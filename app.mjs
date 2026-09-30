@@ -6,7 +6,7 @@ try {
   console.error("Could not load .env:", error);
 }
 
-import { bootstrap } from "./dist-api/phase-main.js";
+const { bootstrap } = await import("./dist-api/phase-main.js");
 
 bootstrap().catch((error) => {
   console.error("ContentOS startup failed:", error);

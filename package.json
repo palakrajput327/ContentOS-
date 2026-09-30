@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --configLoader runner",
+    "dev": "vite --host localhost --configLoader runner",
     "build": "node scripts/build.mjs",
     "build:api": "tsc -p server/tsconfig.json",
     "start:api": "node --env-file=.env dist-api/phase-main.js",

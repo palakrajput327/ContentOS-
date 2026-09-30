@@ -80,48 +80,52 @@ async function find(dir, name) {
     }
   }
 }
-const bin = path.join(
-  root,
-  "node_modules/@embedded-postgres/windows-x64/native/bin",
-);
-const pgdata = path.join(runtime, "postgres");
-await mkdir(pgdata,{recursive:true});
 const dburl = new URL(process.env.DATABASE_URL);
-const password = decodeURIComponent(dburl.password);
-if (!(await exists(path.join(pgdata, "PG_VERSION")))) {
-  const pw = path.join(runtime, "init-password");
-  await writeFile(pw, password + "\n", { mode: 0o600 });
-  try {
-    const p = launch(path.join(bin, "initdb.exe"), [
-      "-D",
-      pgdata,
-      "--username=" + dburl.username,
-      "--auth=scram-sha-256",
-      "--pwfile=" + pw,
-      "--encoding=UTF8",
-      "--locale=C",
-    ]);
-    await new Promise((resolve, reject) => {
-      p.on("exit", (code) =>
-        code === 0
-          ? resolve()
-          : reject(new Error("PostgreSQL initialization failed")),
-      );
-      p.on("error", reject);
-    });
-  } finally {
-    const { unlink } = await import("node:fs/promises");
-    await unlink(pw);
+const isLocalPostgres = dburl.hostname === "127.0.0.1" || dburl.hostname === "localhost";
+if (isLocalPostgres) {
+  const bin = path.join(
+    root,
+    "node_modules/@embedded-postgres/windows-x64/native/bin",
+  );
+  const pgdata = path.join(runtime, "postgres");
+  await mkdir(pgdata,{recursive:true});
+  const port = dburl.port || "5432";
+  const password = decodeURIComponent(dburl.password || "");
+  if (!(await exists(path.join(pgdata, "PG_VERSION")))) {
+    const pw = path.join(runtime, "init-password");
+    await writeFile(pw, password + "\n", { mode: 0o600 });
+    try {
+      const p = launch(path.join(bin, "initdb.exe"), [
+        "-D",
+        pgdata,
+        "--username=" + (dburl.username || "postgres"),
+        "--auth=scram-sha-256",
+        "--pwfile=" + pw,
+        "--encoding=UTF8",
+        "--locale=C",
+      ]);
+      await new Promise((resolve, reject) => {
+        p.on("exit", (code) =>
+          code === 0
+            ? resolve()
+            : reject(new Error("PostgreSQL initialization failed")),
+        );
+        p.on("error", reject);
+      });
+    } finally {
+      const { unlink } = await import("node:fs/promises");
+      await unlink(pw);
+    }
   }
+  launch(path.join(bin, "postgres.exe"), [
+    "-D",
+    pgdata,
+    "-p",
+    port,
+    "-h",
+    "127.0.0.1",
+  ]);
 }
-launch(path.join(bin, "postgres.exe"), [
-  "-D",
-  pgdata,
-  "-p",
-  dburl.port,
-  "-h",
-  "127.0.0.1",
-]);
 const redisUrl = new URL(process.env.REDIS_URL);
 const redisExe = await find(path.join(runtime, "redis"), "redis-server.exe");
 if (!redisExe) throw new Error("Redis executable missing");
@@ -129,7 +133,7 @@ const redisConfig = path.join(path.dirname(redisExe), "redis-local.conf");
 const requirePassLine = redisUrl.password ? `requirepass ${decodeURIComponent(redisUrl.password)}\n` : "";
 await writeFile(
   redisConfig,
-  `bind 127.0.0.1\nport ${redisUrl.port}\nprotected-mode no\n${requirePassLine}appendonly yes\nmaxmemory-policy noeviction\n`,
+  `bind 127.0.0.1\nport ${redisUrl.port || "6379"}\nprotected-mode no\n${requirePassLine}appendonly yes\nmaxmemory-policy noeviction\n`,
   { mode: 0o600 },
 );
 launch(redisExe, ["redis-local.conf"], { cwd: path.dirname(redisExe) });
@@ -137,12 +141,7 @@ let client;
 for (let i = 0; i < 30; i++) {
   try {
     client = new pg.Client({
-      connectionString: new URL(
-        "postgres",
-        dburl.origin === "null"
-          ? `postgresql://${dburl.username}:${dburl.password}@${dburl.host}/`
-          : dburl,
-      ).toString(),
+      connectionString: process.env.DATABASE_URL,
     });
     await client.connect();
     break;
@@ -153,21 +152,29 @@ for (let i = 0; i < 30; i++) {
   }
 }
 if (!client) throw new Error("PostgreSQL did not become ready");
-const found = await client.query("SELECT 1 FROM pg_database WHERE datname=$1", [
-  "contentos",
-]);
-if (!found.rowCount) await client.query("CREATE DATABASE contentos");
+if (isLocalPostgres) {
+  const found = await client.query("SELECT 1 FROM pg_database WHERE datname=$1", [
+    "contentos",
+  ]);
+  if (!found.rowCount) await client.query("CREATE DATABASE contentos");
+}
 await client.end();
 const redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 3 });
-await redis.ping();
+for (let i = 0; i < 15; i++) {
+  try {
+    await redis.ping();
+    break;
+  } catch {
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
 await redis.quit();
 console.log(
   JSON.stringify({
     status: "ready",
-    postgres: "127.0.0.1:" + dburl.port,
-    database: "contentos",
-    redis: "127.0.0.1:" + redisUrl.port,
-    email: "Gmail SMTP configured separately",
+    postgres: isLocalPostgres ? ("127.0.0.1:" + (dburl.port || "5432")) : dburl.host,
+    database: dburl.pathname.replace(/^\//, ""),
+    redis: "127.0.0.1:" + (redisUrl.port || "6379"),
     persistent: true,
   }),
 );
