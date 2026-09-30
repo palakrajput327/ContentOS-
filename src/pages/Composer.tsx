@@ -1,0 +1,463 @@
+import { useState } from "react";
+import {
+  useNavigate,
+  useOutletContext,
+  useSearchParams,
+} from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  Sparkles,
+  Save,
+  Send,
+  ArrowLeft,
+  FileText,
+  Image,
+  Clapperboard,
+  Layers,
+  MessageSquare,
+  Heart,
+  ThumbsUp,
+  MoreHorizontal,
+} from "lucide-react";
+import { Button, PlatformIcon, StatusBadge } from "../components/ui";
+import { platforms, type Platform, type Snapshot } from "../lib/model";
+import { data, request } from "../lib/api";
+import { useSession } from "../lib/session";
+export default function Composer({ studio = false }: { studio?: boolean }) {
+  const s = useOutletContext<Snapshot>();
+  const [params] = useSearchParams();
+  const post = s.posts.find((p) => p.id === params.get("id"));
+  const nav = useNavigate();
+  const query = useQueryClient();
+  const demo = useSession((x) => x.demo);
+  const [title, setTitle] = useState(post?.title || "");
+  const [body, setBody] = useState(post?.body || "");
+  const [selected, setSelected] = useState<Platform[]>(
+    post?.platforms || ["LinkedIn"],
+  );
+  const [variants, setVariants] = useState<Partial<Record<Platform, string>>>(
+    post?.variants || {},
+  );
+  const [preview, setPreview] = useState<Platform>(
+    post?.platforms[0] || "LinkedIn",
+  );
+  const [topic, setTopic] = useState("");
+  const [tone, setTone] = useState(s.brand.tone);
+  const [goal, setGoal] = useState("Engagement");
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [aiOpen, setAiOpen] = useState(studio);
+  const editable =
+    !post || ["DRAFT", "NEEDS_REVIEW", "APPROVED"].includes(post.status);
+  const canEdit = ["Owner", "Admin", "Content Manager", "Editor"].includes(
+    s.workspace.role,
+  );
+  const activeBody = variants[preview] ?? body;
+  async function save(review = false) {
+    try {
+      setError("");
+      if (!title.trim() || !body.trim() || !selected.length)
+        throw new Error(
+          "Add a title, write your post, and choose at least one platform.",
+        );
+      setBusy("saving");
+      const saved = await data.save({
+        ...post,
+        title,
+        body,
+        platforms: selected,
+        variants,
+      });
+      if (review) await data.transition(saved.id, "review");
+      await query.invalidateQueries({ queryKey: ["workspace"] });
+      toast.success(review ? "Post submitted for review" : "Draft saved");
+      nav("/app/library");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+  async function generate() {
+    if (!demo) {
+      setError('AI generation is not configured. You can write and save a post manually.');
+      return;
+    }
+    try {
+      setError("");
+      if (topic.trim().length < 5)
+        throw new Error("Add a little more detail about your topic.");
+      setBusy("generating");
+      let result: {
+        title: string;
+        variants: Partial<Record<Platform, string>>;
+      };
+      if (demo) {
+        result = {
+          title: topic,
+          variants: Object.fromEntries(
+            selected.map((p) => [
+              p,
+              p === "X"
+                ? `${topic.slice(0, 140)}. One useful idea. One clear next step. What would you add?`
+                : p === "Instagram"
+                  ? `${topic}\n\nA fresh perspective for your next creative session. Save this for later.\n\n${s.brand.hashtags}`
+                  : p === "Telegram"
+                    ? `Hello, community! Let’s talk about ${topic.toLowerCase()}.\n\nWhat has worked for you? Share your experience below.`
+                    : `Let’s talk about ${topic.toLowerCase()}.\n\nMeaningful progress starts with a clear question and a practical next step. Give your team room to experiment, share what you learn, and build on the ideas that work.\n\n${s.brand.cta}`,
+            ]),
+          ),
+        };
+        toast.info("Example captions loaded — no AI service was called.");
+      } else {
+        result = await request("/ai/captions", "POST", {
+          topic,
+          tone,
+          goal,
+          platforms: selected,
+        });
+        toast.success("Platform-specific captions generated");
+      }
+      setTitle(result.title);
+      setVariants(result.variants);
+      setBody(result.variants[selected[0]] || "");
+      setPreview(selected[0]);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+  return (
+    <>
+      <div className="page-heading">
+        <div>
+          <button className="back-link" onClick={() => nav("/app/library")}>
+            <ArrowLeft size={14} /> Content library
+          </button>
+          <h1>
+            {studio
+              ? "Give your idea a voice."
+              : post
+                ? "A little refinement goes a long way."
+                : "What’s worth sharing today?"}
+          </h1>
+          <p>
+            {studio
+              ? "A starting point for each channel, shaped by your brand."
+              : "Create with intention. Preview every platform before you share."}
+          </p>
+        </div>
+        <StatusBadge status={post?.status || "DRAFT"} />
+      </div>
+      {studio && <p className="notice">AI generation is not configured yet. Your Brand Kit and manual composer are available.</p>}
+      <div className="composer-grid">
+        <section>
+          <div className="panel composer-panel">
+            <div className="composer-modes">
+              <button className="selected">
+                <FileText size={16} />
+                Text post
+              </button>
+              {[
+                [Image, "Image"],
+                [Layers, "Carousel"],
+                [Clapperboard, "Video"],
+              ].map(([Icon, label]) => {
+                const I = Icon as typeof Image;
+                return (
+                  <button
+                    key={String(label)}
+                    disabled
+                    title="Planned for a later phase"
+                  >
+                    <I size={16} />
+                    {String(label)}
+                    <small>soon</small>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="composer-fields">
+              <label>Where will this story go?</label>
+              <div className="platform-select">
+                {platforms.map((p) => (
+                  <button
+                    disabled={!editable || !canEdit}
+                    key={p}
+                    aria-pressed={selected.includes(p)}
+                    className={selected.includes(p) ? "selected" : ""}
+                    onClick={() => {
+                      setSelected((old) =>
+                        old.includes(p)
+                          ? old.filter((x) => x !== p)
+                          : [...old, p],
+                      );
+                      setPreview(p);
+                    }}
+                  >
+                    <PlatformIcon platform={p} />
+                    {p}
+                  </button>
+                ))}
+              </div>
+              <div className="field-heading">
+                <label htmlFor="post-title">Internal title</label>
+                <span>Only your team sees this</span>
+              </div>
+              <input
+                id="post-title"
+                maxLength={160}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Give this idea a name"
+                disabled={!editable || !canEdit}
+              />
+              <div className="field-heading">
+                <label htmlFor="post-body">Your content</label>
+                <button
+                  className="text-button"
+                  onClick={() => setAiOpen(!aiOpen)}
+                >
+                  <Sparkles size={14} /> Write with AI
+                </button>
+              </div>
+              <textarea
+                id="post-body"
+                value={body}
+                onChange={(e) => {
+                  setBody(e.target.value);
+                  setVariants({});
+                }}
+                placeholder="Start with a thought worth sharing…"
+                rows={9}
+                maxLength={10000}
+                disabled={!editable || !canEdit}
+              />
+              <div className="editor-foot">
+                <span>Editing this base text clears generated variants.</span>
+                <span>{body.length} characters</span>
+              </div>
+              {aiOpen && (
+                <div className="ai-controls">
+                  <div className="row">
+                    <Sparkles size={18} />
+                    <h3>Your creative brief</h3>
+                    {demo && <span className="badge">Example mode</span>}
+                  </div>
+                  <label>
+                    What would you like to share?
+                    <textarea
+                      value={topic}
+                      onChange={(e) => setTopic(e.target.value)}
+                      placeholder="A product insight, a lesson learned, a new perspective…"
+                      rows={3}
+                      maxLength={2000}
+                    />
+                  </label>
+                  <div className="form-grid">
+                    <label>
+                      Tone
+                      <select
+                        value={tone}
+                        onChange={(e) => setTone(e.target.value)}
+                      >
+                        {[
+                          "Professional",
+                          "Corporate",
+                          "Educational",
+                          "Technical",
+                          "Conversational",
+                          "Bold",
+                          "Promotional",
+                        ].map((t) => (
+                          <option key={t}>{t}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Goal
+                      <select
+                        value={goal}
+                        onChange={(e) => setGoal(e.target.value)}
+                      >
+                        {[
+                          "Awareness",
+                          "Engagement",
+                          "Leads",
+                          "Website Traffic",
+                          "Product Promotion",
+                        ].map((g) => (
+                          <option key={g}>{g}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <Button
+                    onClick={generate}
+                    disabled={
+                      !!busy || !selected.length || !editable || !canEdit
+                    }
+                  >
+                    <Sparkles size={16} />
+                    {busy === "generating"
+                      ? "Generating…"
+                      : demo
+                        ? "Load example captions"
+                        : "Generate captions"}
+                  </Button>
+                </div>
+              )}
+              {Object.keys(variants).length > 0 && (
+                <div className="variant-editor">
+                  <div className="field-heading">
+                    <label>Refine {preview} variant</label>
+                    <span>{activeBody.length} characters</span>
+                  </div>
+                  <textarea
+                    rows={6}
+                    value={activeBody}
+                    onChange={(e) =>
+                      setVariants((v) => ({ ...v, [preview]: e.target.value }))
+                    }
+                    disabled={!editable || !canEdit}
+                  />
+                </div>
+              )}
+              {error && (
+                <div className="error-box" role="alert">
+                  {error}
+                </div>
+              )}
+              {!editable && (
+                <div className="notice">
+                  This post is {post?.status.toLowerCase()}. Cancel its schedule
+                  in the library before editing.
+                </div>
+              )}
+              <div className="composer-actions">
+                <Button
+                  onClick={() => save()}
+                  disabled={!!busy || !editable || !canEdit}
+                >
+                  <Save size={16} />
+                  Save draft
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={async () => {
+                    try {
+                      setError("");
+                      if (!title.trim() || !body.trim() || !selected.length)
+                        throw new Error("Add a title, write your post, and choose at least one platform.");
+                      setBusy("publishing");
+                      // 1. Save post draft first
+                      const saved = await data.save({
+                        ...post,
+                        title,
+                        body,
+                        platforms: selected,
+                        variants,
+                      });
+
+                      // 2. Find connected social account for target platform
+                      const acc = s.accounts.find(
+                        (a) => String(a.platform).toLowerCase() === "telegram",
+                      );
+                      if (!acc) {
+                        throw new Error(
+                          "No connected Telegram channel found for this workspace. Please connect a Telegram channel first under Connected Channels.",
+                        );
+                      }
+
+                      // 3. Trigger publish endpoint
+                      await request(`/content/${saved.id}/publish`, "POST", {
+                        socialAccountId: acc.id,
+                      });
+
+                      await query.invalidateQueries({ queryKey: ["workspace"] });
+                      toast.success("Post published to Telegram successfully!");
+                      nav("/app/library");
+                    } catch (e) {
+                      setError((e as Error).message);
+                    } finally {
+                      setBusy("");
+                    }
+                  }}
+                  disabled={!!busy || !editable || !canEdit}
+                >
+                  <Send size={16} />
+                  {busy === "publishing" ? "Publishing to Telegram…" : "Publish Now"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <aside className="preview-column">
+          <div className="preview-heading">
+            <h2>Post preview</h2>
+            <span>Approximate appearance</span>
+          </div>
+          <div className="preview-tabs">
+            {selected.map((p) => (
+              <button
+                aria-label={`Preview ${p}`}
+                aria-pressed={preview === p}
+                className={preview === p ? "active" : ""}
+                key={p}
+                onClick={() => setPreview(p)}
+              >
+                <PlatformIcon platform={p} />
+              </button>
+            ))}
+          </div>
+          <div className="social-preview">
+            <div className="social-profile">
+              <span className="workspace-avatar">{s.brand.name[0] || "A"}</span>
+              <div>
+                <strong>{s.brand.name || s.workspace.name}</strong>
+                <small>
+                  {preview === "LinkedIn"
+                    ? "Company · Just now"
+                    : `@${s.brand.name.toLowerCase().replaceAll(" ", "")}`}
+                </small>
+              </div>
+              <MoreHorizontal size={18} />
+            </div>
+            <p className={!activeBody ? "placeholder-text" : ""}>
+              {activeBody ||
+                "Your next great post starts with a single idea. Start writing to see it take shape here."}
+            </p>
+            <div className="social-reactions">
+              <span>
+                <ThumbsUp size={15} /> Like
+              </span>
+              <span>
+                <MessageSquare size={15} /> Comment
+              </span>
+              <span>
+                <Send size={15} /> Share
+              </span>
+            </div>
+          </div>
+          <div className="preview-tip">
+            <Heart size={17} />
+            <p>
+              Your voice matters. Read every generated caption before submitting
+              it for approval.
+            </p>
+          </div>
+          <div className="brand-reminder">
+            <span className="overline">YOUR BRAND, BUILT IN</span>
+            <h3>{s.brand.tone} & consistent</h3>
+            <p>
+              {s.brand.description ||
+                "Configure your Brand Kit in settings to guide AI generation."}
+            </p>
+          </div>
+        </aside>
+      </div>
+    </>
+  );
+}

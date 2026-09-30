@@ -1,0 +1,10 @@
+CREATE TABLE users (id uuid PRIMARY KEY,email text NOT NULL UNIQUE,name text NOT NULL,password_hash text NOT NULL,email_verified_at timestamptz,terms_accepted_at timestamptz NOT NULL,terms_version text NOT NULL DEFAULT 'development-v1',created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE auth_tokens(id uuid PRIMARY KEY,user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,purpose text NOT NULL CHECK(purpose IN ('verify','reset')),token_hash text NOT NULL UNIQUE,expires_at timestamptz NOT NULL,used_at timestamptz,created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX auth_tokens_user_purpose_idx ON auth_tokens(user_id,purpose,created_at DESC);
+CREATE TABLE auth_sessions(id uuid PRIMARY KEY,user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,family_id uuid NOT NULL,access_hash text NOT NULL UNIQUE,refresh_hash text NOT NULL UNIQUE,access_expires_at timestamptz NOT NULL,refresh_expires_at timestamptz NOT NULL,absolute_expires_at timestamptz NOT NULL,revoked_at timestamptz,rotated_at timestamptz,created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX auth_sessions_user_idx ON auth_sessions(user_id);
+CREATE INDEX auth_sessions_family_idx ON auth_sessions(family_id);
+CREATE TABLE auth_events(id uuid PRIMARY KEY,user_id uuid REFERENCES users(id),action text NOT NULL,request_id text,created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX auth_events_user_time_idx ON auth_events(user_id,created_at DESC);
+CREATE TABLE email_outbox(id uuid PRIMARY KEY,recipient text NOT NULL,subject text NOT NULL,encrypted_body text,state text NOT NULL DEFAULT 'PENDING' CHECK(state IN ('PENDING','PROCESSING','SENT','FAILED','EXPIRED')),attempts integer NOT NULL DEFAULT 0,available_at timestamptz NOT NULL DEFAULT now(),expires_at timestamptz NOT NULL,claimed_at timestamptz,sent_at timestamptz,created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX email_outbox_pending_idx ON email_outbox(state,available_at);

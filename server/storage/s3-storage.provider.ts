@@ -1,0 +1,126 @@
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  HeadObjectCommand,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import {
+  ObjectStorageProvider,
+  UploadObjectInput,
+  StoredObject,
+  SignedUploadInput,
+  SignedUrlResult,
+  ObjectMetadata,
+} from "./storage.types.js";
+
+export interface S3StorageConfig {
+  endpoint: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  forcePathStyle?: boolean;
+}
+
+export class S3StorageProvider implements ObjectStorageProvider {
+  private client: S3Client;
+
+  constructor(config: S3StorageConfig) {
+    this.client = new S3Client({
+      endpoint: config.endpoint,
+      region: config.region || "us-east-1",
+      credentials: {
+        accessKeyId: config.accessKeyId,
+        secretAccessKey: config.secretAccessKey,
+      },
+      forcePathStyle: config.forcePathStyle ?? true,
+    });
+  }
+
+  async upload(input: UploadObjectInput): Promise<StoredObject> {
+    const command = new PutObjectCommand({
+      Bucket: input.bucket,
+      Key: input.objectKey,
+      Body: input.body,
+      ContentType: input.mimeType,
+    });
+
+    const response = await this.client.send(command);
+    return {
+      bucket: input.bucket,
+      objectKey: input.objectKey,
+      sizeBytes: input.body.byteLength,
+      etag: response.ETag || undefined,
+    };
+  }
+
+  async delete(bucket: string, objectKey: string): Promise<void> {
+    const command = new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: objectKey,
+    });
+
+    await this.client.send(command);
+  }
+
+  async exists(bucket: string, objectKey: string): Promise<boolean> {
+    try {
+      await this.getMetadata(bucket, objectKey);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async getMetadata(bucket: string, objectKey: string): Promise<ObjectMetadata> {
+    const command = new HeadObjectCommand({
+      Bucket: bucket,
+      Key: objectKey,
+    });
+
+    const response = await this.client.send(command);
+    return {
+      sizeBytes: Number(response.ContentLength || 0),
+      mimeType: response.ContentType || "application/octet-stream",
+      lastModified: response.LastModified ? new Date(response.LastModified) : undefined,
+      etag: response.ETag || undefined,
+    };
+  }
+
+  async getSignedUploadUrl(input: SignedUploadInput): Promise<SignedUrlResult> {
+    const expiresIn = input.expiresInSeconds || 900; // 15 mins default
+    const command = new PutObjectCommand({
+      Bucket: input.bucket,
+      Key: input.objectKey,
+      ContentType: input.mimeType,
+    });
+
+    const uploadUrl = await getSignedUrl(this.client, command, {
+      expiresIn,
+    });
+
+    return {
+      uploadUrl,
+      expiresAt: new Date(Date.now() + expiresIn * 1000),
+      headers: {
+        "content-type": input.mimeType,
+      },
+    };
+  }
+
+  async getSignedDownloadUrl(
+    bucket: string,
+    objectKey: string,
+    expiresInSeconds: number = 900,
+  ): Promise<string> {
+    const command = new GetObjectCommand({
+      Bucket: bucket,
+      Key: objectKey,
+    });
+
+    return getSignedUrl(this.client, command, {
+      expiresIn: expiresInSeconds,
+    });
+  }
+}

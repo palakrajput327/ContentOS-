@@ -1,0 +1,1 @@
+try { const r=await fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/health',{signal:AbortSignal.timeout(3000)});console.log(JSON.stringify({localApiStatus:r.status})); } catch(e) { console.log(JSON.stringify({localApi:'unreachable',code:e.cause?.code||e.name})); }

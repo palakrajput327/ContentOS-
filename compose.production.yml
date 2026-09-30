@@ -1,0 +1,94 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: contentos
+      POSTGRES_USER: contentos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U contentos -d contentos"]
+      interval: 10s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    command: [sh, -c, 'exec redis-server --appendonly yes --maxmemory-policy noeviction --requirepass "$$REDIS_PASSWORD"']
+    volumes: [redis-data:/data]
+  migrate:
+    build: .
+    env_file: .env.production
+    command: [node, dist-api/migrate.js]
+    depends_on:
+      postgres:
+        condition: service_healthy
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      API_HOST: 0.0.0.0
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+  mail:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    command: [node, dist-api/mail-worker.js]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    command: [node, dist-api/worker.js]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+  pdf-worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    command: [node, dist-api/pdf-worker.js]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+  ai-worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    command: [node, dist-api/ai-worker.js]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+  web:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN to your hostname}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [api]
+volumes:
+  postgres-data:
+  redis-data:
+  caddy-data:
+  caddy-config:
