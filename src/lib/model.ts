@@ -20,7 +20,11 @@ export interface Post {
   id: string;
   title: string;
   body: string;
-  variants: Partial<Record<Platform, string>>;
+  variants: Partial<Record<Platform, string>> & {
+    mediaType?: "text" | "image" | "video";
+    mediaUrl?: string;
+    [key: string]: any;
+  };
   platforms: Platform[];
   status: Status;
   createdAt: string;

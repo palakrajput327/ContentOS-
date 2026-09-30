@@ -275,8 +275,9 @@ const maintenance = new Worker(
           { id: item.id },
           { jobId: item.id },
         );
-    await pool.query("DELETE FROM sessions WHERE expires_at<now()");
-    await pool.query("DELETE FROM oauth_states WHERE expires_at<now()");
+    try {
+      await pool.query("DELETE FROM auth_sessions WHERE absolute_expires_at < now()");
+    } catch {}
   },
   { connection: redis, concurrency: 1 },
 );

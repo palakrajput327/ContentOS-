@@ -63,34 +63,6 @@ export default function Shell() {
             <PanelLeftClose size={19} />
           </button>
         </div>
-        <div className="workspace-switch">
-          <span className="workspace-avatar">
-            {s?.workspace.name[0] || "W"}
-          </span>
-          <div>
-            {s?.workspace.name || "Workspace"}
-            <small>{s?.workspace.role || "Team workspace"}</small>
-          </div>
-          <select
-            aria-label="Switch workspace"
-            value={session.workspaceId || ""}
-            onChange={async (e) => {
-              const r = await request<{ workspaceId: string }>(
-                "/workspaces/select",
-                "POST",
-                { id: e.target.value },
-              );
-              session.login(session.user!, r.workspaceId);
-              query.removeQueries({ queryKey: ["workspace"] });
-            }}
-          >
-            {workspaces.map((w) => (
-              <option value={w.id} key={w.id}>
-                {w.name}
-              </option>
-            ))}
-          </select>
-        </div>
         <nav onClick={() => setMobile(false)}>
           <div className="nav-group">WORKSPACE</div>
           {links.map(([path, label, Icon]) => (
@@ -238,7 +210,42 @@ export default function Shell() {
             </button>
             <span className="breadcrumb">
               Workspace <span>/</span>{" "}
-              <strong>{s?.workspace.name || "Loading"}</strong>
+              {workspaces.length > 1 ? (
+                <select
+                  aria-label="Switch workspace"
+                  className="breadcrumb-workspace-select"
+                  value={session.workspaceId || ""}
+                  onChange={async (e) => {
+                    const r = await request<{ workspaceId: string }>(
+                      "/workspaces/select",
+                      "POST",
+                      { id: e.target.value },
+                    );
+                    session.login(session.user!, r.workspaceId);
+                    query.removeQueries({ queryKey: ["workspace"] });
+                  }}
+                  style={{
+                    background: "transparent",
+                    color: "inherit",
+                    border: "none",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    outline: "none",
+                  }}
+                >
+                  {workspaces.map((w) => (
+                    <option
+                      value={w.id}
+                      key={w.id}
+                      style={{ background: "#18222b", color: "#f1f5f9" }}
+                    >
+                      {w.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <strong>{s?.workspace.name || "Loading"}</strong>
+              )}
             </span>
           </div>
           <div className="row">

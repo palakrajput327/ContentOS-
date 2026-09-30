@@ -105,14 +105,19 @@ class ErrorFilter implements ExceptionFilter {
       status = e.getStatus();
       message = e.message;
     }
-    console.error(
-      JSON.stringify({
-        event: "api_error",
-        status,
-        path: r.path,
-        requestId: r.requestId,
-      }),
-    );
+    // Only log unexpected server faults (>= 500) as api_error.
+    // Routine 401 unauthenticated checks (e.g., visitor loading login page) are standard HTTP behavior.
+    if (status >= 500) {
+      console.error(
+        JSON.stringify({
+          event: "api_error",
+          status,
+          path: r.path,
+          requestId: r.requestId,
+          message,
+        }),
+      );
+    }
     c.getResponse()
       .status(status)
       .json({
@@ -147,6 +152,8 @@ import { SocialController } from "./social.controller.js";
 import { StorageController } from "./storage/storage.controller.js";
 import { DocumentsController } from "./documents/documents.controller.js";
 import { KnowledgeController } from "./knowledge/knowledge.controller.js";
+import { AIController } from "./ai.controller.js";
+import { AnalyticsController } from "./analytics.controller.js";
 @Module({
   controllers: [
     PhaseAuthController,
@@ -160,6 +167,8 @@ import { KnowledgeController } from "./knowledge/knowledge.controller.js";
     StorageController,
     DocumentsController,
     KnowledgeController,
+    AIController,
+    AnalyticsController,
   ],
   providers: [AdminGuard, { provide: APP_GUARD, useClass: PhaseGuard }],
 })

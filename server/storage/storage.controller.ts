@@ -15,8 +15,12 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { audit, pool, transaction } from "../db.js";
 import { assertPermission, WorkspaceRequired, type AuthedRequest } from "../security.js";
-import { MediaAssetType } from "./storage.types.js";
+import { Put, Query, Res } from "@nestjs/common";
+import * as path from "node:path";
+import * as fs from "node:fs";
+import { MediaAssetType, ObjectStorageProvider } from "./storage.types.js";
 import { S3StorageProvider } from "./s3-storage.provider.js";
+import { LocalStorageProvider } from "./local-storage.provider.js";
 
 export const presignUploadSchema = z.object({
   type: z.enum([
@@ -36,7 +40,7 @@ export const completeUploadSchema = z.object({
   checksum: z.string().optional(),
 });
 
-function getStorageProvider(): { provider: S3StorageProvider; bucket: string } {
+function getStorageProvider(): { provider: ObjectStorageProvider; bucket: string } {
   const endpoint = process.env.STORAGE_ENDPOINT;
   const region = process.env.STORAGE_REGION || "us-east-1";
   const bucket = process.env.STORAGE_BUCKET;
@@ -44,21 +48,23 @@ function getStorageProvider(): { provider: S3StorageProvider; bucket: string } {
   const secretAccessKey = process.env.STORAGE_SECRET_KEY;
   const forcePathStyle = process.env.STORAGE_FORCE_PATH_STYLE !== "false";
 
-  if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) {
-    throw new ServiceUnavailableException(
-      "Object Storage is not configured on the server.",
-    );
+  if (endpoint && bucket && accessKeyId && secretAccessKey) {
+    return {
+      provider: new S3StorageProvider({
+        endpoint,
+        region,
+        accessKeyId,
+        secretAccessKey,
+        forcePathStyle,
+      }),
+      bucket,
+    };
   }
 
+  // Seamless fallback to local disk storage
   return {
-    provider: new S3StorageProvider({
-      endpoint,
-      region,
-      accessKeyId,
-      secretAccessKey,
-      forcePathStyle,
-    }),
-    bucket,
+    provider: new LocalStorageProvider(),
+    bucket: process.env.STORAGE_BUCKET || "contentos-media",
   };
 }
 
@@ -303,5 +309,63 @@ export class StorageController {
 
       return { success: true, assetId };
     });
+  }
+
+  @WorkspaceRequired()
+  @Get("media")
+  async listMedia(@Req() r: AuthedRequest, @Query("type") type?: string) {
+    const w = r.workspace.id;
+    const query = type
+      ? "SELECT id, type, mime_type, size_bytes, original_filename, status, created_at FROM media_assets WHERE workspace_id = $1 AND type = $2 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 100"
+      : "SELECT id, type, mime_type, size_bytes, original_filename, status, created_at FROM media_assets WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 100";
+    const params = type ? [w, type] : [w];
+    const res = await pool.query(query, params);
+    return { media: res.rows };
+  }
+
+  @Put("local/upload")
+  async localUpload(
+    @Query("bucket") bucket: string,
+    @Query("key") objectKey: string,
+    @Req() req: any,
+    @Res() res: any,
+  ) {
+    if (!bucket || !objectKey) {
+      return res.status(400).json({ message: "Bucket and key parameters are required" });
+    }
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", async () => {
+      try {
+        const buffer = Buffer.concat(chunks);
+        const { provider } = getStorageProvider();
+        await provider.upload({
+          bucket,
+          objectKey,
+          body: buffer,
+          mimeType: req.headers["content-type"] || "application/octet-stream",
+        });
+        res.status(200).json({ ok: true, sizeBytes: buffer.length });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+  }
+
+  @Get("local/download")
+  async localDownload(
+    @Query("bucket") bucket: string,
+    @Query("key") objectKey: string,
+    @Res() res: any,
+  ) {
+    if (!bucket || !objectKey) {
+      return res.status(400).json({ message: "Bucket and key parameters are required" });
+    }
+    const safeKey = objectKey.replace(/\.\./g, "_");
+    const filePath = path.join(process.cwd(), "uploads", bucket, safeKey);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: "File not found in local storage" });
+    }
+    return res.sendFile(path.resolve(filePath));
   }
 }

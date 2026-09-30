@@ -133,9 +133,22 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
   async generateStructured<T>(input: GenerateStructuredInput<T>): Promise<StructuredGenerationResult<T>> {
     const endpoint = new URL("chat/completions", this.baseUrl).toString();
+    const hasJsonWord = input.messages.some((m) =>
+      m.content.toLowerCase().includes("json"),
+    );
+    const messages = hasJsonWord
+      ? input.messages
+      : [
+          ...input.messages,
+          {
+            role: "system" as const,
+            content: "Respond strictly with a valid json object matching the requested schema.",
+          },
+        ];
+
     const payload = {
       model: this.model,
-      messages: input.messages,
+      messages,
       temperature: input.temperature ?? 0.1,
       max_tokens: input.maxTokens,
       response_format: { type: "json_object" },
@@ -146,18 +159,46 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     let parsedJson: unknown;
     try {
-      parsedJson = JSON.parse(rawText);
+      parsedJson = JSON.parse(rawText.trim());
     } catch {
-      throw new LLMProviderException("LLM returned invalid non-JSON output in structured mode.");
+      const match = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (match) {
+        try {
+          parsedJson = JSON.parse(match[1].trim());
+        } catch {}
+      }
+      if (!parsedJson) {
+        const firstBrace = rawText.indexOf("{");
+        const lastBrace = rawText.lastIndexOf("}");
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          try {
+            parsedJson = JSON.parse(rawText.slice(firstBrace, lastBrace + 1));
+          } catch {}
+        }
+      }
+      if (!parsedJson) {
+        throw new LLMProviderException(
+          "LLM returned invalid non-JSON output in structured mode.",
+        );
+      }
     }
 
     const validation = input.schema.safeParse(parsedJson);
     if (!validation.success) {
-      throw new LLMProviderException("LLM structured output validation failed.");
+      console.error(
+        `[${this.providerName}] Structured output validation error:`,
+        validation.error.issues,
+        "Received parsed JSON:",
+        JSON.stringify(parsedJson, null, 2),
+      );
+      throw new LLMProviderException(
+        `LLM structured output validation failed: ${validation.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ")}`,
+      );
     }
 
     return {
-      provider: this.providerName, model: this.model,
+      provider: this.providerName,
+      model: this.model,
       data: validation.data,
       rawText,
       usage: res.usage

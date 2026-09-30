@@ -131,14 +131,18 @@ These features are scaffolded or referenced in the code and database schema, but
 
 | Component | Working Now | Action Required |
 | :--- | :---: | :--- |
-| User Signup / Login | ✅ | Ready to use |
+| User Signup / Login | ✅ | Ready to use (Direct password login enabled) |
 | PostgreSQL Migrations | ✅ | Ready to use |
 | Redis Local Queue | ✅ | Ready to use |
 | Frontend Hot-Reload | ✅ | Ready to use |
 | Telegram Channel Publishing | ✅ | Ready with Bot Token & Chat ID |
 | PDF Extraction & Chunking | ✅ | Ready to use |
-| AI Generation (Backend) | ❌ | Add `AIController` to `phase-main.ts` |
-| AI Generation (Frontend) | ❌ | Remove `if (!demo)` guard in `Composer.tsx` |
-| AI Generation (Keys) | ❌ | Add valid API key in `.env` |
-| LinkedIn / X / Instagram | ❌ | Implement OAuth endpoints in `social.controller.ts` |
-| Media / Video Publishing | ❌ | Implement `publishMedia` in `providers/social.ts` |
+| AI Generation (Backend) | ✅ Fixed | `AIController` registered in `phase-main.ts` |
+| AI Generation (Frontend) | ✅ Fixed | Block in `Composer.tsx` removed, creative brief active |
+| AI Generation (Keys) | ✅ Working | Verified active keys for Gemini, Groq & OpenRouter |
+| LinkedIn Integration | ✅ Fixed | Implemented connect & publish in `social.controller.ts` |
+| Media / Video Publishing | ✅ Fixed | Implemented `publishMedia` & `publishVideo` in `providers/social.ts` |
+| Local Storage Fallback | ✅ Fixed | `LocalStorageProvider` automatically activated when S3 is unset |
+| Image & Video Post Modes | ✅ Fixed | Enabled in `Composer.tsx` with upload & live social preview |
+| Member Role & Removal API | ✅ Fixed | `DELETE /members/:userId` & `PATCH /members/:userId` in workspace controller |
+| Background Publishing Worker | ✅ Running | BullMQ `worker.js` listening for scheduled posts |

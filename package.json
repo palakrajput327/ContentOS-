@@ -11,6 +11,7 @@
     "migrate": "node --env-file=.env dist-api/migrate.js",
     "test": "npm run build:api && node scripts/test-auth.mjs",
     "start:mail": "node --env-file=.env dist-api/mail-worker.js",
+    "start:worker": "node --env-file=.env dist-api/worker.js",
     "local:services": "node scripts/local-services.mjs",
     "preview:local": "vite preview --host localhost --port 5173 --configLoader runner",
     "test:llm": "npm run build:api && node --test scripts/test-llm-fallback.mjs && node scripts/test-knowledge.mjs"

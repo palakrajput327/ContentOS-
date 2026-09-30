@@ -239,19 +239,39 @@ export class PhaseAuthController {
   }
   @Public() @Post("login") async login(@Body() input:unknown,@Req() req:AuthedRequest,@Res({passthrough:true}) res:Response){
     const c=z.object({email,password:z.string().min(1).max(128)}).parse(input);
-    const challenge=randomBytes(32).toString('base64url');
-    await transaction(async db=>{
-      const user=(await db.query('SELECT * FROM users WHERE email=$1 FOR UPDATE',[c.email])).rows[0];
-      const valid=await verifyPassword(c.password,user?.password_hash||`scrypt:00000000000000000000000000000000:${'00'.repeat(64)}`);
-      if(!user||!valid)throw new UnauthorizedException('Email or password is incorrect.');
-      requireMail();
-      const recent=await db.query("SELECT 1 FROM auth_tokens WHERE user_id=$1 AND purpose='login' AND used_at IS NULL AND created_at>now()-interval '1 minute'",[user.id]);
-      if(recent.rowCount)throw new HttpException('A sign-in code was recently requested. Use it or wait 60 seconds before trying again.',429);
-      await queueTokenEmail(db,user,'login',hash(challenge));
-      await authEvent(db,user.id,'LOGIN_CODE_REQUESTED',req.requestId);
+    const requireOtp = process.env.REQUIRE_LOGIN_OTP === "true";
+    if (requireOtp) {
+      const challenge=randomBytes(32).toString('base64url');
+      await transaction(async db=>{
+        const user=(await db.query('SELECT * FROM users WHERE email=$1 FOR UPDATE',[c.email])).rows[0];
+        const valid=await verifyPassword(c.password,user?.password_hash||`scrypt:00000000000000000000000000000000:${'00'.repeat(64)}`);
+        if(!user||!valid)throw new UnauthorizedException('Email or password is incorrect.');
+        requireMail();
+        const recent=await db.query("SELECT 1 FROM auth_tokens WHERE user_id=$1 AND purpose='login' AND used_at IS NULL AND created_at>now()-interval '1 minute'",[user.id]);
+        if(recent.rowCount)throw new HttpException('A sign-in code was recently requested. Use it or wait 60 seconds before trying again.',429);
+        await queueTokenEmail(db,user,'login',hash(challenge));
+        await authEvent(db,user.id,'LOGIN_CODE_REQUESTED',req.requestId);
+      });
+      res.cookie('contentos_login_challenge',challenge,{...cookieOptions(),maxAge:10*60000});
+      return {requiresCode:true,email:c.email,message:'Your sign-in code is queued. Enter it here to open your dashboard.'};
+    }
+
+    const result = await transaction(async db => {
+      const user = (await db.query('SELECT * FROM users WHERE email=$1 FOR UPDATE', [c.email])).rows[0];
+      const valid = await verifyPassword(c.password, user?.password_hash || `scrypt:00000000000000000000000000000000:${'00'.repeat(64)}`);
+      if (!user || !valid) throw new UnauthorizedException('Email or password is incorrect.');
+      return { user, session: await newSession(db, user.id) };
     });
-    res.cookie('contentos_login_challenge',challenge,{...cookieOptions(),maxAge:10*60000});
-    return {requiresCode:true,email:c.email,message:'Your sign-in code is queued. Enter it here to open your dashboard.'};
+
+    setCookies(res, result.session);
+    await authEvent(pool, result.user.id, 'USER_LOGIN', req.requestId);
+    const wid = await workspaceForUser(result.user.id);
+    return {
+      requiresCode: false,
+      user: { id: result.user.id, name: result.user.name, email: result.user.email, emailVerified: true },
+      workspaceId: wid,
+      message: 'Logged in successfully',
+    };
   }
   @Public() @Post('login/resend') async resendLogin(@Body()input:unknown,@Req()req:AuthedRequest,@Res({passthrough:true})res:Response){
     const v=z.object({email}).parse(input);requireMail();

@@ -22,6 +22,7 @@ import { WorkspaceController } from "./workspace.controller.js";
 import { ContentController } from "./content.controller.js";
 import { SocialController } from "./social.controller.js";
 import { AIController } from "./ai.controller.js";
+import { AnalyticsController } from "./analytics.controller.js";
 import { ProviderError } from "./providers/social.js";
 import { pool } from "./db.js";
 @Catch()
@@ -46,14 +47,17 @@ class ErrorFilter implements ExceptionFilter {
           ? "Authorization expired. Reconnect your account."
           : `The social provider could not complete the request (${error.code}).`;
     }
-    console.error(
-      JSON.stringify({
-        event: "api_error",
-        requestId: req.requestId,
-        status,
-        path: req.path,
-      }),
-    );
+    if (status >= 500) {
+      console.error(
+        JSON.stringify({
+          event: "api_error",
+          requestId: req.requestId,
+          status,
+          path: req.path,
+          message,
+        }),
+      );
+    }
     ctx
       .getResponse()
       .status(status)
@@ -67,6 +71,7 @@ class ErrorFilter implements ExceptionFilter {
     ContentController,
     SocialController,
     AIController,
+    AnalyticsController,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })

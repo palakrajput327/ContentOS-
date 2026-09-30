@@ -5,19 +5,24 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
+  Res,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
 } from "@nestjs/common";
+import type { Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { audit, pool, transaction } from "./db.js";
 import {
   WorkspaceRequired,
+  Public,
   assertPermission,
   encryptToken,
   decryptToken,
+  hash,
   type AuthedRequest,
 } from "./security.js";
 import { SocialProviderRegistry, type SocialProviderName } from "./social.provider.js";
@@ -106,6 +111,354 @@ export class SocialController {
       return {
         id: acc.id,
         platform: "telegram",
+        providerId: valResult.providerId,
+        name: valResult.name,
+        state: valResult.status,
+      };
+    });
+  }
+
+  @WorkspaceRequired()
+  @Post(["social/accounts/:platform/connect", "social/accounts/:platform/connect-oauth"])
+  async startOAuthConnect(
+    @Req() r: AuthedRequest,
+    @Param("platform") platformParam: string,
+  ) {
+    assertPermission(r.workspace.role, "manage");
+    const platform = platformParam.toLowerCase();
+    const appUrl = process.env.APP_URL || "http://localhost:5173";
+    const redirectUri = `${appUrl}/api/v1/social/accounts/${platform}/callback`;
+
+    let clientId: string | undefined;
+    let authUrlBase: string | undefined;
+    let scope: string | undefined;
+
+    if (platform === "linkedin") {
+      clientId = process.env.LINKEDIN_CLIENT_ID;
+      authUrlBase = "https://www.linkedin.com/oauth/v2/authorization";
+      scope = "openid profile w_member_social";
+    } else if (platform === "instagram") {
+      clientId = process.env.INSTAGRAM_CLIENT_ID || process.env.META_CLIENT_ID;
+      authUrlBase = "https://api.instagram.com/oauth/authorize";
+      scope = "user_profile,user_media";
+    } else if (platform === "x" || platform === "twitter") {
+      clientId = process.env.X_CLIENT_ID;
+      authUrlBase = "https://twitter.com/i/oauth2/authorize";
+      scope = "tweet.read tweet.write users.read offline.access";
+    } else if (platform === "youtube") {
+      clientId = process.env.YOUTUBE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+      authUrlBase = "https://accounts.google.com/o/oauth2/v2/auth";
+      scope = "https://www.googleapis.com/auth/youtube";
+    } else {
+      throw new BadRequestException(`1-click OAuth redirect is not supported for ${platform}`);
+    }
+
+    const isConfigured = Boolean(
+      clientId &&
+      !clientId.includes("oauth_client_id") &&
+      !clientId.includes("app_id") &&
+      !clientId.includes("client_id") &&
+      !clientId.includes("placeholder") &&
+      !clientId.includes("your_"),
+    );
+
+    if (!isConfigured) {
+      return {
+        configured: false,
+        message: `Please add your real ${platform.toUpperCase()}_CLIENT_ID and ${platform.toUpperCase()}_CLIENT_SECRET in .env to connect your official ${platform} account.`,
+      };
+    }
+
+    const state = randomUUID();
+    const expiresAt = new Date(Date.now() + 15 * 60000);
+
+    await pool.query(
+      `INSERT INTO oauth_states(state_hash, workspace_id, user_id, session_hash, expires_at)
+       VALUES($1, $2, $3, $4, $5)`,
+      [hash(state), r.workspace.id, r.user.id, r.sessionHash || hash(r.user.id), expiresAt],
+    );
+
+    const url = `${authUrlBase}?response_type=code&client_id=${encodeURIComponent(
+      clientId!,
+    )}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(
+      scope,
+    )}&state=${state}`;
+
+    return { configured: true, url };
+  }
+
+  @Public()
+  @Get("social/accounts/:platform/callback")
+  async oauthCallback(
+    @Param("platform") platformParam: string,
+    @Query("code") code: string,
+    @Query("state") state: string,
+    @Query("error") errorStr: string,
+    @Res() res: Response,
+  ) {
+    const platform = platformParam.toLowerCase() as SocialProviderName;
+    const appUrl = process.env.APP_URL || "http://localhost:5173";
+
+    if (errorStr || !code || !state) {
+      return res.redirect(`${appUrl}/app/channels?error=${encodeURIComponent(errorStr || "OAuth canceled")}`);
+    }
+
+    const stateHash = hash(state);
+    const stateRes = await pool.query(
+      "SELECT * FROM oauth_states WHERE state_hash = $1 AND expires_at > NOW()",
+      [stateHash],
+    );
+
+    if (!stateRes.rowCount) {
+      return res.redirect(`${appUrl}/app/channels?error=${encodeURIComponent("OAuth session expired. Please try again.")}`);
+    }
+
+    const stateRecord = stateRes.rows[0];
+    const w = stateRecord.workspace_id;
+    const userId = stateRecord.user_id;
+
+    // Exchange code for token with platform provider
+    let token = "";
+    try {
+      const redirectUri = `${appUrl}/api/v1/social/accounts/${platform}/callback`;
+      if (platform === "linkedin") {
+        const tokenRes = await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: redirectUri,
+            client_id: process.env.LINKEDIN_CLIENT_ID || "",
+            client_secret: process.env.LINKEDIN_CLIENT_SECRET || "",
+          }),
+        });
+        const tokenData = await tokenRes.json();
+        token = tokenData.access_token;
+      } else if (platform === "instagram") {
+        const tokenRes = await fetch("https://api.instagram.com/oauth/access_token", {
+          method: "POST",
+          body: new URLSearchParams({
+            client_id: process.env.INSTAGRAM_CLIENT_ID || "",
+            client_secret: process.env.INSTAGRAM_CLIENT_SECRET || "",
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri,
+            code,
+          }),
+        });
+        const tokenData = await tokenRes.json();
+        token = tokenData.access_token;
+        if (token && process.env.INSTAGRAM_CLIENT_SECRET) {
+          try {
+            const longLivedRes = await fetch(
+              `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${encodeURIComponent(process.env.INSTAGRAM_CLIENT_SECRET)}&access_token=${encodeURIComponent(token)}`,
+            );
+            if (longLivedRes.ok) {
+              const longLivedData = await longLivedRes.json();
+              if (longLivedData.access_token) {
+                token = longLivedData.access_token;
+              }
+            }
+          } catch {
+            // Keep short-lived token
+          }
+        }
+      } else if (platform === "x") {
+        const basicAuth = Buffer.from(
+          `${process.env.X_CLIENT_ID || ""}:${process.env.X_CLIENT_SECRET || ""}`,
+        ).toString("base64");
+        const tokenRes = await fetch("https://api.twitter.com/2/oauth2/token", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${basicAuth}`,
+          },
+          body: new URLSearchParams({
+            code,
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri,
+            code_verifier: "challenge",
+          }),
+        });
+        const tokenData = await tokenRes.json();
+        token = tokenData.access_token;
+      } else if (platform === "youtube") {
+        const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            code,
+            client_id: process.env.YOUTUBE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "",
+            client_secret: process.env.YOUTUBE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || "",
+            redirect_uri: redirectUri,
+            grant_type: "authorization_code",
+          }),
+        });
+        const tokenData = await tokenRes.json();
+        token = tokenData.access_token;
+      }
+    } catch (err: any) {
+      return res.redirect(`${appUrl}/app/channels?error=${encodeURIComponent("Authentication error: " + err.message)}`);
+    }
+
+    if (!token) {
+      return res.redirect(`${appUrl}/app/channels?error=${encodeURIComponent("Could not obtain access token from " + platform + ". Please verify your credentials.")}`);
+    }
+
+    const provider = SocialProviderRegistry.getProvider(platform);
+    const valResult = await provider.validateConnection({ token });
+    if (!valResult.valid) {
+      return res.redirect(`${appUrl}/app/channels?error=${encodeURIComponent(valResult.details?.error || "Account validation failed for " + platform)}`);
+    }
+    const encryptedToken = encryptToken(token, w);
+    const accountId = randomUUID();
+
+    await transaction(async (db) => {
+      await db.query(
+        `INSERT INTO social_accounts(id, workspace_id, platform, provider_id, name, state, last_sync)
+         VALUES($1, $2, $3, $4, $5, $6, NOW())
+         ON CONFLICT (workspace_id, platform) DO UPDATE
+         SET provider_id = EXCLUDED.provider_id,
+             name = EXCLUDED.name,
+             state = EXCLUDED.state,
+             last_sync = NOW()`,
+        [accountId, w, platform, valResult.providerId, valResult.name, valResult.status],
+      );
+
+      const acc = (
+        await db.query("SELECT id FROM social_accounts WHERE workspace_id = $1 AND platform = $2", [w, platform])
+      ).rows[0];
+
+      await db.query(
+        `INSERT INTO social_account_tokens(account_id, ciphertext, expires_at)
+         VALUES($1, $2, NULL)
+         ON CONFLICT (account_id) DO UPDATE
+         SET ciphertext = EXCLUDED.ciphertext`,
+        [acc.id, encryptedToken],
+      );
+
+      await db.query("DELETE FROM oauth_states WHERE state_hash = $1", [stateHash]);
+
+      await audit(db, w, userId, "connected_channel_oauth", "social_account", acc.id, valResult.name, null, {
+        platform,
+      });
+    });
+
+    return res.redirect(`${appUrl}/app/channels?connected=${platform}`);
+  }
+
+  @WorkspaceRequired()
+  @Post("social/accounts/linkedin/token-connect")
+  async connectLinkedInToken(@Req() r: AuthedRequest, @Body() input: unknown) {
+    assertPermission(r.workspace.role, "manage");
+    const { token } = z.object({ token: z.string().trim().min(1, "Access token required") }).parse(input);
+    const w = r.workspace.id;
+
+    const provider = SocialProviderRegistry.getProvider("linkedin");
+    const valResult = await provider.validateConnection({ token });
+
+    if (!valResult.valid) {
+      throw new BadRequestException(
+        `LinkedIn connection failed: ${valResult.details?.error || valResult.status}`,
+      );
+    }
+
+    const encryptedToken = encryptToken(token, w);
+    const accountId = randomUUID();
+
+    return transaction(async (db) => {
+      await db.query(
+        `INSERT INTO social_accounts(id, workspace_id, platform, provider_id, name, state, last_sync)
+         VALUES($1, $2, 'linkedin', $3, $4, $5, NOW())
+         ON CONFLICT (workspace_id, platform) DO UPDATE
+         SET provider_id = EXCLUDED.provider_id,
+             name = EXCLUDED.name,
+             state = EXCLUDED.state,
+             last_sync = NOW()`,
+        [accountId, w, valResult.providerId, valResult.name, valResult.status],
+      );
+
+      const acc = (
+        await db.query("SELECT id FROM social_accounts WHERE workspace_id = $1 AND platform = 'linkedin'", [w])
+      ).rows[0];
+
+      await db.query(
+        `INSERT INTO social_account_tokens(account_id, ciphertext, expires_at)
+         VALUES($1, $2, NULL)
+         ON CONFLICT (account_id) DO UPDATE
+         SET ciphertext = EXCLUDED.ciphertext`,
+        [acc.id, encryptedToken],
+      );
+
+      await audit(db, w, r.user.id, "connected_channel", "social_account", acc.id, valResult.name, null, {
+        platform: "linkedin",
+      });
+
+      return {
+        id: acc.id,
+        platform: "linkedin",
+        providerId: valResult.providerId,
+        name: valResult.name,
+        state: valResult.status,
+      };
+    });
+  }
+
+  @WorkspaceRequired()
+  @Post("social/accounts/:platform/token-connect")
+  async connectPlatformToken(
+    @Req() r: AuthedRequest,
+    @Param("platform") platformParam: string,
+    @Body() input: unknown,
+  ) {
+    assertPermission(r.workspace.role, "manage");
+    const platform = platformParam.toLowerCase() as SocialProviderName;
+    const { token } = z.object({ token: z.string().trim().min(1, "Access token required") }).parse(input);
+    const w = r.workspace.id;
+
+    const provider = SocialProviderRegistry.getProvider(platform);
+    const valResult = await provider.validateConnection({ token });
+
+    if (!valResult.valid) {
+      throw new BadRequestException(
+        `${platform.toUpperCase()} connection failed: ${valResult.details?.error || valResult.status}`,
+      );
+    }
+
+    const encryptedToken = encryptToken(token, w);
+    const accountId = randomUUID();
+
+    return transaction(async (db) => {
+      await db.query(
+        `INSERT INTO social_accounts(id, workspace_id, platform, provider_id, name, state, last_sync)
+         VALUES($1, $2, $3, $4, $5, $6, NOW())
+         ON CONFLICT (workspace_id, platform) DO UPDATE
+         SET provider_id = EXCLUDED.provider_id,
+             name = EXCLUDED.name,
+             state = EXCLUDED.state,
+             last_sync = NOW()`,
+        [accountId, w, platform, valResult.providerId, valResult.name, valResult.status],
+      );
+
+      const acc = (
+        await db.query("SELECT id FROM social_accounts WHERE workspace_id = $1 AND platform = $2", [w, platform])
+      ).rows[0];
+
+      await db.query(
+        `INSERT INTO social_account_tokens(account_id, ciphertext, expires_at)
+         VALUES($1, $2, NULL)
+         ON CONFLICT (account_id) DO UPDATE
+         SET ciphertext = EXCLUDED.ciphertext`,
+        [acc.id, encryptedToken],
+      );
+
+      await audit(db, w, r.user.id, "connected_channel", "social_account", acc.id, valResult.name, null, {
+        platform,
+      });
+
+      return {
+        id: acc.id,
+        platform,
         providerId: valResult.providerId,
         name: valResult.name,
         state: valResult.status,

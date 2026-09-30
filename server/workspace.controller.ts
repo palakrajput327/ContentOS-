@@ -5,6 +5,8 @@ import {
   Post,
   Put,
   Patch,
+  Delete,
+  Param,
   Req,
   NotFoundException,
   BadRequestException,
@@ -260,6 +262,107 @@ export class WorkspaceController {
         { role: v.role },
       );
       return { id: u.id };
+    });
+  }
+
+  @WorkspaceRequired()
+  @Delete("members/:userId")
+  async deleteMember(
+    @Req() r: AuthedRequest,
+    @Param("userId") targetUserId: string,
+  ) {
+    assertPermission(r.workspace.role, "manage");
+    if (r.user.id === targetUserId) {
+      throw new BadRequestException("You cannot remove yourself from the workspace.");
+    }
+
+    return transaction(async (db) => {
+      const existing = await db.query(
+        "SELECT m.role, u.name FROM workspace_members m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = $1 AND m.user_id = $2",
+        [r.workspace.id, targetUserId],
+      );
+
+      if (!existing.rowCount) {
+        throw new NotFoundException("Member not found in this workspace.");
+      }
+
+      const member = existing.rows[0];
+      if (member.role === "Owner") {
+        throw new BadRequestException("Workspace owner cannot be removed.");
+      }
+
+      await db.query(
+        "DELETE FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
+        [r.workspace.id, targetUserId],
+      );
+
+      await audit(
+        db,
+        r.workspace.id,
+        r.user.id,
+        "removed member",
+        "member",
+        targetUserId,
+        member.name,
+      );
+
+      return { success: true, removedUserId: targetUserId };
+    });
+  }
+
+  @WorkspaceRequired()
+  @Patch("members/:userId")
+  async updateMemberRole(
+    @Req() r: AuthedRequest,
+    @Param("userId") targetUserId: string,
+    @Body() input: unknown,
+  ) {
+    assertPermission(r.workspace.role, "manage");
+    const v = z
+      .object({
+        role: z.enum([
+          "Admin",
+          "Content Manager",
+          "Editor",
+          "Approver",
+          "Viewer",
+        ]),
+      })
+      .parse(input);
+
+    return transaction(async (db) => {
+      const existing = await db.query(
+        "SELECT m.role, u.name FROM workspace_members m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = $1 AND m.user_id = $2",
+        [r.workspace.id, targetUserId],
+      );
+
+      if (!existing.rowCount) {
+        throw new NotFoundException("Member not found in this workspace.");
+      }
+
+      const member = existing.rows[0];
+      if (member.role === "Owner") {
+        throw new BadRequestException("Cannot modify role of workspace owner.");
+      }
+
+      await db.query(
+        "UPDATE workspace_members SET role = $3 WHERE workspace_id = $1 AND user_id = $2",
+        [r.workspace.id, targetUserId, v.role],
+      );
+
+      await audit(
+        db,
+        r.workspace.id,
+        r.user.id,
+        "updated member role",
+        "member",
+        targetUserId,
+        member.name,
+        { role: member.role },
+        { role: v.role },
+      );
+
+      return { success: true, role: v.role };
     });
   }
 }

@@ -203,8 +203,17 @@ export function Login({
         onSubmit={handleSubmit(async (values) => {
           try {
             setError("");
-            const r = await authRequest<{ requiresCode: boolean; email: string }>("/login", values);
-            nav("/login-code", {state:{email:r.email}});
+            const r = await authRequest<{ requiresCode: boolean; email: string; user?: User }>("/login", values);
+            if (r.requiresCode) {
+              nav("/login-code", { state: { email: r.email } });
+            } else if (r.user) {
+              await onLogin(r.user);
+              nav("/app");
+            } else {
+              const me = await authRequest<{ user: User }>("/me");
+              if (me?.user) await onLogin(me.user);
+              nav("/app");
+            }
           } catch (e) {
             setError((e as Error).message);
           }

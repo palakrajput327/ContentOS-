@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { useOutletContext } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+import { useOutletContext, useSearchParams } from "react-router-dom";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Link2,
@@ -11,6 +11,18 @@ import {
   BarChart3,
   ArrowUpRight,
   Settings as SettingsIcon,
+  Sparkles,
+  TrendingUp,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  Zap,
+  Calendar,
+  Layers,
+  Activity as ActivityIcon,
+  Bot,
+  Loader2,
 } from "lucide-react";
 import {
   Button,
@@ -27,53 +39,94 @@ import {
 } from "../lib/model";
 import { data, request } from "../lib/api";
 import { useSession } from "../lib/session";
+
 export function Channels() {
   const s = useOutletContext<Snapshot>();
   const demo = useSession((x) => x.demo);
   const query = useQueryClient();
-  const [connect, setConnect] = useState<Platform | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [connectTelegram, setConnectTelegram] = useState(false);
   const [channel, setChannel] = useState("");
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [connectingPlatform, setConnectingPlatform] = useState<Platform | null>(null);
   const [remove, setRemove] = useState<string | null>(null);
   const canManage = ["Owner", "Admin"].includes(s.workspace.role);
-  async function submit() {
+
+  useEffect(() => {
+    const connectedParam = searchParams.get("connected");
+    const errorParam = searchParams.get("error");
+    if (connectedParam) {
+      const name = connectedParam.charAt(0).toUpperCase() + connectedParam.slice(1);
+      toast.success(`${name} account connected successfully!`);
+      query.invalidateQueries({ queryKey: ["workspace"] });
+      setSearchParams({}, { replace: true });
+    } else if (errorParam) {
+      toast.error(decodeURIComponent(errorParam));
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, query, setSearchParams]);
+
+  async function handleStartConnect(p: Platform) {
+    if (p === "Telegram") {
+      setConnectTelegram(true);
+      setChannel("");
+      setToken("");
+      setError("");
+      return;
+    }
+
+    try {
+      setConnectingPlatform(p);
+      const platformKey = p.toLowerCase();
+      const res = await request<{ configured: boolean; url?: string; message?: string }>(
+        `/social/accounts/${platformKey}/connect-oauth`,
+        "POST",
+      );
+      if (res.configured && res.url) {
+        window.location.href = res.url;
+      } else {
+        toast.error(
+          res.message ||
+            `Please add your real ${p.toUpperCase()}_CLIENT_ID and ${p.toUpperCase()}_CLIENT_SECRET in .env`,
+        );
+      }
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setConnectingPlatform(null);
+    }
+  }
+
+  async function submitTelegram() {
     try {
       setBusy(true);
       setError("");
       if (demo) {
-        throw new Error(
-          "Live connections are disabled in the demo. Run the application server and configure provider credentials to connect your accounts.",
-        );
+        throw new Error("Live connections are disabled in demo mode.");
       }
-      if (connect === "LinkedIn") {
-        const r = await request<{ url: string }>(
-          "/social/accounts/linkedin/connect",
-          "POST",
-        );
-        window.location.assign(r.url);
-      } else {
-        const cleanChannel = channel.trim();
-        const cleanToken = token.trim();
-        if (!cleanChannel) {
-          throw new Error("Please enter your Channel @username or Chat ID.");
-        }
-        if (!cleanToken) {
-          throw new Error("Please enter your Telegram Bot token.");
-        }
-        await request("/social/accounts/telegram/connect", "POST", { chatId: cleanChannel, botToken: cleanToken });
-        setToken("");
-        setConnect(null);
-        await query.invalidateQueries({ queryKey: ["workspace"] });
-        toast.success("Telegram channel connected securely");
+      const cleanChannel = channel.trim();
+      const cleanToken = token.trim();
+      if (!cleanChannel) {
+        throw new Error("Please enter your Channel @username or Chat ID.");
       }
+      if (!cleanToken) {
+        throw new Error("Please enter your Telegram Bot token.");
+      }
+      await request("/social/accounts/telegram/connect", "POST", { chatId: cleanChannel, botToken: cleanToken });
+      setToken("");
+      setChannel("");
+      setConnectTelegram(false);
+      await query.invalidateQueries({ queryKey: ["workspace"] });
+      toast.success("Telegram channel connected successfully");
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   }
+
   return (
     <>
       <div className="page-heading">
@@ -86,10 +139,15 @@ export function Channels() {
           <ShieldCheck size={14} /> Workspace-owned connections
         </span>
       </div>
+
       <div className="channel-grid">
         {platforms.map((p) => {
-          const accounts = s.accounts.filter((a) => String(a.platform).toLowerCase() === p.toLowerCase());
-          const supported = p === "Telegram";
+          const accounts = s.accounts.filter(
+            (a) => String(a.platform).toLowerCase() === p.toLowerCase(),
+          );
+          const supported = true;
+          const isConnecting = connectingPlatform === p;
+
           return (
             <article key={p} className="panel channel-card">
               <div className="channel-card-heading">
@@ -128,6 +186,7 @@ export function Channels() {
                     <div className="account-actions" style={{ display: "flex", gap: "8px" }}>
                       <button
                         className="text-button"
+                        disabled={busy}
                         onClick={async () => {
                           try {
                             setBusy(true);
@@ -155,91 +214,69 @@ export function Channels() {
               ))}
               {canManage && (
                 <Button
-                  onClick={() => {
-                    setConnect(p);
-                    setError("");
-                  }}
-                  disabled={!supported}
+                  onClick={() => handleStartConnect(p)}
+                  disabled={!supported || isConnecting}
                 >
                   <Link2 size={15} />
-                  {supported ? (accounts.length ? "Add another channel" : "Connect account") : "Coming Later"}
-                  {supported && <ArrowUpRight size={14} />}
+                  {isConnecting
+                    ? "Connecting…"
+                    : supported
+                      ? (accounts.length ? "Add another channel" : "Connect account")
+                      : "Coming Later"}
+                  {supported && !isConnecting && <ArrowUpRight size={14} />}
                 </Button>
               )}
             </article>
           );
         })}
       </div>
+
       <Modal
-        open={!!connect}
+        open={connectTelegram}
         onOpenChange={(o) => {
           if (!o) {
-            setConnect(null);
+            setConnectTelegram(false);
             setToken("");
+            setChannel("");
+            setError("");
           }
         }}
-        title={`Connect ${connect || "account"}`}
-        description={
-          connect === "Telegram"
-            ? "Add your bot as a channel administrator with permission to post."
-            : "You’ll authorize publishing on LinkedIn and return to this workspace."
-        }
+        title="Connect Telegram"
+        description="Enter your channel @username and HTTP API Bot Token."
       >
-        {connect === "Telegram" && (
-          <>
-            <details className="notice" style={{ marginBottom: "16px", cursor: "pointer" }} open>
-              <summary style={{ fontWeight: 600, color: "var(--color-primary-light, #38bdf8)", display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                <span>📖 How to connect Telegram (Step-by-Step Guide)</span>
-              </summary>
-              <ol style={{ marginTop: "10px", paddingLeft: "18px", fontSize: "0.875rem", lineHeight: "1.5" }}>
-                <li style={{ marginBottom: "6px" }}>
-                  <strong>Create a Bot:</strong> Open Telegram and search for <code>@BotFather</code>. Send <code>/newbot</code>, choose a name and username for your bot, and copy the <strong>HTTP API Bot Token</strong>.
-                </li>
-                <li style={{ marginBottom: "6px" }}>
-                  <strong>Add Bot to Channel/Group:</strong> Go to your Telegram channel or group, open <i>Channel Info &rarr; Administrators &rarr; Add Admin</i>, search for your bot, and give it <strong>Post Messages</strong> permission.
-                </li>
-                <li>
-                  <strong>Enter Credentials:</strong> Paste your Channel Username (e.g. <code>@hindustan_social_network</code>) and your Bot Token below, then click <strong>Continue securely</strong>.
-                </li>
-              </ol>
-            </details>
+        <label>
+          Channel @username or Chat ID
+          <input
+            value={channel}
+            onChange={(e) => setChannel(e.target.value)}
+            placeholder="@your_channel or @hindustan_social_network"
+            autoComplete="off"
+          />
+        </label>
+        <label style={{ marginTop: "12px" }}>
+          Bot token (from @BotFather)
+          <input
+            type="password"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            autoComplete="off"
+            placeholder="e.g. 8818622380:AAFIE6T9Cns..."
+          />
+        </label>
 
-            <label>
-              Channel / Group @username or Chat ID
-              <input
-                value={channel}
-                onChange={(e) => setChannel(e.target.value)}
-                placeholder="@your_channel or @hindustan_social_network"
-                autoComplete="off"
-              />
-            </label>
-            {!demo && (
-              <label>
-                Bot token
-                <input
-                  type="password"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  autoComplete="off"
-                  placeholder="e.g. 8818622380:AAFIE6T9Cns..."
-                />
-              </label>
-            )}
-          </>
-        )}
-        {demo && (
-          <p className="notice">
-            This preview cannot connect real accounts. Credentials belong in
-            your own application deployment.
-          </p>
-        )}
         {error && (
-          <p className="error-box" role="alert">
+          <p className="error-box" role="alert" style={{ marginTop: "12px" }}>
             {error}
           </p>
         )}
-        <Button onClick={submit} variant="primary" disabled={busy}>
-          {busy ? "Connecting…" : "Continue securely"}
+
+        <Button
+          onClick={submitTelegram}
+          variant="primary"
+          disabled={busy}
+          style={{ marginTop: "16px", width: "100%", justifyContent: "center" }}
+        >
+          {busy ? "Connecting…" : "Connect Telegram"}
           <ArrowUpRight size={15} />
         </Button>
       </Modal>
@@ -360,6 +397,7 @@ export function Members() {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("Editor");
+  const [busy, setBusy] = useState(false);
   const canManage = ["Owner", "Admin"].includes(s.workspace.role);
   return (
     <>
@@ -384,6 +422,7 @@ export function Members() {
               <th>Email</th>
               <th>Role</th>
               <th>Access</th>
+              {canManage && <th>Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -397,7 +436,33 @@ export function Members() {
                 </td>
                 <td>{m.email}</td>
                 <td>
-                  <StatusBadge status={m.role} />
+                  {canManage && m.role !== "Owner" ? (
+                    <select
+                      value={m.role}
+                      disabled={busy}
+                      onChange={async (e) => {
+                        try {
+                          setBusy(true);
+                          await request(`/members/${m.id}`, "PATCH", { role: e.target.value });
+                          await query.invalidateQueries({ queryKey: ["workspace"] });
+                          toast.success(`Role updated to ${e.target.value}`);
+                        } catch (err) {
+                          toast.error((err as Error).message);
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      style={{ padding: "4px 8px", borderRadius: "6px", fontSize: "0.85rem" }}
+                    >
+                      {["Admin", "Content Manager", "Editor", "Approver", "Viewer"].map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <StatusBadge status={m.role} />
+                  )}
                 </td>
                 <td>
                   {m.role === "Viewer"
@@ -408,6 +473,34 @@ export function Members() {
                         ? "Create & edit"
                         : "Workspace & content"}
                 </td>
+                {canManage && (
+                  <td>
+                    {m.role !== "Owner" ? (
+                      <button
+                        className="text-button"
+                        style={{ color: "var(--color-danger, #ef4444)" }}
+                        disabled={busy}
+                        onClick={async () => {
+                          if (!confirm(`Are you sure you want to remove ${m.name} from this workspace?`)) return;
+                          try {
+                            setBusy(true);
+                            await request(`/members/${m.id}`, "DELETE");
+                            await query.invalidateQueries({ queryKey: ["workspace"] });
+                            toast.success(`${m.name} removed from workspace`);
+                          } catch (err) {
+                            toast.error((err as Error).message);
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                      >
+                        Remove
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Owner</span>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -669,47 +762,506 @@ export function Settings() {
 }
 export function Analytics() {
   const s = useOutletContext<Snapshot>();
+  const [aiInsights, setAiInsights] = useState<{
+    healthScore: number;
+    statusRating: string;
+    executiveSummary: string;
+    strengths: string[];
+    opportunities: string[];
+    bestTimesToPost: Array<{
+      platform: string;
+      bestDays: string;
+      bestTimeSlots: string;
+      rationale: string;
+    }>;
+    actionableRecommendations: string[];
+  } | null>(null);
+  const [generatingAi, setGeneratingAi] = useState(false);
+  const [aiModel, setAiModel] = useState<string>("");
+
+  const { data: overview, isLoading, refetch } = useQuery({
+    queryKey: ["analytics", "overview", s.workspace.id],
+    queryFn: () =>
+      request<{
+        metrics: {
+          published: number;
+          scheduled: number;
+          drafts: number;
+          needsReview: number;
+          channels: number;
+          completionRate: number;
+        };
+        accounts: Array<{ platform: string; name: string; state: string; last_sync: string | null }>;
+        platformDistribution: Record<string, number>;
+        timeline: Array<{ day: string; total: number; published: number; scheduled: number; drafts: number }>;
+        recentContent: Array<{
+          id: string;
+          title: string;
+          status: string;
+          platforms: string[];
+          createdAt: string;
+          scheduledAt: string | null;
+        }>;
+      }>("/analytics/overview"),
+  });
+
+  async function handleGenerateAiInsights() {
+    try {
+      setGeneratingAi(true);
+      const res = await request<{
+        insights: NonNullable<typeof aiInsights>;
+        model: string;
+        generatedAt: string;
+      }>("/analytics/ai-insights", "POST");
+      setAiInsights(res.insights);
+      setAiModel(res.model);
+      toast.success("AI Analytics generated successfully!");
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to generate AI insights.");
+    } finally {
+      setGeneratingAi(false);
+    }
+  }
+
+  const metrics = overview?.metrics || {
+    published: s.posts.filter((p) => p.status === "PUBLISHED").length,
+    scheduled: s.posts.filter((p) => p.status === "SCHEDULED").length,
+    drafts: s.posts.filter((p) => p.status === "DRAFT").length,
+    needsReview: s.posts.filter((p) => p.status === "NEEDS_REVIEW").length,
+    channels: s.accounts.length,
+    completionRate: 0,
+  };
+
+  const platformsList = ["LinkedIn", "Instagram", "X", "YouTube", "Telegram"] as const;
+
   return (
     <>
       <div className="page-heading">
         <div>
-          <span className="overline">A CLEARER PICTURE</span>
+          <span className="overline">INTELLIGENCE &amp; PERFORMANCE</span>
           <h1>Understand your publishing rhythm.</h1>
           <p>
-            Workspace counts are available now. Provider engagement sync is
-            planned.
+            Real-time workspace activity metrics and AI-driven publishing intelligence.
           </p>
         </div>
-        <span className="badge">Workspace data</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <Button
+            variant="secondary"
+            onClick={() => refetch()}
+            disabled={isLoading}
+            style={{ fontSize: "0.8rem", padding: "6px 12px" }}
+          >
+            <RefreshCw size={13} className={isLoading ? "spin" : ""} />
+            Sync Data
+          </Button>
+          <span className="badge">Real API Live Data</span>
+        </div>
       </div>
+
       <div className="stats-grid">
-        {[
-          ["Published", s.posts.filter((p) => p.status === "PUBLISHED").length],
-          ["Scheduled", s.posts.filter((p) => p.status === "SCHEDULED").length],
-          ["Drafts", s.posts.filter((p) => p.status === "DRAFT").length],
-          ["Channels", s.accounts.length],
-        ].map(([t, n]) => (
-          <div className="stat-card" key={t}>
-            <div>
-              {t}
-              <BarChart3 size={17} />
-            </div>
-            <strong>{n}</strong>
-            <small>Current workspace</small>
+        <div className="stat-card">
+          <div>
+            Published Posts
+            <BarChart3 size={17} />
           </div>
-        ))}
+          <strong>{metrics.published}</strong>
+          <small>Live on channels</small>
+        </div>
+
+        <div className="stat-card">
+          <div>
+            Scheduled Pipeline
+            <Clock size={17} />
+          </div>
+          <strong>{metrics.scheduled}</strong>
+          <small>Queued for release</small>
+        </div>
+
+        <div className="stat-card">
+          <div>
+            Draft Backlog
+            <Layers size={17} />
+          </div>
+          <strong>{metrics.drafts}</strong>
+          <small>Ideas &amp; in-progress</small>
+        </div>
+
+        <div className="stat-card">
+          <div>
+            Connected Channels
+            <Zap size={17} />
+          </div>
+          <strong>{metrics.channels}</strong>
+          <small>Active destinations</small>
+        </div>
       </div>
-      <div className="panel">
-        <Empty
-          icon={<BarChart3 size={36} />}
-          title="Performance insights are next."
+
+      {/* AI Intelligence Panel */}
+      <div
+        className="panel"
+        style={{
+          marginBottom: "24px",
+          border: "1px solid rgba(99, 102, 241, 0.3)",
+          background: "linear-gradient(180deg, rgba(20, 24, 38, 0.8) 0%, rgba(13, 16, 24, 0.95) 100%)",
+          padding: "24px",
+          borderRadius: "12px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "12px",
+            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+            paddingBottom: "16px",
+            marginBottom: "20px",
+          }}
         >
-          <p>
-            Reach, engagement, and audience growth will appear after provider
-            analytics integrations are implemented. No estimated metrics are
-            shown.
-          </p>
-        </Empty>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "10px",
+                background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#a5b4fc",
+              }}
+            >
+              <Sparkles size={18} />
+            </div>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "#f8fafc" }}>
+                AI Content &amp; Rhythm Intelligence
+              </h3>
+              <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "#94a3b8" }}>
+                {aiModel
+                  ? `Synthesized with ${aiModel} from your real workspace posts and schedule`
+                  : "Analyze your real content velocity and get AI-recommended publishing strategies"}
+              </p>
+            </div>
+          </div>
+
+          <Button
+            variant="primary"
+            disabled={generatingAi}
+            onClick={handleGenerateAiInsights}
+            style={{ fontSize: "0.85rem", gap: "8px" }}
+          >
+            {generatingAi ? (
+              <>
+                <Loader2 size={15} className="spin" />
+                Analyzing real data…
+              </>
+            ) : (
+              <>
+                <Sparkles size={15} />
+                {aiInsights ? "Refresh AI Insights" : "Generate AI Insights"}
+              </>
+            )}
+          </Button>
+        </div>
+
+        {generatingAi && (
+          <div style={{ textAlign: "center", padding: "40px 20px" }}>
+            <Loader2 size={32} className="spin" style={{ margin: "0 auto 14px", color: "#818cf8" }} />
+            <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem", color: "#f1f5f9" }}>
+              AI is analyzing your real content trajectory…
+            </h4>
+            <p style={{ margin: 0, fontSize: "0.825rem", color: "#94a3b8" }}>
+              Evaluating publishing cadence, platform balance, and scheduling opportunities.
+            </p>
+          </div>
+        )}
+
+        {!generatingAi && aiInsights && (
+          <div>
+            {/* Top Score & Summary Banner */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "180px 1fr",
+                gap: "20px",
+                background: "rgba(255, 255, 255, 0.03)",
+                border: "1px solid rgba(255, 255, 255, 0.06)",
+                borderRadius: "10px",
+                padding: "18px",
+                marginBottom: "20px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRight: "1px solid rgba(255, 255, 255, 0.08)",
+                  paddingRight: "16px",
+                  textAlign: "center",
+                }}
+              >
+                <span style={{ fontSize: "0.75rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Content Health
+                </span>
+                <span style={{ fontSize: "2.4rem", fontWeight: 700, color: "#38bdf8", lineHeight: 1.1, margin: "6px 0" }}>
+                  {aiInsights.healthScore}
+                  <span style={{ fontSize: "1rem", color: "#64748b" }}>/100</span>
+                </span>
+                <span
+                  style={{
+                    fontSize: "0.725rem",
+                    padding: "2px 8px",
+                    borderRadius: "6px",
+                    background: "rgba(56, 189, 248, 0.12)",
+                    color: "#38bdf8",
+                    fontWeight: 600,
+                  }}
+                >
+                  {aiInsights.statusRating}
+                </span>
+              </div>
+
+              <div>
+                <span style={{ fontSize: "0.75rem", color: "#a5b4fc", fontWeight: 600, textTransform: "uppercase" }}>
+                  Executive Brief
+                </span>
+                <p style={{ margin: "6px 0 0", fontSize: "0.9rem", color: "#e2e8f0", lineHeight: 1.6 }}>
+                  {aiInsights.executiveSummary}
+                </p>
+              </div>
+            </div>
+
+            {/* Strengths & Opportunities */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: "16px",
+                marginBottom: "20px",
+              }}
+            >
+              <div
+                style={{
+                  background: "rgba(34, 197, 94, 0.04)",
+                  border: "1px solid rgba(34, 197, 94, 0.15)",
+                  borderRadius: "10px",
+                  padding: "16px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", color: "#4ade80", fontWeight: 600, fontSize: "0.85rem" }}>
+                  <CheckCircle2 size={16} />
+                  <span>Key Strengths</span>
+                </div>
+                <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "0.825rem", color: "#cbd5e1", lineHeight: 1.6 }}>
+                  {aiInsights.strengths.map((str, idx) => (
+                    <li key={idx} style={{ marginBottom: "6px" }}>
+                      {str}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div
+                style={{
+                  background: "rgba(245, 158, 11, 0.04)",
+                  border: "1px solid rgba(245, 158, 11, 0.15)",
+                  borderRadius: "10px",
+                  padding: "16px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", color: "#fbbf24", fontWeight: 600, fontSize: "0.85rem" }}>
+                  <AlertCircle size={16} />
+                  <span>Growth Opportunities</span>
+                </div>
+                <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "0.825rem", color: "#cbd5e1", lineHeight: 1.6 }}>
+                  {aiInsights.opportunities.map((opp, idx) => (
+                    <li key={idx} style={{ marginBottom: "6px" }}>
+                      {opp}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            {/* Optimal Posting Windows */}
+            <div style={{ marginBottom: "20px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
+                <Clock size={16} color="#38bdf8" />
+                <h4 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 600, color: "#f1f5f9" }}>
+                  AI-Recommended Publishing Windows
+                </h4>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                  gap: "12px",
+                }}
+              >
+                {aiInsights.bestTimesToPost.map((b, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      background: "rgba(255, 255, 255, 0.02)",
+                      border: "1px solid rgba(255, 255, 255, 0.06)",
+                      borderRadius: "8px",
+                      padding: "12px",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+                      <strong style={{ fontSize: "0.85rem", color: "#f8fafc" }}>{b.platform}</strong>
+                      <span style={{ fontSize: "0.72rem", color: "#38bdf8", fontWeight: 600 }}>{b.bestDays}</span>
+                    </div>
+                    <div style={{ fontSize: "0.8rem", color: "#a5b4fc", fontWeight: 500, marginBottom: "4px" }}>
+                      ⏰ {b.bestTimeSlots}
+                    </div>
+                    <p style={{ margin: 0, fontSize: "0.75rem", color: "#94a3b8", lineHeight: 1.4 }}>
+                      {b.rationale}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Actionable Recommendations */}
+            <div
+              style={{
+                background: "rgba(99, 102, 241, 0.06)",
+                border: "1px solid rgba(99, 102, 241, 0.2)",
+                borderRadius: "10px",
+                padding: "16px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", color: "#a5b4fc", fontWeight: 600, fontSize: "0.85rem" }}>
+                <Zap size={16} />
+                <span>Strategic Action Plan</span>
+              </div>
+              <ol style={{ margin: 0, paddingLeft: "20px", fontSize: "0.825rem", color: "#cbd5e1", lineHeight: 1.6 }}>
+                {aiInsights.actionableRecommendations.map((rec, idx) => (
+                  <li key={idx} style={{ marginBottom: "6px" }}>
+                    {rec}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </div>
+        )}
+
+        {!generatingAi && !aiInsights && (
+          <div style={{ textAlign: "center", padding: "30px 20px" }}>
+            <Sparkles size={28} style={{ color: "#818cf8", margin: "0 auto 10px" }} />
+            <p style={{ margin: "0 0 16px", fontSize: "0.875rem", color: "#94a3b8", maxWidth: "480px", marginLeft: "auto", marginRight: "auto" }}>
+              Click &quot;Generate AI Insights&quot; above to have our LLM engine scan your real workspace content, channel cadence, and draft backlog to provide strategic recommendations.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Platform Activity & Recent Posts */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "24px" }}>
+        {/* Platform Coverage */}
+        <div className="panel" style={{ padding: "20px", borderRadius: "12px" }}>
+          <h3 style={{ margin: "0 0 14px", fontSize: "0.95rem", fontWeight: 600, display: "flex", alignItems: "center", gap: "8px" }}>
+            <ActivityIcon size={16} />
+            <span>Platform Coverage</span>
+          </h3>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {platformsList.map((platformName) => {
+              const count = overview?.platformDistribution?.[platformName] ?? 0;
+              const connectedAccount = overview?.accounts?.find(
+                (a) => a.platform.toLowerCase() === platformName.toLowerCase(),
+              );
+
+              return (
+                <div
+                  key={platformName}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 12px",
+                    background: "rgba(255, 255, 255, 0.02)",
+                    border: "1px solid rgba(255, 255, 255, 0.05)",
+                    borderRadius: "8px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <PlatformIcon platform={platformName} />
+                    <div>
+                      <strong style={{ fontSize: "0.85rem", color: "#f1f5f9" }}>{platformName}</strong>
+                      <span style={{ display: "block", fontSize: "0.72rem", color: "#64748b" }}>
+                        {connectedAccount ? connectedAccount.name : "Not connected"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <span style={{ fontSize: "0.8rem", color: "#94a3b8" }}>{count} posts</span>
+                    <span
+                      style={{
+                        fontSize: "0.7rem",
+                        padding: "2px 7px",
+                        borderRadius: "999px",
+                        background: connectedAccount
+                          ? "rgba(34, 197, 94, 0.12)"
+                          : "rgba(148, 163, 184, 0.08)",
+                        color: connectedAccount ? "#4ade80" : "#94a3b8",
+                      }}
+                    >
+                      {connectedAccount ? "Connected" : "Inactive"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Recent Publishing Activity */}
+        <div className="panel" style={{ padding: "20px", borderRadius: "12px" }}>
+          <h3 style={{ margin: "0 0 14px", fontSize: "0.95rem", fontWeight: 600, display: "flex", alignItems: "center", gap: "8px" }}>
+            <Calendar size={16} />
+            <span>Recent Content Log</span>
+          </h3>
+
+          {overview?.recentContent && overview.recentContent.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {overview.recentContent.slice(0, 5).map((post) => (
+                <div
+                  key={post.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "8px 12px",
+                    background: "rgba(255, 255, 255, 0.02)",
+                    borderRadius: "6px",
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: 1, paddingRight: "10px" }}>
+                    <div style={{ fontSize: "0.825rem", color: "#f1f5f9", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {post.title}
+                    </div>
+                    <small style={{ fontSize: "0.7rem", color: "#64748b" }}>
+                      {post.createdAt ? dateLabel(post.createdAt) : "Recently"}
+                    </small>
+                  </div>
+                  <StatusBadge status={post.status} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ fontSize: "0.825rem", color: "#64748b", margin: 0, padding: "20px 0", textAlign: "center" }}>
+              No content published or drafted yet.
+            </p>
+          )}
+        </div>
       </div>
     </>
   );
