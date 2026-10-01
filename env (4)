@@ -1,0 +1,84 @@
+# =========================
+# APP CONFIGURATION
+# =========================
+APP_ENV=development
+NODE_ENV=development
+
+APP_URL=http://localhost:5173
+APP_ORIGIN=http://localhost:5173
+PORT=3001
+
+# =========================
+# POSTGRESQL DATABASE
+# =========================
+PGHOST=127.0.0.1
+PGPORT=5432
+PGDATABASE=contentos
+PGUSER=postgres
+PGPASSWORD=your_postgres_password_here
+
+DATABASE_URL=postgresql://neondb_owner:npg_SMsYekaf6K4F@ep-odd-wind-b309rvnv.c-4.ap-southeast-1.aws.neon.tech/smm-panel?uselibpqcompat=true&sslmode=require
+# =========================
+# REDIS QUEUE SERVICE
+# =========================
+REDIS_URL=redis://127.0.0.1:6379
+
+# =========================
+# JWT / SECURITY ENCRYPTION
+# =========================
+JWT_SECRET=-91pd8aQSae_pRy2zwa6AEXghqj11pnajS4zAK1L1rP3DxljQsyjdhfC3YSO113x
+JWT_REFRESH_SECRET=5Mxz1yHUX5HNY4BdsRU4m0t0E2Yy4ZhLtSu1xx2-wIgSXQAGY_4gAqY5GxZ1IAXq
+
+ENCRYPTION_KEY=e5a275439460ba9918a94970464e4ad9e4d139a3c55b43b490035fc3f2f7e6e0
+TOKEN_ENCRYPTION_KEY=e5a275439460ba9918a94970464e4ad9e4d139a3c55b43b490035fc3f2f7e6e0
+
+# =========================
+# FRONTEND / VITE
+# =========================
+VITE_API_ENABLED=true
+VITE_AUTH_PHASE_ONLY=false
+VITE_PRODUCT_NAME=ContentOS
+VITE_API_URL=http://localhost:3001/api
+
+# =========================
+# MAIL / SMTP
+# =========================
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=Hindustansocialnetwork
+MAIL_PASSWORD=akupokkmllnpmcvu
+MAIL_FROM_ADDRESS=hindustansocialnetwork@gmail.com
+MAIL_SECURE=false
+
+# =========================
+# LLM & AI PROVIDERS
+# =========================
+LLM_PROVIDER=gemini
+LLM_FALLBACK_PROVIDERS=groq,openrouter
+LLM_TIMEOUT_MS=30000
+LLM_MAX_RETRIES=1
+
+GEMINI_API_KEY=AQ.Ab8RN6Ke5wl2vt4Av9CbVMJ3UWRuxnhK5dbl_ZlAKr732XnElQ
+GEMINI_MODEL=gemini-3.8-flash
+
+GROQ_API_KEY=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
+GROQ_MODEL=openai/gpt-oss-120b
+
+OPENROUTER_API_KEY=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
+OPENROUTER_MODEL=google/gemini-2.5-flash
+
+# =========================
+# SOCIAL OAUTH 2.0 APPS
+# =========================
+LINKEDIN_CLIENT_ID=linkedin_oauth_client_id
+LINKEDIN_CLIENT_SECRET=linkedin_oauth_client_secret
+LINKEDIN_API_VERSION=202401
+
+INSTAGRAM_CLIENT_ID=instagram_app_id
+INSTAGRAM_CLIENT_SECRET=instagram_app_secret
+
+X_CLIENT_ID=x_oauth_client_id
+X_CLIENT_SECRET=x_oauth_client_secret
+
+YOUTUBE_CLIENT_ID=youtube_client_id
+YOUTUBE_CLIENT_SECRET=youtube_client_secret

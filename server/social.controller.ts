@@ -26,6 +26,7 @@ import {
   type AuthedRequest,
 } from "./security.js";
 import { SocialProviderRegistry, type SocialProviderName } from "./social.provider.js";
+import { socialRedirectUri, socialCredentialConfigured } from "./social.oauth.js";
 
 export const telegramConnectSchema = z.object({
   botToken: z.string().trim().min(1, "Telegram Bot Token is required"),
@@ -125,9 +126,8 @@ export class SocialController {
     @Param("platform") platformParam: string,
   ) {
     assertPermission(r.workspace.role, "manage");
-    const platform = platformParam.toLowerCase();
-    const appUrl = process.env.APP_URL || "http://localhost:5173";
-    const redirectUri = `${appUrl}/api/v1/social/accounts/${platform}/callback`;
+    const platform = platformParam.toLowerCase() === "twitter" ? "x" : platformParam.toLowerCase();
+    const redirectUri = socialRedirectUri(platform);
 
     let clientId: string | undefined;
     let authUrlBase: string | undefined;
@@ -153,14 +153,12 @@ export class SocialController {
       throw new BadRequestException(`1-click OAuth redirect is not supported for ${platform}`);
     }
 
-    const isConfigured = Boolean(
-      clientId &&
-      !clientId.includes("oauth_client_id") &&
-      !clientId.includes("app_id") &&
-      !clientId.includes("client_id") &&
-      !clientId.includes("placeholder") &&
-      !clientId.includes("your_"),
-    );
+    const clientSecret = platform === "instagram"
+      ? process.env.INSTAGRAM_CLIENT_SECRET || process.env.META_CLIENT_SECRET
+      : platform === "youtube"
+        ? process.env.YOUTUBE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET
+        : process.env[`${platform.toUpperCase()}_CLIENT_SECRET`];
+    const isConfigured = socialCredentialConfigured(clientId) && socialCredentialConfigured(clientSecret);
 
     if (!isConfigured) {
       return {
@@ -184,7 +182,7 @@ export class SocialController {
       scope,
     )}&state=${state}`;
 
-    return { configured: true, url };
+    return { configured: true, url, redirectUri };
   }
 
   @Public()
@@ -220,7 +218,7 @@ export class SocialController {
     // Exchange code for token with platform provider
     let token = "";
     try {
-      const redirectUri = `${appUrl}/api/v1/social/accounts/${platform}/callback`;
+      const redirectUri = socialRedirectUri(platform);
       if (platform === "linkedin") {
         const tokenRes = await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
           method: "POST",
@@ -234,6 +232,9 @@ export class SocialController {
           }),
         });
         const tokenData = await tokenRes.json();
+        if (!tokenRes.ok) {
+          throw new Error(`LinkedIn token exchange failed (${tokenData.error || tokenRes.status}). Check the client credentials, registered redirect URL, and enabled LinkedIn products.`);
+        }
         token = tokenData.access_token;
       } else if (platform === "instagram") {
         const tokenRes = await fetch("https://api.instagram.com/oauth/access_token", {
@@ -295,6 +296,9 @@ export class SocialController {
           }),
         });
         const tokenData = await tokenRes.json();
+        if (!tokenRes.ok) {
+          throw new Error(`YouTube token exchange failed (${tokenData.error || tokenRes.status}). Check the Google OAuth client credentials and registered redirect URL.`);
+        }
         token = tokenData.access_token;
       }
     } catch (err: any) {
@@ -482,10 +486,13 @@ export class SocialController {
     }
 
     const acc = accRes.rows[0];
-    const botToken = decryptToken(acc.ciphertext, w);
+    const token = decryptToken(acc.ciphertext, w);
     const provider = SocialProviderRegistry.getProvider(acc.platform as SocialProviderName);
 
-    const valResult = await provider.validateConnection({ botToken, chatId: acc.provider_id });
+    const config = acc.platform === "telegram"
+      ? { botToken: token, chatId: acc.provider_id }
+      : { token };
+    const valResult = await provider.validateConnection(config);
     const newState = valResult.valid ? "CONNECTED" : valResult.status;
 
     await pool.query(
@@ -581,7 +588,9 @@ export class SocialController {
 
       // 4. Invoke Provider
       const result = await provider.publishText(
-        { botToken, chatId: acc.provider_id },
+        acc.platform === "telegram"
+          ? { botToken, chatId: acc.provider_id }
+          : { token: botToken, author: acc.provider_id },
         { text: content.body, destination: acc.provider_id },
       );
 

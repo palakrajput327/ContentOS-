@@ -63,7 +63,7 @@ export function Channels() {
       query.invalidateQueries({ queryKey: ["workspace"] });
       setSearchParams({}, { replace: true });
     } else if (errorParam) {
-      toast.error(decodeURIComponent(errorParam));
+      toast.error(errorParam);
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, query, setSearchParams]);

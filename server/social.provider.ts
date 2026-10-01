@@ -215,7 +215,7 @@ export class LinkedInProvider implements SocialProvider {
     const { token, author } = (config || {}) as any;
     if (!token) throw new BadRequestException("LinkedIn access token is required.");
     try {
-      const apiVersion = process.env.LINKEDIN_API_VERSION || "202401";
+      const apiVersion = process.env.LINKEDIN_API_VERSION || "202609";
       const res = await fetch("https://api.linkedin.com/rest/posts", {
         method: "POST",
         headers: {
@@ -376,9 +376,18 @@ export class YouTubeProvider implements SocialProvider {
       const res = await fetch("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true", {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) return { valid: false, status: "INVALID_CREDENTIALS", providerId: "", name: "YouTube" };
       const data = await res.json();
+      if (!res.ok) return {
+        valid: false,
+        status: res.status === 403 ? "INSUFFICIENT_PERMISSION" : "INVALID_CREDENTIALS",
+        providerId: "", name: "YouTube",
+        details: { error: data.error?.message || "YouTube could not validate the account. Enable YouTube Data API v3 and authorize the requested permissions." },
+      };
       const channel = data.items?.[0];
+      if (!channel?.id) return {
+        valid: false, status: "DESTINATION_NOT_FOUND", providerId: "", name: "YouTube",
+        details: { error: "No YouTube channel was found for this Google account. Choose an account with a YouTube channel or create one first." },
+      };
       return {
         valid: true,
         status: "CONNECTED",
@@ -392,8 +401,8 @@ export class YouTubeProvider implements SocialProvider {
 
   async publishText(config: unknown, request: PublishTextRequest): Promise<PublishResult> {
     return {
-      success: true,
-      providerPostId: "mock_yt_" + Date.now(),
+      success: false,
+      error: "YouTube requires a video upload. Text-only publishing is not supported.",
       publishedAt: new Date(),
     };
   }

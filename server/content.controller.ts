@@ -132,7 +132,9 @@ export class ContentController {
 
       // 4. Invoke Provider
       const result = await provider.publishText(
-        { botToken, chatId: acc.provider_id },
+        acc.platform === "telegram"
+          ? { botToken, chatId: acc.provider_id }
+          : { token: botToken, author: acc.provider_id },
         { text: content.body, destination: acc.provider_id },
       );
 
