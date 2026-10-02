@@ -25,8 +25,14 @@ import {
   hash,
   type AuthedRequest,
 } from "./security.js";
-import { SocialProviderRegistry, type SocialProviderName } from "./social.provider.js";
-import { socialRedirectUri, socialCredentialConfigured } from "./social.oauth.js";
+import {
+  SocialProviderRegistry,
+  type SocialProviderName,
+} from "./social.provider.js";
+import {
+  socialRedirectUri,
+  socialCredentialConfigured,
+} from "./social.oauth.js";
 
 export const telegramConnectSchema = z.object({
   botToken: z.string().trim().min(1, "Telegram Bot Token is required"),
@@ -93,21 +99,34 @@ export class SocialController {
 
       // Fetch actual account ID (in case of upsert)
       const acc = (
-        await db.query("SELECT id FROM social_accounts WHERE workspace_id = $1 AND platform = 'telegram'", [w])
+        await db.query(
+          "SELECT id FROM social_accounts WHERE workspace_id = $1 AND platform = 'telegram'",
+          [w],
+        )
       ).rows[0];
 
       await db.query(
         `INSERT INTO social_account_tokens(account_id, ciphertext, expires_at)
-         VALUES($1, $2, NULL)
+         VALUES($1, $2, $3)
          ON CONFLICT (account_id) DO UPDATE
-         SET ciphertext = EXCLUDED.ciphertext`,
-        [acc.id, encryptedToken],
+         SET ciphertext = EXCLUDED.ciphertext, expires_at=EXCLUDED.expires_at`,
+        [acc.id, encryptedToken, null],
       );
 
-      await audit(db, w, r.user.id, "connected_channel", "social_account", acc.id, valResult.name, null, {
-        platform: "telegram",
-        chatId: v.chatId,
-      });
+      await audit(
+        db,
+        w,
+        r.user.id,
+        "connected_channel",
+        "social_account",
+        acc.id,
+        valResult.name,
+        null,
+        {
+          platform: "telegram",
+          chatId: v.chatId,
+        },
+      );
 
       return {
         id: acc.id,
@@ -120,13 +139,19 @@ export class SocialController {
   }
 
   @WorkspaceRequired()
-  @Post(["social/accounts/:platform/connect", "social/accounts/:platform/connect-oauth"])
+  @Post([
+    "social/accounts/:platform/connect",
+    "social/accounts/:platform/connect-oauth",
+  ])
   async startOAuthConnect(
     @Req() r: AuthedRequest,
     @Param("platform") platformParam: string,
   ) {
     assertPermission(r.workspace.role, "manage");
-    const platform = platformParam.toLowerCase() === "twitter" ? "x" : platformParam.toLowerCase();
+    const platform =
+      platformParam.toLowerCase() === "twitter"
+        ? "x"
+        : platformParam.toLowerCase();
     const redirectUri = socialRedirectUri(platform);
 
     let clientId: string | undefined;
@@ -150,15 +175,21 @@ export class SocialController {
       authUrlBase = "https://accounts.google.com/o/oauth2/v2/auth";
       scope = "https://www.googleapis.com/auth/youtube";
     } else {
-      throw new BadRequestException(`1-click OAuth redirect is not supported for ${platform}`);
+      throw new BadRequestException(
+        `1-click OAuth redirect is not supported for ${platform}`,
+      );
     }
 
-    const clientSecret = platform === "instagram"
-      ? process.env.INSTAGRAM_CLIENT_SECRET || process.env.META_CLIENT_SECRET
-      : platform === "youtube"
-        ? process.env.YOUTUBE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET
-        : process.env[`${platform.toUpperCase()}_CLIENT_SECRET`];
-    const isConfigured = socialCredentialConfigured(clientId) && socialCredentialConfigured(clientSecret);
+    const clientSecret =
+      platform === "instagram"
+        ? process.env.INSTAGRAM_CLIENT_SECRET || process.env.META_CLIENT_SECRET
+        : platform === "youtube"
+          ? process.env.YOUTUBE_CLIENT_SECRET ||
+            process.env.GOOGLE_CLIENT_SECRET
+          : process.env[`${platform.toUpperCase()}_CLIENT_SECRET`];
+    const isConfigured =
+      socialCredentialConfigured(clientId) &&
+      socialCredentialConfigured(clientSecret);
 
     if (!isConfigured) {
       return {
@@ -173,7 +204,13 @@ export class SocialController {
     await pool.query(
       `INSERT INTO oauth_states(state_hash, workspace_id, user_id, session_hash, expires_at)
        VALUES($1, $2, $3, $4, $5)`,
-      [hash(state), r.workspace.id, r.user.id, r.sessionHash || hash(r.user.id), expiresAt],
+      [
+        hash(state),
+        r.workspace.id,
+        r.user.id,
+        r.sessionHash || hash(r.user.id),
+        expiresAt,
+      ],
     );
 
     const url = `${authUrlBase}?response_type=code&client_id=${encodeURIComponent(
@@ -182,7 +219,14 @@ export class SocialController {
       scope,
     )}&state=${state}`;
 
-    return { configured: true, url, redirectUri };
+    return {
+      configured: true,
+      url:
+        platform === "youtube"
+          ? `${url}&access_type=offline&prompt=consent`
+          : url,
+      redirectUri,
+    };
   }
 
   @Public()
@@ -198,7 +242,9 @@ export class SocialController {
     const appUrl = process.env.APP_URL || "http://localhost:5173";
 
     if (errorStr || !code || !state) {
-      return res.redirect(`${appUrl}/app/channels?error=${encodeURIComponent(errorStr || "OAuth canceled")}`);
+      return res.redirect(
+        `${appUrl}/app/channels?error=${encodeURIComponent(errorStr || "OAuth canceled")}`,
+      );
     }
 
     const stateHash = hash(state);
@@ -208,7 +254,9 @@ export class SocialController {
     );
 
     if (!stateRes.rowCount) {
-      return res.redirect(`${appUrl}/app/channels?error=${encodeURIComponent("OAuth session expired. Please try again.")}`);
+      return res.redirect(
+        `${appUrl}/app/channels?error=${encodeURIComponent("OAuth session expired. Please try again.")}`,
+      );
     }
 
     const stateRecord = stateRes.rows[0];
@@ -216,37 +264,47 @@ export class SocialController {
     const userId = stateRecord.user_id;
 
     // Exchange code for token with platform provider
+    let youtubeRefresh: string | undefined;
+    let youtubeExpires: Date | null = null;
     let token = "";
     try {
       const redirectUri = socialRedirectUri(platform);
       if (platform === "linkedin") {
-        const tokenRes = await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            grant_type: "authorization_code",
-            code,
-            redirect_uri: redirectUri,
-            client_id: process.env.LINKEDIN_CLIENT_ID || "",
-            client_secret: process.env.LINKEDIN_CLIENT_SECRET || "",
-          }),
-        });
+        const tokenRes = await fetch(
+          "https://www.linkedin.com/oauth/v2/accessToken",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              grant_type: "authorization_code",
+              code,
+              redirect_uri: redirectUri,
+              client_id: process.env.LINKEDIN_CLIENT_ID || "",
+              client_secret: process.env.LINKEDIN_CLIENT_SECRET || "",
+            }),
+          },
+        );
         const tokenData = await tokenRes.json();
         if (!tokenRes.ok) {
-          throw new Error(`LinkedIn token exchange failed (${tokenData.error || tokenRes.status}). Check the client credentials, registered redirect URL, and enabled LinkedIn products.`);
+          throw new Error(
+            `LinkedIn token exchange failed (${tokenData.error || tokenRes.status}). Check the client credentials, registered redirect URL, and enabled LinkedIn products.`,
+          );
         }
         token = tokenData.access_token;
       } else if (platform === "instagram") {
-        const tokenRes = await fetch("https://api.instagram.com/oauth/access_token", {
-          method: "POST",
-          body: new URLSearchParams({
-            client_id: process.env.INSTAGRAM_CLIENT_ID || "",
-            client_secret: process.env.INSTAGRAM_CLIENT_SECRET || "",
-            grant_type: "authorization_code",
-            redirect_uri: redirectUri,
-            code,
-          }),
-        });
+        const tokenRes = await fetch(
+          "https://api.instagram.com/oauth/access_token",
+          {
+            method: "POST",
+            body: new URLSearchParams({
+              client_id: process.env.INSTAGRAM_CLIENT_ID || "",
+              client_secret: process.env.INSTAGRAM_CLIENT_SECRET || "",
+              grant_type: "authorization_code",
+              redirect_uri: redirectUri,
+              code,
+            }),
+          },
+        );
         const tokenData = await tokenRes.json();
         token = tokenData.access_token;
         if (token && process.env.INSTAGRAM_CLIENT_SECRET) {
@@ -289,30 +347,48 @@ export class SocialController {
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({
             code,
-            client_id: process.env.YOUTUBE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "",
-            client_secret: process.env.YOUTUBE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || "",
+            client_id:
+              process.env.YOUTUBE_CLIENT_ID ||
+              process.env.GOOGLE_CLIENT_ID ||
+              "",
+            client_secret:
+              process.env.YOUTUBE_CLIENT_SECRET ||
+              process.env.GOOGLE_CLIENT_SECRET ||
+              "",
             redirect_uri: redirectUri,
             grant_type: "authorization_code",
           }),
         });
         const tokenData = await tokenRes.json();
         if (!tokenRes.ok) {
-          throw new Error(`YouTube token exchange failed (${tokenData.error || tokenRes.status}). Check the Google OAuth client credentials and registered redirect URL.`);
+          throw new Error(
+            `YouTube token exchange failed (${tokenData.error || tokenRes.status}). Check the Google OAuth client credentials and registered redirect URL.`,
+          );
         }
         token = tokenData.access_token;
+        youtubeRefresh = tokenData.refresh_token;
+        youtubeExpires = new Date(
+          Date.now() + Number(tokenData.expires_in || 3600) * 1000,
+        );
       }
     } catch (err: any) {
-      return res.redirect(`${appUrl}/app/channels?error=${encodeURIComponent("Authentication error: " + err.message)}`);
+      return res.redirect(
+        `${appUrl}/app/channels?error=${encodeURIComponent("Authentication error: " + err.message)}`,
+      );
     }
 
     if (!token) {
-      return res.redirect(`${appUrl}/app/channels?error=${encodeURIComponent("Could not obtain access token from " + platform + ". Please verify your credentials.")}`);
+      return res.redirect(
+        `${appUrl}/app/channels?error=${encodeURIComponent("Could not obtain access token from " + platform + ". Please verify your credentials.")}`,
+      );
     }
 
     const provider = SocialProviderRegistry.getProvider(platform);
     const valResult = await provider.validateConnection({ token });
     if (!valResult.valid) {
-      return res.redirect(`${appUrl}/app/channels?error=${encodeURIComponent(valResult.details?.error || "Account validation failed for " + platform)}`);
+      return res.redirect(
+        `${appUrl}/app/channels?error=${encodeURIComponent(valResult.details?.error || "Account validation failed for " + platform)}`,
+      );
     }
     const encryptedToken = encryptToken(token, w);
     const accountId = randomUUID();
@@ -326,26 +402,53 @@ export class SocialController {
              name = EXCLUDED.name,
              state = EXCLUDED.state,
              last_sync = NOW()`,
-        [accountId, w, platform, valResult.providerId, valResult.name, valResult.status],
+        [
+          accountId,
+          w,
+          platform,
+          valResult.providerId,
+          valResult.name,
+          valResult.status,
+        ],
       );
 
       const acc = (
-        await db.query("SELECT id FROM social_accounts WHERE workspace_id = $1 AND platform = $2", [w, platform])
+        await db.query(
+          "SELECT id FROM social_accounts WHERE workspace_id = $1 AND platform = $2",
+          [w, platform],
+        )
       ).rows[0];
 
       await db.query(
         `INSERT INTO social_account_tokens(account_id, ciphertext, expires_at)
-         VALUES($1, $2, NULL)
+         VALUES($1, $2, $3)
          ON CONFLICT (account_id) DO UPDATE
-         SET ciphertext = EXCLUDED.ciphertext`,
-        [acc.id, encryptedToken],
+         SET ciphertext = EXCLUDED.ciphertext, expires_at=EXCLUDED.expires_at`,
+        [acc.id, encryptedToken, youtubeExpires],
       );
 
-      await db.query("DELETE FROM oauth_states WHERE state_hash = $1", [stateHash]);
+      if (youtubeRefresh)
+        await db.query(
+          "UPDATE social_account_tokens SET refresh_ciphertext=$2 WHERE account_id=$1",
+          [acc.id, encryptToken(youtubeRefresh, w)],
+        );
+      await db.query("DELETE FROM oauth_states WHERE state_hash = $1", [
+        stateHash,
+      ]);
 
-      await audit(db, w, userId, "connected_channel_oauth", "social_account", acc.id, valResult.name, null, {
-        platform,
-      });
+      await audit(
+        db,
+        w,
+        userId,
+        "connected_channel_oauth",
+        "social_account",
+        acc.id,
+        valResult.name,
+        null,
+        {
+          platform,
+        },
+      );
     });
 
     return res.redirect(`${appUrl}/app/channels?connected=${platform}`);
@@ -355,7 +458,9 @@ export class SocialController {
   @Post("social/accounts/linkedin/token-connect")
   async connectLinkedInToken(@Req() r: AuthedRequest, @Body() input: unknown) {
     assertPermission(r.workspace.role, "manage");
-    const { token } = z.object({ token: z.string().trim().min(1, "Access token required") }).parse(input);
+    const { token } = z
+      .object({ token: z.string().trim().min(1, "Access token required") })
+      .parse(input);
     const w = r.workspace.id;
 
     const provider = SocialProviderRegistry.getProvider("linkedin");
@@ -383,7 +488,10 @@ export class SocialController {
       );
 
       const acc = (
-        await db.query("SELECT id FROM social_accounts WHERE workspace_id = $1 AND platform = 'linkedin'", [w])
+        await db.query(
+          "SELECT id FROM social_accounts WHERE workspace_id = $1 AND platform = 'linkedin'",
+          [w],
+        )
       ).rows[0];
 
       await db.query(
@@ -394,9 +502,19 @@ export class SocialController {
         [acc.id, encryptedToken],
       );
 
-      await audit(db, w, r.user.id, "connected_channel", "social_account", acc.id, valResult.name, null, {
-        platform: "linkedin",
-      });
+      await audit(
+        db,
+        w,
+        r.user.id,
+        "connected_channel",
+        "social_account",
+        acc.id,
+        valResult.name,
+        null,
+        {
+          platform: "linkedin",
+        },
+      );
 
       return {
         id: acc.id,
@@ -417,7 +535,9 @@ export class SocialController {
   ) {
     assertPermission(r.workspace.role, "manage");
     const platform = platformParam.toLowerCase() as SocialProviderName;
-    const { token } = z.object({ token: z.string().trim().min(1, "Access token required") }).parse(input);
+    const { token } = z
+      .object({ token: z.string().trim().min(1, "Access token required") })
+      .parse(input);
     const w = r.workspace.id;
 
     const provider = SocialProviderRegistry.getProvider(platform);
@@ -441,11 +561,21 @@ export class SocialController {
              name = EXCLUDED.name,
              state = EXCLUDED.state,
              last_sync = NOW()`,
-        [accountId, w, platform, valResult.providerId, valResult.name, valResult.status],
+        [
+          accountId,
+          w,
+          platform,
+          valResult.providerId,
+          valResult.name,
+          valResult.status,
+        ],
       );
 
       const acc = (
-        await db.query("SELECT id FROM social_accounts WHERE workspace_id = $1 AND platform = $2", [w, platform])
+        await db.query(
+          "SELECT id FROM social_accounts WHERE workspace_id = $1 AND platform = $2",
+          [w, platform],
+        )
       ).rows[0];
 
       await db.query(
@@ -456,9 +586,19 @@ export class SocialController {
         [acc.id, encryptedToken],
       );
 
-      await audit(db, w, r.user.id, "connected_channel", "social_account", acc.id, valResult.name, null, {
-        platform,
-      });
+      await audit(
+        db,
+        w,
+        r.user.id,
+        "connected_channel",
+        "social_account",
+        acc.id,
+        valResult.name,
+        null,
+        {
+          platform,
+        },
+      );
 
       return {
         id: acc.id,
@@ -482,16 +622,21 @@ export class SocialController {
     );
 
     if (!accRes.rowCount) {
-      throw new NotFoundException("Social account not found in this workspace.");
+      throw new NotFoundException(
+        "Social account not found in this workspace.",
+      );
     }
 
     const acc = accRes.rows[0];
     const token = decryptToken(acc.ciphertext, w);
-    const provider = SocialProviderRegistry.getProvider(acc.platform as SocialProviderName);
+    const provider = SocialProviderRegistry.getProvider(
+      acc.platform as SocialProviderName,
+    );
 
-    const config = acc.platform === "telegram"
-      ? { botToken: token, chatId: acc.provider_id }
-      : { token };
+    const config =
+      acc.platform === "telegram"
+        ? { botToken: token, chatId: acc.provider_id }
+        : { token };
     const valResult = await provider.validateConnection(config);
     const newState = valResult.valid ? "CONNECTED" : valResult.status;
 
@@ -500,9 +645,19 @@ export class SocialController {
       [newState, valResult.name, id, w],
     );
 
-    await audit(pool, w, r.user.id, "validated_channel", "social_account", id, valResult.name, null, {
-      state: newState,
-    });
+    await audit(
+      pool,
+      w,
+      r.user.id,
+      "validated_channel",
+      "social_account",
+      id,
+      valResult.name,
+      null,
+      {
+        state: newState,
+      },
+    );
 
     return {
       id,
@@ -519,132 +674,37 @@ export class SocialController {
     const w = r.workspace.id;
 
     const acc = (
-      await pool.query("SELECT id, name, platform FROM social_accounts WHERE id = $1 AND workspace_id = $2", [id, w])
+      await pool.query(
+        "SELECT id, name, platform FROM social_accounts WHERE id = $1 AND workspace_id = $2",
+        [id, w],
+      )
     ).rows[0];
 
     if (!acc) {
-      throw new NotFoundException("Social account not found in this workspace.");
+      throw new NotFoundException(
+        "Social account not found in this workspace.",
+      );
     }
 
     return transaction(async (db) => {
-      await db.query("DELETE FROM social_accounts WHERE id = $1 AND workspace_id = $2", [id, w]);
-      await audit(db, w, r.user.id, "disconnected_channel", "social_account", id, acc.name, null, {
-        platform: acc.platform,
-      });
-      return { success: true, message: "Channel disconnected successfully." };
-    });
-  }
-
-  @WorkspaceRequired()
-  @Post("content/:id/publish")
-  async publishContent(@Req() r: AuthedRequest, @Param("id") contentId: string, @Body() input: unknown) {
-    assertPermission(r.workspace.role, "schedule");
-    const v = publishSchema.parse(input);
-    const w = r.workspace.id;
-
-    return transaction(async (db) => {
-      // 1. Lock content row for update to prevent concurrent duplicate publishing
-      const contentRes = await db.query(
-        "SELECT * FROM content WHERE id = $1 AND workspace_id = $2 FOR UPDATE",
-        [contentId, w],
-      );
-
-      if (!contentRes.rowCount) {
-        throw new NotFoundException("Content item not found in this workspace.");
-      }
-
-      const content = contentRes.rows[0];
-      if (content.status === "PUBLISHING") {
-        throw new BadRequestException("This post is currently being published.");
-      }
-      if (content.status === "PUBLISHED") {
-        throw new BadRequestException("This post has already been published.");
-      }
-
-      // 2. Lock and load social account belonging to same workspace
-      const accRes = await db.query(
-        "SELECT a.*, t.ciphertext FROM social_accounts a JOIN social_account_tokens t ON t.account_id = a.id WHERE a.id = $1 AND a.workspace_id = $2",
-        [v.socialAccountId, w],
-      );
-
-      if (!accRes.rowCount) {
-        throw new ForbiddenException("Selected social account does not belong to your active workspace.");
-      }
-
-      const acc = accRes.rows[0];
-      const botToken = decryptToken(acc.ciphertext, w);
-      const provider = SocialProviderRegistry.getProvider(acc.platform as SocialProviderName);
-
-      // 3. Set content state to PUBLISHING
       await db.query(
-        "UPDATE content SET status = 'PUBLISHING', updated_at = NOW(), updated_by = $1 WHERE id = $2 AND workspace_id = $3",
-        [r.user.id, contentId, w],
+        "DELETE FROM social_accounts WHERE id = $1 AND workspace_id = $2",
+        [id, w],
       );
-
-      await audit(db, w, r.user.id, "publish_started", "content", contentId, content.title || "Untitled Post", null, {
-        platform: acc.platform,
-        socialAccountId: acc.id,
-      });
-
-      // 4. Invoke Provider
-      const result = await provider.publishText(
-        acc.platform === "telegram"
-          ? { botToken, chatId: acc.provider_id }
-          : { token: botToken, author: acc.provider_id },
-        { text: content.body, destination: acc.provider_id },
-      );
-
-      if (!result.success) {
-        await db.query(
-          "UPDATE content SET status = 'FAILED', updated_at = NOW(), updated_by = $1 WHERE id = $2 AND workspace_id = $3",
-          [r.user.id, contentId, w],
-        );
-
-        await audit(db, w, r.user.id, "publish_failed", "content", contentId, content.title || "Untitled Post", null, {
+      await audit(
+        db,
+        w,
+        r.user.id,
+        "disconnected_channel",
+        "social_account",
+        id,
+        acc.name,
+        null,
+        {
           platform: acc.platform,
-          error: result.error,
-        });
-
-        throw new BadRequestException(`Publishing failed: ${result.error}`);
-      }
-
-      // 5. Update content state to PUBLISHED
-      await db.query(
-        "UPDATE content SET status = 'PUBLISHED', published_by = $1, updated_at = NOW(), updated_by = $1 WHERE id = $2 AND workspace_id = $3",
-        [r.user.id, contentId, w],
+        },
       );
-
-      // Record in scheduled_posts & published_posts
-      const schedId = randomUUID();
-      await db.query(
-        `INSERT INTO scheduled_posts(id, workspace_id, content_id, account_id, content_version, execute_at, timezone, state, provider_post_id)
-         VALUES($1, $2, $3, $4, $5, NOW(), 'UTC', 'PUBLISHED', $6)
-         ON CONFLICT (content_id, account_id, content_version) DO UPDATE SET state = 'PUBLISHED', provider_post_id = EXCLUDED.provider_post_id`,
-        [schedId, w, contentId, acc.id, content.version, result.providerPostId || "N/A"],
-      );
-
-      const actualSched = (
-        await db.query("SELECT id FROM scheduled_posts WHERE content_id = $1 AND account_id = $2 AND content_version = $3", [contentId, acc.id, content.version])
-      ).rows[0];
-
-      const pubId = randomUUID();
-      await db.query(
-        "INSERT INTO published_posts(id, workspace_id, scheduled_post_id, provider_post_id, published_at) VALUES($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
-        [pubId, w, actualSched.id, result.providerPostId || "N/A", result.publishedAt],
-      );
-
-      await audit(db, w, r.user.id, "published_content", "content", contentId, content.title || "Untitled Post", null, {
-        platform: acc.platform,
-        providerPostId: result.providerPostId,
-      });
-
-      return {
-        success: true,
-        contentId,
-        status: "PUBLISHED",
-        providerPostId: result.providerPostId,
-        publishedAt: result.publishedAt,
-      };
+      return { success: true, message: "Channel disconnected successfully." };
     });
   }
 }

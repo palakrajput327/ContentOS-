@@ -30,10 +30,13 @@ export default function Library({
   const query = useQueryClient();
   const [params, setParams] = useSearchParams();
   const [search, setSearch] = useState("");
-  useEffect(() => { setSearch(params.get('q') || ''); }, [params]);
+  useEffect(() => {
+    setSearch(params.get("q") || "");
+  }, [params]);
   const filter = approvals ? "NEEDS_REVIEW" : params.get("status") || "ALL";
   const [schedule, setSchedule] = useState<Post | null>(null);
   const [date, setDate] = useState("");
+  const [scheduleError, setScheduleError] = useState("");
   const [busy, setBusy] = useState(false);
   const role = s.workspace.role;
   const canApprove = ["Owner", "Admin", "Approver"].includes(role);
@@ -51,6 +54,7 @@ export default function Library({
   async function action(p: Post, a: string, options?: unknown) {
     try {
       setBusy(true);
+      if (a === "schedule") setScheduleError("");
       await data.transition(p.id, a, options);
       await query.invalidateQueries({ queryKey: ["workspace"] });
       toast.success(
@@ -64,6 +68,7 @@ export default function Library({
       );
       setSchedule(null);
     } catch (e) {
+      if (a === "schedule") setScheduleError((e as Error).message);
       toast.error((e as Error).message);
     } finally {
       setBusy(false);
@@ -195,6 +200,7 @@ export default function Library({
                         body: p.body,
                         platforms: p.platforms,
                         variants: p.variants,
+                        youtube: p.youtube,
                       });
                       await query.invalidateQueries({
                         queryKey: ["workspace"],
@@ -232,7 +238,12 @@ export default function Library({
       )}
       <Modal
         open={!!schedule}
-        onOpenChange={(o) => !o && setSchedule(null)}
+        onOpenChange={(o) => {
+          if (!o) {
+            setSchedule(null);
+            setScheduleError("");
+          }
+        }}
         title="Give this post its moment."
         description={schedule?.title}
       >
@@ -240,8 +251,10 @@ export default function Library({
           onSubmit={(e) => {
             e.preventDefault();
             const d = new Date(date);
-            if (!Number.isFinite(d.getTime()) || d.getTime() <= Date.now()) {
-              toast.error("Choose a future date and time.");
+            if (!Number.isFinite(d.getTime()) || d.getTime() < Date.now() + 30000) {
+              const message = "Choose a time at least 30 seconds in the future.";
+              setScheduleError(message);
+              toast.error(message);
               return;
             }
             if (schedule)
@@ -257,13 +270,18 @@ export default function Library({
               type="datetime-local"
               required
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(e) => {
+                setDate(e.target.value);
+                setScheduleError("");
+              }}
             />
           </label>
           <p className="form-note">
             Entered in {Intl.DateTimeFormat().resolvedOptions().timeZone}.
             Displayed in your workspace timezone: {s.workspace.timezone}.
           </p>
+          <p className="form-note">Choose a time at least 30 seconds ahead. Two minutes ahead gives you time to confirm.</p>
+          {scheduleError && <p role="alert">{scheduleError}</p>}
           <Button type="submit" variant="primary" disabled={busy}>
             <CalendarDays size={16} />
             {busy ? "Scheduling…" : "Schedule post"}

@@ -4,6 +4,10 @@ import { pool, transaction, audit, type DB } from "./db.js";
 import { redis, publishingQueue } from "./queues.js";
 import { decryptToken } from "./security.js";
 import { socialProvider, ProviderError } from "./providers/social.js";
+import {
+  publishYouTubeRecord,
+  pollYouTubeProcessing,
+} from "./youtube.service.js";
 async function aggregate(
   db: DB,
   contentId: string,
@@ -12,18 +16,20 @@ async function aggregate(
 ) {
   const rows = (
     await db.query(
-      "SELECT state FROM scheduled_posts WHERE content_id=$1 AND workspace_id=$2 AND content_version=$3",
+      "SELECT state,processing_status FROM scheduled_posts WHERE content_id=$1 AND workspace_id=$2 AND content_version=$3",
       [contentId, wid, version],
     )
   ).rows;
   const states = rows.map((r) => r.state);
-  const status = states.every((s) => s === "PUBLISHED")
-    ? "PUBLISHED"
-    : states.includes("UNCERTAIN")
-      ? "UNCERTAIN"
-      : states.includes("FAILED")
-        ? "FAILED"
-        : "PUBLISHING";
+  const status =
+    states.every((s) => s === "PUBLISHED") &&
+    rows.every((r) => r.processing_status !== "processing")
+      ? "PUBLISHED"
+      : states.includes("UNCERTAIN")
+        ? "UNCERTAIN"
+        : states.includes("FAILED")
+          ? "FAILED"
+          : "PUBLISHING";
   await db.query(
     "UPDATE content SET status=$3,updated_at=now() WHERE id=$1 AND workspace_id=$2",
     [contentId, wid, status],
@@ -90,8 +96,9 @@ async function claim(id: string) {
     ).rows[0];
     if (
       !account?.ciphertext ||
-      account.state !== "Connected" ||
-      (account.expires_at &&
+      String(account.state).toLowerCase() !== "connected" ||
+      (String(account.platform).toLowerCase() !== "youtube" &&
+        account.expires_at &&
         new Date(account.expires_at).getTime() <= Date.now())
     ) {
       await db.query(
@@ -127,6 +134,10 @@ const worker = new Worker(
     const c = await claim(job.data.id);
     if (!c) return;
     const { account, content, job: record } = c;
+    if (String(account.platform).toLowerCase() === "youtube") {
+      await publishYouTubeRecord(record, content, account);
+      return;
+    }
     let providerId: string;
     try {
       providerId = await socialProvider(account.platform).publishText(
@@ -244,6 +255,7 @@ await maintenanceQueue.upsertJobScheduler(
 const maintenance = new Worker(
   "scheduler-maintenance",
   async () => {
+    await pollYouTubeProcessing();
     const jobs = (
       await pool.query(
         "SELECT id,execute_at FROM scheduled_posts WHERE state='PENDING' ORDER BY execute_at LIMIT 200",
@@ -276,7 +288,9 @@ const maintenance = new Worker(
           { jobId: item.id },
         );
     try {
-      await pool.query("DELETE FROM auth_sessions WHERE absolute_expires_at < now()");
+      await pool.query(
+        "DELETE FROM auth_sessions WHERE absolute_expires_at < now()",
+      );
     } catch {}
   },
   { connection: redis, concurrency: 1 },

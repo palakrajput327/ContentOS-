@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   Body,
   Controller,
   Delete,
@@ -11,16 +12,23 @@ import {
   ForbiddenException,
   ServiceUnavailableException,
 } from "@nestjs/common";
+import { pipeline } from "node:stream/promises";
+import { Transform } from "node:stream";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { audit, pool, transaction } from "../db.js";
-import { assertPermission, WorkspaceRequired, type AuthedRequest } from "../security.js";
+import {
+  assertPermission,
+  WorkspaceRequired,
+  type AuthedRequest,
+} from "../security.js";
 import { Put, Query, Res } from "@nestjs/common";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { MediaAssetType, ObjectStorageProvider } from "./storage.types.js";
 import { S3StorageProvider } from "./s3-storage.provider.js";
 import { LocalStorageProvider } from "./local-storage.provider.js";
+import { getStorageProvider } from "./storage.factory.js";
 
 export const presignUploadSchema = z.object({
   type: z.enum([
@@ -33,49 +41,42 @@ export const presignUploadSchema = z.object({
   ]),
   originalFilename: z.string().trim().min(1).max(255),
   mimeType: z.string().trim().min(1).max(128),
-  sizeBytes: z.number().int().positive().max(500 * 1024 * 1024), // 500 MB max limit
+  sizeBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(500 * 1024 * 1024), // 500 MB max limit
 });
 
 export const completeUploadSchema = z.object({
   checksum: z.string().optional(),
 });
 
-function getStorageProvider(): { provider: ObjectStorageProvider; bucket: string } {
-  const endpoint = process.env.STORAGE_ENDPOINT;
-  const region = process.env.STORAGE_REGION || "us-east-1";
-  const bucket = process.env.STORAGE_BUCKET;
-  const accessKeyId = process.env.STORAGE_ACCESS_KEY;
-  const secretAccessKey = process.env.STORAGE_SECRET_KEY;
-  const forcePathStyle = process.env.STORAGE_FORCE_PATH_STYLE !== "false";
-
-  if (endpoint && bucket && accessKeyId && secretAccessKey) {
-    return {
-      provider: new S3StorageProvider({
-        endpoint,
-        region,
-        accessKeyId,
-        secretAccessKey,
-        forcePathStyle,
-      }),
-      bucket,
-    };
-  }
-
-  // Seamless fallback to local disk storage
-  return {
-    provider: new LocalStorageProvider(),
-    bucket: process.env.STORAGE_BUCKET || "contentos-media",
-  };
-}
-
 function validateMimeType(type: MediaAssetType, mime: string) {
   const allowed: Record<MediaAssetType, string[]> = {
-    DOCUMENT: ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "text/plain"],
-    IMAGE: ["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"],
+    DOCUMENT: [
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain",
+    ],
+    IMAGE: [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/gif",
+      "image/svg+xml",
+    ],
     VIDEO: ["video/mp4", "video/webm", "video/quicktime"],
     AUDIO: ["audio/mpeg", "audio/wav", "audio/mp4", "audio/ogg"],
     THUMBNAIL: ["image/jpeg", "image/png", "image/webp"],
-    GENERATED_ASSET: ["image/png", "image/jpeg", "image/webp", "video/mp4", "application/json"],
+    GENERATED_ASSET: [
+      "image/png",
+      "image/jpeg",
+      "image/webp",
+      "video/mp4",
+      "application/json",
+    ],
   };
 
   if (!allowed[type]?.includes(mime.toLowerCase())) {
@@ -145,7 +146,12 @@ export class StorageController {
         assetId,
         uploadUrl: presigned.uploadUrl,
         expiresAt: presigned.expiresAt,
-        headers: presigned.headers,
+        headers: {
+          ...presigned.headers,
+          ...(provider instanceof LocalStorageProvider
+            ? { "X-Workspace-Id": w }
+            : {}),
+        },
       };
     });
   }
@@ -167,7 +173,9 @@ export class StorageController {
     );
 
     if (!assetRes.rowCount) {
-      throw new NotFoundException("Media asset record not found in this workspace.");
+      throw new NotFoundException(
+        "Media asset record not found in this workspace.",
+      );
     }
 
     const asset = assetRes.rows[0];
@@ -176,7 +184,9 @@ export class StorageController {
     // Verify object exists in storage
     const exists = await provider.exists(asset.bucket, asset.object_key);
     if (!exists) {
-      throw new BadRequestException("Uploaded file was not found in object storage.");
+      throw new BadRequestException(
+        "Uploaded file was not found in object storage.",
+      );
     }
 
     const meta = await provider.getMetadata(asset.bucket, asset.object_key);
@@ -211,7 +221,10 @@ export class StorageController {
 
   @WorkspaceRequired()
   @Get("media/:assetId")
-  async getMediaMetadata(@Req() r: AuthedRequest, @Param("assetId") assetId: string) {
+  async getMediaMetadata(
+    @Req() r: AuthedRequest,
+    @Param("assetId") assetId: string,
+  ) {
     const w = r.workspace.id;
     const res = await pool.query(
       "SELECT id, type, mime_type, size_bytes, original_filename, status, created_at FROM media_assets WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL",
@@ -227,7 +240,10 @@ export class StorageController {
 
   @WorkspaceRequired()
   @Get("media/:assetId/download")
-  async getDownloadUrl(@Req() r: AuthedRequest, @Param("assetId") assetId: string) {
+  async getDownloadUrl(
+    @Req() r: AuthedRequest,
+    @Param("assetId") assetId: string,
+  ) {
     const w = r.workspace.id;
     const res = await pool.query(
       "SELECT bucket, object_key, original_filename, status FROM media_assets WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL",
@@ -269,7 +285,10 @@ export class StorageController {
 
   @WorkspaceRequired()
   @Delete("media/:assetId")
-  async deleteMedia(@Req() r: AuthedRequest, @Param("assetId") assetId: string) {
+  async deleteMedia(
+    @Req() r: AuthedRequest,
+    @Param("assetId") assetId: string,
+  ) {
     assertPermission(r.workspace.role, "manage");
     const w = r.workspace.id;
 
@@ -323,49 +342,94 @@ export class StorageController {
     return { media: res.rows };
   }
 
+  @WorkspaceRequired()
   @Put("local/upload")
   async localUpload(
     @Query("bucket") bucket: string,
     @Query("key") objectKey: string,
-    @Req() req: any,
+    @Req() req: AuthedRequest,
     @Res() res: any,
   ) {
-    if (!bucket || !objectKey) {
-      return res.status(400).json({ message: "Bucket and key parameters are required" });
+    assertPermission(req.workspace.role, "edit");
+    const asset = (
+      await pool.query(
+        "SELECT * FROM media_assets WHERE bucket=$1 AND object_key=$2 AND workspace_id=$3 AND deleted_at IS NULL",
+        [bucket, objectKey, req.workspace.id],
+      )
+    ).rows[0];
+    if (!asset || asset.status !== "PENDING")
+      throw new NotFoundException(
+        "Pending upload not found in this workspace.",
+      );
+    const base = path.resolve(process.env.STORAGE_LOCAL_DIR || "uploads");
+    const file = path.resolve(base, bucket, objectKey);
+    if (
+      !file.startsWith(base + path.sep) ||
+      objectKey.includes("..") ||
+      objectKey.includes("\\")
+    )
+      throw new BadRequestException("Invalid media path");
+    await fs.promises.mkdir(path.dirname(file), { recursive: true });
+    let destination: fs.promises.FileHandle;
+    try {
+      destination = await fs.promises.open(file, "wx");
+    } catch {
+      throw new ConflictException(
+        "This file was already uploaded. Complete it or start a new upload.",
+      );
     }
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", async () => {
-      try {
-        const buffer = Buffer.concat(chunks);
-        const { provider } = getStorageProvider();
-        await provider.upload({
-          bucket,
-          objectKey,
-          body: buffer,
-          mimeType: req.headers["content-type"] || "application/octet-stream",
-        });
-        res.status(200).json({ ok: true, sizeBytes: buffer.length });
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
-      }
+    let bytes = 0;
+    const limiter = new Transform({
+      transform(chunk, _encoding, callback) {
+        bytes += chunk.length;
+        callback(
+          bytes > Number(asset.size_bytes) || bytes > 500 * 1024 * 1024
+            ? new Error("Upload exceeds declared size")
+            : null,
+          chunk,
+        );
+      },
     });
+    try {
+      await pipeline(req, limiter, destination.createWriteStream());
+    } catch (e) {
+      await fs.promises.unlink(file).catch(() => {});
+      throw new BadRequestException(
+        "Media upload failed or exceeds declared size.",
+      );
+    }
+    if (bytes !== Number(asset.size_bytes)) {
+      await fs.promises.unlink(file);
+      throw new BadRequestException(
+        "Uploaded size does not match the selected file.",
+      );
+    }
+    return res.status(200).json({ ok: true, sizeBytes: bytes });
   }
 
   @Get("local/download")
   async localDownload(
     @Query("bucket") bucket: string,
     @Query("key") objectKey: string,
+    @Req() req: AuthedRequest,
     @Res() res: any,
   ) {
-    if (!bucket || !objectKey) {
-      return res.status(400).json({ message: "Bucket and key parameters are required" });
-    }
-    const safeKey = objectKey.replace(/\.\./g, "_");
-    const filePath = path.join(process.cwd(), "uploads", bucket, safeKey);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ message: "File not found in local storage" });
-    }
-    return res.sendFile(path.resolve(filePath));
+    const asset = (
+      await pool.query(
+        "SELECT m.* FROM media_assets m JOIN workspace_members w ON w.workspace_id=m.workspace_id WHERE m.bucket=$1 AND m.object_key=$2 AND w.user_id=$3 AND m.deleted_at IS NULL AND m.status='COMPLETED'",
+        [bucket, objectKey, req.user.id],
+      )
+    ).rows[0];
+    if (!asset)
+      throw new NotFoundException("Media not found in your workspaces.");
+    const base = path.resolve(process.env.STORAGE_LOCAL_DIR || "uploads"),
+      file = path.resolve(base, bucket, objectKey);
+    if (
+      !file.startsWith(base + path.sep) ||
+      objectKey.includes("..") ||
+      objectKey.includes("\\")
+    )
+      throw new BadRequestException("Invalid media path");
+    return res.sendFile(file);
   }
 }

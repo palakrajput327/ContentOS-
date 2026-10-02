@@ -25,6 +25,14 @@ export interface Post {
     mediaUrl?: string;
     [key: string]: any;
   };
+  youtube?: {
+    kind: "Short" | "Video";
+    assetId: string;
+    title: string;
+    description: string;
+    visibility: "private" | "unlisted" | "public";
+    thumbnailAssetId?: string;
+  };
   platforms: Platform[];
   status: Status;
   createdAt: string;

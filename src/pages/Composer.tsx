@@ -27,6 +27,7 @@ import { Button, PlatformIcon, StatusBadge } from "../components/ui";
 import { platforms, type Platform, type Snapshot } from "../lib/model";
 import { data, request } from "../lib/api";
 import { useSession } from "../lib/session";
+import YouTubeComposer from "./YouTubeComposer";
 export default function Composer({ studio = false }: { studio?: boolean }) {
   const s = useOutletContext<Snapshot>();
   const [params] = useSearchParams();
@@ -95,7 +96,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       if (!res.ok) throw new Error("File upload failed to storage service");
 
       await request(`/storage/uploads/${presign.assetId}/complete`, "POST", {});
-      
+
       const download = await request<{ downloadUrl: string }>(
         `/storage/media/${presign.assetId}/download`,
       );
@@ -184,6 +185,18 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       setBusy("");
     }
   }
+  if (selected.includes("YouTube"))
+    return (
+      <YouTubeComposer
+        key={post?.id || "new-youtube"}
+        snapshot={s}
+        post={post}
+        onPlatform={(p) => {
+          setSelected([p]);
+          setPreview(p);
+        }}
+      />
+    );
   return (
     <>
       <div className="page-heading">
@@ -254,21 +267,38 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                       marginBottom: "10px",
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
                       {postType === "image" ? (
-                        <Image size={18} style={{ color: "var(--color-accent, #6366f1)" }} />
+                        <Image
+                          size={18}
+                          style={{ color: "var(--color-accent, #6366f1)" }}
+                        />
                       ) : (
-                        <Clapperboard size={18} style={{ color: "var(--color-accent, #6366f1)" }} />
+                        <Clapperboard
+                          size={18}
+                          style={{ color: "var(--color-accent, #6366f1)" }}
+                        />
                       )}
                       <strong>
-                        {postType === "image" ? "Attached Image" : "Attached Video"}
+                        {postType === "image"
+                          ? "Attached Image"
+                          : "Attached Video"}
                       </strong>
                     </div>
                     {mediaUrl && (
                       <button
                         type="button"
                         className="text-button"
-                        style={{ color: "var(--color-danger, #ef4444)", fontSize: "0.8rem" }}
+                        style={{
+                          color: "var(--color-danger, #ef4444)",
+                          fontSize: "0.8rem",
+                        }}
                         onClick={() => setMediaUrl("")}
                       >
                         <XIcon size={14} /> Remove
@@ -277,7 +307,13 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                   </div>
 
                   {mediaUrl ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                      }}
+                    >
                       {postType === "image" ? (
                         <img
                           src={mediaUrl}
@@ -327,7 +363,14 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                     </div>
                   ) : (
                     <div>
-                      <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "10px",
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        }}
+                      >
                         <label
                           className="button primary"
                           style={{
@@ -348,13 +391,20 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                             : `Upload ${postType === "image" ? "Image" : "Video"}`}
                           <input
                             type="file"
-                            accept={postType === "image" ? "image/*" : "video/*"}
+                            accept={
+                              postType === "image" ? "image/*" : "video/*"
+                            }
                             style={{ display: "none" }}
                             disabled={uploadingMedia}
                             onChange={handleMediaUpload}
                           />
                         </label>
-                        <span style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+                        <span
+                          style={{
+                            fontSize: "0.85rem",
+                            color: "var(--color-text-muted)",
+                          }}
+                        >
                           or enter URL
                         </span>
                         <input
@@ -399,12 +449,34 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
 
               {aiOpen && (
                 <div className="ai-controls">
-                  <div className="row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <div
+                    className="row"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
                       <Sparkles size={18} className="text-emerald-400" />
-                      <h3 style={{ margin: 0, fontWeight: 600 }}>AI Creative Brief</h3>
+                      <h3 style={{ margin: 0, fontWeight: 600 }}>
+                        AI Creative Brief
+                      </h3>
                     </div>
-                    <span className="badge" style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981", border: "1px solid rgba(16, 185, 129, 0.3)" }}>
+                    <span
+                      className="badge"
+                      style={{
+                        background: "rgba(16, 185, 129, 0.15)",
+                        color: "#10b981",
+                        border: "1px solid rgba(16, 185, 129, 0.3)",
+                      }}
+                    >
                       Live AI Active
                     </span>
                   </div>
@@ -555,7 +627,9 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                     try {
                       setError("");
                       if (!title.trim() || !body.trim() || !selected.length)
-                        throw new Error("Add a title, write your post, and choose at least one platform.");
+                        throw new Error(
+                          "Add a title, write your post, and choose at least one platform.",
+                        );
                       setBusy("publishing");
                       // 1. Save post draft first
                       const saved = await data.save({
@@ -567,9 +641,12 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                       });
 
                       // 2. Find connected social account for target platform
-                      const targetPlatform = preview || selected[0] || "Telegram";
+                      const targetPlatform =
+                        preview || selected[0] || "Telegram";
                       const acc = s.accounts.find(
-                        (a) => String(a.platform).toLowerCase() === targetPlatform.toLowerCase(),
+                        (a) =>
+                          String(a.platform).toLowerCase() ===
+                          targetPlatform.toLowerCase(),
                       );
                       if (!acc) {
                         throw new Error(
@@ -582,8 +659,12 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                         socialAccountId: acc.id,
                       });
 
-                      await query.invalidateQueries({ queryKey: ["workspace"] });
-                      toast.success(`Post published to ${targetPlatform} successfully!`);
+                      await query.invalidateQueries({
+                        queryKey: ["workspace"],
+                      });
+                      toast.success(
+                        `Post published to ${targetPlatform} successfully!`,
+                      );
                       nav("/app/library");
                     } catch (e) {
                       setError((e as Error).message);
@@ -594,7 +675,9 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                   disabled={!!busy || !editable || !canEdit}
                 >
                   <Send size={16} />
-                  {busy === "publishing" ? `Publishing to ${preview || selected[0]}…` : `Publish Now to ${preview || selected[0]}`}
+                  {busy === "publishing"
+                    ? `Publishing to ${preview || selected[0]}…`
+                    : `Publish Now to ${preview || selected[0]}`}
                 </Button>
               </div>
             </div>

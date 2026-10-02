@@ -1,4 +1,5 @@
 import {
+  Get,
   Body,
   Controller,
   Param,
@@ -20,7 +21,17 @@ import {
   decryptToken,
   type AuthedRequest,
 } from "./security.js";
-import { SocialProviderRegistry, type SocialProviderName } from "./social.provider.js";
+import {
+  SocialProviderRegistry,
+  type SocialProviderName,
+} from "./social.provider.js";
+import {
+  publishYouTubeNow,
+  validateYouTubeInput,
+  checkYouTubeRecord,
+} from "./youtube.service.js";
+import { youtubeSchema } from "./youtube.schema.js";
+import { pool } from "./db.js";
 import { serializePost } from "./workspace.controller.js";
 
 export const publishSchema = z.object({
@@ -35,7 +46,7 @@ export const platformSchema = z.enum([
 ]);
 const inputSchema = z.object({
   title: z.string().trim().min(1).max(160),
-  body: z.string().trim().min(1).max(10000),
+  body: z.string().trim().max(10000),
   platforms: z
     .array(platformSchema)
     .min(1)
@@ -44,6 +55,7 @@ const inputSchema = z.object({
   variants: z
     .record(platformSchema, z.string().trim().min(1).max(10000))
     .default({}),
+  youtube: youtubeSchema.optional(),
   version: z.number().int().positive().optional(),
 });
 export function assertEditable(status: string) {
@@ -80,11 +92,57 @@ async function locked(db: DB, id: string, wid: string) {
 @WorkspaceRequired()
 @Controller("content")
 export class ContentController {
+  @Post(":id/youtube/check")
+  async checkYouTube(@Req() r: AuthedRequest, @Param("id") id: string) {
+    assertPermission(r.workspace.role, "schedule");
+    z.string().uuid().parse(id);
+    const rows = (
+      await pool.query(
+        "SELECT s.* FROM scheduled_posts s JOIN social_accounts a ON a.id=s.account_id AND a.workspace_id=s.workspace_id WHERE s.content_id=$1 AND s.workspace_id=$2 AND lower(a.platform)='youtube' AND s.provider_post_id IS NOT NULL",
+        [id, r.workspace.id],
+      )
+    ).rows;
+    if (!rows.length)
+      throw new NotFoundException("No YouTube upload found in this workspace.");
+    for (const row of rows) await checkYouTubeRecord(row);
+    return this.youtubeStatus(r, id);
+  }
+  @Get(":id/youtube")
+  async youtubeStatus(@Req() r: AuthedRequest, @Param("id") id: string) {
+    z.string().uuid().parse(id);
+    const content = (
+      await pool.query(
+        "SELECT id FROM content WHERE id=$1 AND workspace_id=$2",
+        [id, r.workspace.id],
+      )
+    ).rows[0];
+    if (!content)
+      throw new NotFoundException("Content not found in this workspace.");
+    const publications = (
+      await pool.query(
+        'SELECT s.id,s.state,s.provider_post_id AS "videoId",s.processing_status AS "processingStatus",s.actual_visibility AS visibility,s.error_code AS error,s.publish_warning AS warning FROM scheduled_posts s JOIN social_accounts a ON a.id=s.account_id AND a.workspace_id=s.workspace_id WHERE s.content_id=$1 AND s.workspace_id=$2 AND lower(a.platform)=\'youtube\' ORDER BY s.created_at DESC',
+        [id, r.workspace.id],
+      )
+    ).rows;
+    return { publications };
+  }
   @Post(":id/publish")
-  async publishContent(@Req() r: AuthedRequest, @Param("id") contentId: string, @Body() input: unknown) {
+  async publishContent(
+    @Req() r: AuthedRequest,
+    @Param("id") contentId: string,
+    @Body() input: unknown,
+  ) {
     assertPermission(r.workspace.role, "schedule");
     const v = publishSchema.parse(input);
     const w = r.workspace.id;
+    const target = (
+      await pool.query(
+        "SELECT platform FROM social_accounts WHERE id=$1 AND workspace_id=$2",
+        [v.socialAccountId, w],
+      )
+    ).rows[0];
+    if (String(target?.platform).toLowerCase() === "youtube")
+      return publishYouTubeNow(w, r.user.id, contentId, v.socialAccountId);
 
     return transaction(async (db) => {
       // 1. Lock content row for update to prevent concurrent duplicate publishing
@@ -94,12 +152,16 @@ export class ContentController {
       );
 
       if (!contentRes.rowCount) {
-        throw new NotFoundException("Content item not found in this workspace.");
+        throw new NotFoundException(
+          "Content item not found in this workspace.",
+        );
       }
 
       const content = contentRes.rows[0];
       if (content.status === "PUBLISHING") {
-        throw new BadRequestException("This post is currently being published.");
+        throw new BadRequestException(
+          "This post is currently being published.",
+        );
       }
       if (content.status === "PUBLISHED") {
         throw new BadRequestException("This post has already been published.");
@@ -112,12 +174,16 @@ export class ContentController {
       );
 
       if (!accRes.rowCount) {
-        throw new ForbiddenException("Selected social account does not belong to your active workspace.");
+        throw new ForbiddenException(
+          "Selected social account does not belong to your active workspace.",
+        );
       }
 
       const acc = accRes.rows[0];
       const botToken = decryptToken(acc.ciphertext, w);
-      const provider = SocialProviderRegistry.getProvider(acc.platform as SocialProviderName);
+      const provider = SocialProviderRegistry.getProvider(
+        acc.platform as SocialProviderName,
+      );
 
       // 3. Set content state to PUBLISHING
       await db.query(
@@ -125,10 +191,20 @@ export class ContentController {
         [r.user.id, contentId, w],
       );
 
-      await audit(db, w, r.user.id, "publish_started", "content", contentId, content.title || "Untitled Post", null, {
-        platform: acc.platform,
-        socialAccountId: acc.id,
-      });
+      await audit(
+        db,
+        w,
+        r.user.id,
+        "publish_started",
+        "content",
+        contentId,
+        content.title || "Untitled Post",
+        null,
+        {
+          platform: acc.platform,
+          socialAccountId: acc.id,
+        },
+      );
 
       // 4. Invoke Provider
       const result = await provider.publishText(
@@ -144,10 +220,20 @@ export class ContentController {
           [r.user.id, contentId, w],
         );
 
-        await audit(db, w, r.user.id, "publish_failed", "content", contentId, content.title || "Untitled Post", null, {
-          platform: acc.platform,
-          error: result.error,
-        });
+        await audit(
+          db,
+          w,
+          r.user.id,
+          "publish_failed",
+          "content",
+          contentId,
+          content.title || "Untitled Post",
+          null,
+          {
+            platform: acc.platform,
+            error: result.error,
+          },
+        );
 
         throw new BadRequestException(`Publishing failed: ${result.error}`);
       }
@@ -164,23 +250,49 @@ export class ContentController {
         `INSERT INTO scheduled_posts(id, workspace_id, content_id, account_id, content_version, execute_at, timezone, state, provider_post_id)
          VALUES($1, $2, $3, $4, $5, NOW(), 'UTC', 'PUBLISHED', $6)
          ON CONFLICT (content_id, account_id, content_version) DO UPDATE SET state = 'PUBLISHED', provider_post_id = EXCLUDED.provider_post_id`,
-        [schedId, w, contentId, acc.id, content.version, result.providerPostId || "N/A"],
+        [
+          schedId,
+          w,
+          contentId,
+          acc.id,
+          content.version,
+          result.providerPostId || "N/A",
+        ],
       );
 
       const actualSched = (
-        await db.query("SELECT id FROM scheduled_posts WHERE content_id = $1 AND account_id = $2 AND content_version = $3", [contentId, acc.id, content.version])
+        await db.query(
+          "SELECT id FROM scheduled_posts WHERE content_id = $1 AND account_id = $2 AND content_version = $3",
+          [contentId, acc.id, content.version],
+        )
       ).rows[0];
 
       const pubId = randomUUID();
       await db.query(
         "INSERT INTO published_posts(id, workspace_id, scheduled_post_id, provider_post_id, published_at) VALUES($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
-        [pubId, w, actualSched.id, result.providerPostId || "N/A", result.publishedAt],
+        [
+          pubId,
+          w,
+          actualSched.id,
+          result.providerPostId || "N/A",
+          result.publishedAt,
+        ],
       );
 
-      await audit(db, w, r.user.id, "published_content", "content", contentId, content.title || "Untitled Post", null, {
-        platform: acc.platform,
-        providerPostId: result.providerPostId,
-      });
+      await audit(
+        db,
+        w,
+        r.user.id,
+        "published_content",
+        "content",
+        contentId,
+        content.title || "Untitled Post",
+        null,
+        {
+          platform: acc.platform,
+          providerPostId: result.providerPostId,
+        },
+      );
 
       return {
         success: true,
@@ -195,11 +307,14 @@ export class ContentController {
   @Post() async create(@Req() r: AuthedRequest, @Body() input: unknown) {
     assertPermission(r.workspace.role, "edit");
     const v = inputSchema.parse(input);
+    if (v.platforms.includes("YouTube"))
+      await validateYouTubeInput(pool, r.workspace.id, v.youtube);
+    else if (!v.body) throw new BadRequestException("Post text is required.");
     const id = randomUUID();
     return transaction(async (db) => {
       const p = (
         await db.query(
-          "INSERT INTO content(id,workspace_id,title,body,platforms,variants,created_by,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$7) RETURNING *",
+          "INSERT INTO content(id,workspace_id,title,body,platforms,variants,created_by,updated_by,youtube) VALUES($1,$2,$3,$4,$5,$6,$7,$7,$8) RETURNING *",
           [
             id,
             r.workspace.id,
@@ -208,6 +323,7 @@ export class ContentController {
             JSON.stringify(v.platforms),
             JSON.stringify(v.variants),
             r.user.id,
+            v.youtube ? JSON.stringify(v.youtube) : null,
           ],
         )
       ).rows[0];
@@ -240,6 +356,9 @@ export class ContentController {
       .parse(input);
     return transaction(async (db) => {
       const old = await locked(db, id, r.workspace.id);
+      if (v.platforms.includes("YouTube"))
+        await validateYouTubeInput(db, r.workspace.id, v.youtube);
+      else if (!v.body) throw new BadRequestException("Post text is required.");
       assertEditable(old.status);
       if (old.version !== v.version)
         throw new ConflictException(
@@ -247,7 +366,7 @@ export class ContentController {
         );
       const p = (
         await db.query(
-          "UPDATE content SET title=$3,body=$4,platforms=$5,variants=$6,version=version+1,status='DRAFT',approved_by=NULL,updated_by=$7,updated_at=now() WHERE id=$1 AND workspace_id=$2 RETURNING *",
+          "UPDATE content SET title=$3,body=$4,platforms=$5,variants=$6,version=version+1,status='DRAFT',approved_by=NULL,updated_by=$7,youtube=$8,updated_at=now() WHERE id=$1 AND workspace_id=$2 RETURNING *",
           [
             id,
             r.workspace.id,
@@ -256,6 +375,7 @@ export class ContentController {
             JSON.stringify(v.platforms),
             JSON.stringify(v.variants),
             r.user.id,
+            v.youtube ? JSON.stringify(v.youtube) : null,
           ],
         )
       ).rows[0];
@@ -340,19 +460,21 @@ export class ContentController {
         ).rows[0];
         validateSchedule(p.status, ws.require_approval, at);
         for (const platform of p.platforms as string[]) {
-          if (!["LinkedIn", "Telegram"].includes(platform))
+          if (!["LinkedIn", "Telegram", "YouTube"].includes(platform))
             throw new BadRequestException(
               `${platform} publishing is not available in this MVP.`,
             );
           const body = p.variants[platform] || p.body;
           const max = platform === "Telegram" ? 4096 : 3000;
-          if (body.length > max)
+          if (platform === "YouTube")
+            await validateYouTubeInput(db, r.workspace.id, p.youtube);
+          if (platform !== "YouTube" && body.length > max)
             throw new BadRequestException(
               `${platform} text must be no longer than ${max} characters.`,
             );
           const account = (
             await db.query(
-              "SELECT a.id FROM social_accounts a JOIN social_account_tokens t ON t.account_id=a.id WHERE a.workspace_id=$1 AND a.platform=$2 AND a.state='Connected' AND (t.expires_at IS NULL OR t.expires_at>now()) FOR SHARE OF a",
+              "SELECT a.id FROM social_accounts a JOIN social_account_tokens t ON t.account_id=a.id WHERE a.workspace_id=$1 AND lower(a.platform)=lower($2) AND lower(a.state)='connected' AND (t.expires_at IS NULL OR t.expires_at>now() OR (lower(a.platform)='youtube' AND t.refresh_ciphertext IS NOT NULL)) FOR SHARE OF a",
               [r.workspace.id, platform],
             )
           ).rows[0];

@@ -1,3 +1,4 @@
+import { createReadStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
@@ -13,12 +14,27 @@ export class LocalStorageProvider implements ObjectStorageProvider {
   private baseDir: string;
 
   constructor(baseDir?: string) {
-    this.baseDir = baseDir || process.env.STORAGE_LOCAL_DIR || path.resolve(process.cwd(), "uploads");
+    this.baseDir =
+      baseDir ||
+      process.env.STORAGE_LOCAL_DIR ||
+      path.resolve(process.cwd(), "uploads");
   }
 
   private getFilePath(bucket: string, objectKey: string): string {
-    const safeKey = objectKey.replace(/\.\./g, "_");
-    return path.join(this.baseDir, bucket, safeKey);
+    const root = path.resolve(this.baseDir);
+    const target = path.resolve(root, bucket, objectKey);
+    if (
+      !target.startsWith(root + path.sep) ||
+      !/^[a-zA-Z0-9_-]+$/.test(bucket) ||
+      objectKey.includes("..") ||
+      objectKey.includes("\\")
+    )
+      throw new Error("Invalid storage path");
+    return target;
+  }
+
+  async read(bucket: string, objectKey: string) {
+    return createReadStream(this.getFilePath(bucket, objectKey));
   }
 
   async upload(input: UploadObjectInput): Promise<StoredObject> {
@@ -53,7 +69,10 @@ export class LocalStorageProvider implements ObjectStorageProvider {
     }
   }
 
-  async getMetadata(bucket: string, objectKey: string): Promise<ObjectMetadata> {
+  async getMetadata(
+    bucket: string,
+    objectKey: string,
+  ): Promise<ObjectMetadata> {
     const targetPath = this.getFilePath(bucket, objectKey);
     const stat = await fs.stat(targetPath);
     const ext = path.extname(objectKey).toLowerCase();

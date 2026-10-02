@@ -1,10 +1,5 @@
 export type MediaAssetType =
-  | "DOCUMENT"
-  | "IMAGE"
-  | "VIDEO"
-  | "AUDIO"
-  | "THUMBNAIL"
-  | "GENERATED_ASSET";
+  "DOCUMENT" | "IMAGE" | "VIDEO" | "AUDIO" | "THUMBNAIL" | "GENERATED_ASSET";
 
 export interface UploadObjectInput {
   bucket: string;
@@ -41,6 +36,10 @@ export interface ObjectMetadata {
 }
 
 export interface ObjectStorageProvider {
+  read(
+    bucket: string,
+    objectKey: string,
+  ): Promise<import("node:stream").Readable>;
   upload(input: UploadObjectInput): Promise<StoredObject>;
   delete(bucket: string, objectKey: string): Promise<void>;
   exists(bucket: string, objectKey: string): Promise<boolean>;

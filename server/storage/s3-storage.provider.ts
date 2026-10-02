@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import {
   S3Client,
   PutObjectCommand,
@@ -38,6 +39,14 @@ export class S3StorageProvider implements ObjectStorageProvider {
     });
   }
 
+  async read(bucket: string, objectKey: string) {
+    const response = await this.client.send(
+      new GetObjectCommand({ Bucket: bucket, Key: objectKey }),
+    );
+    if (!response.Body) throw new Error("Media object not found");
+    return response.Body as Readable;
+  }
+
   async upload(input: UploadObjectInput): Promise<StoredObject> {
     const command = new PutObjectCommand({
       Bucket: input.bucket,
@@ -73,7 +82,10 @@ export class S3StorageProvider implements ObjectStorageProvider {
     }
   }
 
-  async getMetadata(bucket: string, objectKey: string): Promise<ObjectMetadata> {
+  async getMetadata(
+    bucket: string,
+    objectKey: string,
+  ): Promise<ObjectMetadata> {
     const command = new HeadObjectCommand({
       Bucket: bucket,
       Key: objectKey,
@@ -83,7 +95,9 @@ export class S3StorageProvider implements ObjectStorageProvider {
     return {
       sizeBytes: Number(response.ContentLength || 0),
       mimeType: response.ContentType || "application/octet-stream",
-      lastModified: response.LastModified ? new Date(response.LastModified) : undefined,
+      lastModified: response.LastModified
+        ? new Date(response.LastModified)
+        : undefined,
       etag: response.ETag || undefined,
     };
   }

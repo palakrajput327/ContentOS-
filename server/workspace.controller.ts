@@ -49,6 +49,7 @@ export function serializePost(p: Record<string, any>) {
     title: p.title,
     body: p.body,
     variants: p.variants,
+    youtube: p.youtube,
     platforms: p.platforms,
     status: p.status,
     version: p.version,
@@ -273,7 +274,9 @@ export class WorkspaceController {
   ) {
     assertPermission(r.workspace.role, "manage");
     if (r.user.id === targetUserId) {
-      throw new BadRequestException("You cannot remove yourself from the workspace.");
+      throw new BadRequestException(
+        "You cannot remove yourself from the workspace.",
+      );
     }
 
     return transaction(async (db) => {
