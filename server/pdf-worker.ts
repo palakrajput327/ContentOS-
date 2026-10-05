@@ -2,86 +2,117 @@ import { Worker } from "bullmq";
 import { randomUUID } from "node:crypto";
 import { pool, transaction, audit } from "./db.js";
 import { redis } from "./queues.js";
-import { S3StorageProvider } from "./storage/s3-storage.provider.js";
-import { extractPDFPages } from "./documents/extraction/pdf-extractor.js";
+import { getStorageProvider } from "./storage/storage.factory.js";
+import { extractPDFPages, removeRepeatingWatermarks } from "./documents/extraction/pdf-extractor.js";
+import { normalizeText } from "./documents/extraction/text-normalizer.js";
 import { chunkDocumentPages } from "./documents/chunking/document-chunker.js";
-import { detectScannedPDF, StubOcrProvider } from "./documents/ocr/ocr.provider.js";
+import { detectScannedPDF, TesseractOcrProvider } from "./documents/ocr/ocr.provider.js";
 import { ExtractionJobPayload } from "./documents/documents.types.js";
+import { KnowledgeService } from "./knowledge/knowledge.service.js";
 
-function getStorageProvider(): { provider: S3StorageProvider; bucket: string } {
-  const endpoint = process.env.STORAGE_ENDPOINT || "http://127.0.0.1:9000";
-  const region = process.env.STORAGE_REGION || "us-east-1";
-  const bucket = process.env.STORAGE_BUCKET || "contentos-media";
-  const accessKeyId = process.env.STORAGE_ACCESS_KEY || "contentos";
-  const secretAccessKey = process.env.STORAGE_SECRET_KEY || "local-minio-dev-only";
-  const forcePathStyle = process.env.STORAGE_FORCE_PATH_STYLE !== "false";
+const knowledgeService = new KnowledgeService();
 
-  return {
-    provider: new S3StorageProvider({
-      endpoint,
-      region,
-      accessKeyId,
-      secretAccessKey,
-      forcePathStyle,
-    }),
-    bucket,
-  };
-}
+export async function processPDFDocument(
+  documentId: string,
+  workspaceId: string,
+  options?: { force?: boolean },
+) {
+  console.log(`[PDF Worker] Starting extraction for document ${documentId} (workspace: ${workspaceId})`);
 
-export const pdfWorker = new Worker<ExtractionJobPayload>(
-  "pdf-processing",
-  async (job) => {
-    const { documentId, workspaceId } = job.data;
-    console.log(`[PDF Worker] Starting extraction for document ${documentId} (workspace: ${workspaceId})`);
+  // 1. Fetch document and media asset details
+  const docRes = await pool.query(
+    `SELECT d.*, m.bucket, m.object_key, m.size_bytes
+     FROM documents d
+     JOIN media_assets m ON m.id = d.media_asset_id
+     WHERE d.id = $1 AND d.workspace_id = $2`,
+    [documentId, workspaceId],
+  );
 
-    // 1. Fetch document and media asset details
-    const docRes = await pool.query(
-      `SELECT d.*, m.bucket, m.object_key, m.size_bytes
-       FROM documents d
-       JOIN media_assets m ON m.id = d.media_asset_id
-       WHERE d.id = $1 AND d.workspace_id = $2`,
-      [documentId, workspaceId],
-    );
+  if (!docRes.rowCount) {
+    throw new Error(`Document ${documentId} not found in workspace ${workspaceId}`);
+  }
 
-    if (!docRes.rowCount) {
-      throw new Error(`Document ${documentId} not found in workspace ${workspaceId}`);
-    }
+  const doc = docRes.rows[0];
 
-    const doc = docRes.rows[0];
+  // Atomic check-and-lock: Only one worker/runner can process this document at a time
+  const lock = options?.force
+    ? await pool.query(
+        `UPDATE documents
+         SET status = 'PROCESSING', processing_started_at = NOW()
+         WHERE id = $1 AND workspace_id = $2
+         RETURNING id`,
+        [documentId, workspaceId],
+      )
+    : await pool.query(
+        `UPDATE documents
+         SET status = 'PROCESSING', processing_started_at = NOW()
+         WHERE id = $1 AND workspace_id = $2
+           AND (status IN ('QUEUED', 'FAILED') OR (status IN ('PROCESSING', 'CHUNKING', 'EXTRACTING') AND (processing_started_at IS NULL OR processing_started_at < NOW() - INTERVAL '25 seconds')))
+         RETURNING id`,
+        [documentId, workspaceId],
+      );
+  if (!lock.rowCount) {
+    console.log(`[PDF Worker] Document ${documentId} is already being processed or finished. Skipping duplicate run.`);
+    return { pageCount: doc.page_count || 0, chunkCount: 0 };
+  }
 
-    // Mark as PROCESSING
-    await pool.query(
-      "UPDATE documents SET status = 'PROCESSING', processing_started_at = NOW() WHERE id = $1",
-      [documentId],
-    );
+  try {
+    // 2. Fetch object from Object Storage (Direct stream if local, presigned fetch if S3)
+    const { provider, bucket } = getStorageProvider();
+    let pdfBuffer: Buffer;
 
-    try {
-      // 2. Fetch object from Object Storage
-      const { provider } = getStorageProvider();
-      const signedDownloadUrl = await provider.getSignedDownloadUrl(doc.bucket, doc.object_key, 300);
-
+    if (typeof (provider as any).read === "function") {
+      const stream = await (provider as any).read(doc.bucket || bucket, doc.object_key);
+      const bufChunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        bufChunks.push(Buffer.from(chunk));
+      }
+      pdfBuffer = Buffer.concat(bufChunks);
+    } else {
+      const signedDownloadUrl = await provider.getSignedDownloadUrl(
+        doc.bucket || bucket,
+        doc.object_key,
+        300,
+      );
       const downloadRes = await fetch(signedDownloadUrl);
       if (!downloadRes.ok) {
         throw new Error(`Failed to download PDF object from storage (${downloadRes.status})`);
       }
-
       const arrayBuf = await downloadRes.arrayBuffer();
-      const pdfBuffer = Buffer.from(arrayBuf);
+      pdfBuffer = Buffer.from(arrayBuf);
+    }
 
-      // 3. Extract Pages
-      await pool.query("UPDATE documents SET status = 'EXTRACTING' WHERE id = $1", [documentId]);
-      const { pageCount, pages } = await extractPDFPages(pdfBuffer);
+    // 3. Extract Pages
+    await pool.query("UPDATE documents SET status = 'EXTRACTING' WHERE id = $1", [documentId]);
+    const { pageCount, pages } = await extractPDFPages(pdfBuffer);
 
       // 4. OCR Detection & Handling
       const isScanned = detectScannedPDF(pages);
       let ocrUsed = false;
 
       if (isScanned) {
-        const ocrProvider = new StubOcrProvider();
-        if (!ocrProvider.isAvailable()) {
-          console.warn(`[PDF Worker] Document ${documentId} appears to be scanned/OCR required, but OCR is disabled.`);
-        } else {
-          ocrUsed = true;
+        console.log(`[PDF Worker] Document ${documentId} is scanned/image-based. Running OCR extraction...`);
+        try {
+          const ocrProvider = new TesseractOcrProvider();
+          const maxOcrPages = Math.min(pageCount, Number(process.env.OCR_MAX_PAGES) || 10);
+          const ocrResults = await ocrProvider.extractFromPDF(pdfBuffer, maxOcrPages, pageCount);
+          if (ocrResults.size > 0) {
+            ocrUsed = true;
+            for (const p of pages) {
+              if (ocrResults.has(p.pageNumber)) {
+                const text = ocrResults.get(p.pageNumber)!;
+                p.rawText = text;
+                p.cleanText = normalizeText(text);
+                p.characterCount = p.cleanText.length;
+                p.ocrUsed = true;
+                p.extractionMethod = "tesseract-ocr";
+              }
+            }
+            removeRepeatingWatermarks(pages);
+            console.log(`[PDF Worker] OCR populated text for ${ocrResults.size} pages.`);
+          }
+        } catch (ocrErr: any) {
+          console.warn(`[PDF Worker] OCR extraction warning:`, ocrErr?.message || ocrErr);
         }
       }
 
@@ -90,21 +121,35 @@ export const pdfWorker = new Worker<ExtractionJobPayload>(
       const chunks = chunkDocumentPages(pages);
 
       // 6. Idempotent Database Transaction (replace previous pages & chunks)
+      const sanitize = (text: string | null | undefined) => (text ? text.replace(/\0/g, "") : "");
+
       await transaction(async (db) => {
+        const docStillPresent = await db.query("SELECT id FROM documents WHERE id = $1", [documentId]);
+        if (!docStillPresent.rowCount) {
+          console.log(`[PDF Worker] Document ${documentId} was removed. Cancelling insertion.`);
+          return;
+        }
+
         await db.query("DELETE FROM document_pages WHERE document_id = $1", [documentId]);
         await db.query("DELETE FROM document_chunks WHERE document_id = $1", [documentId]);
 
         for (const p of pages) {
           await db.query(
             `INSERT INTO document_pages(id, document_id, workspace_id, page_number, raw_text, clean_text, extraction_method, ocr_used, character_count)
-             VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+             VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT (document_id, page_number) DO UPDATE SET
+               raw_text = EXCLUDED.raw_text,
+               clean_text = EXCLUDED.clean_text,
+               extraction_method = EXCLUDED.extraction_method,
+               ocr_used = EXCLUDED.ocr_used,
+               character_count = EXCLUDED.character_count`,
             [
               randomUUID(),
               documentId,
               workspaceId,
               p.pageNumber,
-              p.rawText,
-              p.cleanText,
+              sanitize(p.rawText),
+              sanitize(p.cleanText),
               p.extractionMethod,
               ocrUsed,
               p.characterCount,
@@ -115,7 +160,14 @@ export const pdfWorker = new Worker<ExtractionJobPayload>(
         for (const c of chunks) {
           await db.query(
             `INSERT INTO document_chunks(id, document_id, workspace_id, chunk_index, page_start, page_end, content, character_count, token_count, content_hash)
-             VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+             VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (document_id, chunk_index) DO UPDATE SET
+               page_start = EXCLUDED.page_start,
+               page_end = EXCLUDED.page_end,
+               content = EXCLUDED.content,
+               character_count = EXCLUDED.character_count,
+               token_count = EXCLUDED.token_count,
+               content_hash = EXCLUDED.content_hash`,
             [
               randomUUID(),
               documentId,
@@ -123,7 +175,7 @@ export const pdfWorker = new Worker<ExtractionJobPayload>(
               c.chunkIndex,
               c.pageStart,
               c.pageEnd,
-              c.content,
+              sanitize(c.content),
               c.characterCount,
               c.tokenCount,
               c.contentHash,
@@ -152,6 +204,31 @@ export const pdfWorker = new Worker<ExtractionJobPayload>(
       });
 
       console.log(`[PDF Worker] Extraction completed successfully for ${documentId}: ${pageCount} pages, ${chunks.length} chunks.`);
+
+      // 7. Auto-Extract Knowledge & Facts immediately
+      try {
+        const generationId = randomUUID();
+        await pool.query(
+          `INSERT INTO ai_generations(
+            id, workspace_id, actor_id, provider, generation_type, status, input, output
+          ) VALUES ($1, $2, $3, $4, 'DOCUMENT_KNOWLEDGE', 'QUEUED', $5, '{}')`,
+          [
+            generationId,
+            workspaceId,
+            doc.created_by,
+            process.env.LLM_PROVIDER || "groq",
+            JSON.stringify({ documentId, autoTriggered: true }),
+          ],
+        );
+
+        console.log(`[PDF Worker] Auto-triggering knowledge extraction for document ${documentId}...`);
+        await knowledgeService.processKnowledgeExtraction(generationId, documentId, workspaceId);
+        console.log(`[PDF Worker] Knowledge extraction completed for document ${documentId}`);
+      } catch (kErr: any) {
+        console.warn(`[PDF Worker] Auto knowledge extraction deferred:`, kErr?.message || kErr);
+      }
+
+      return { pageCount, chunkCount: chunks.length };
     } catch (err: any) {
       console.error(`[PDF Worker] Extraction failed for document ${documentId}:`, err);
       const errMsg = err?.message || "PDF processing failed";
@@ -177,10 +254,17 @@ export const pdfWorker = new Worker<ExtractionJobPayload>(
 
       throw err;
     }
+}
+
+export const pdfWorker = new Worker<ExtractionJobPayload>(
+  "pdf-processing",
+  async (job) => {
+    const { documentId, workspaceId } = job.data;
+    return processPDFDocument(documentId, workspaceId);
   },
   {
     connection: redis,
-    concurrency: Number(process.env.PDF_WORKER_CONCURRENCY) || 2,
+    concurrency: Number(process.env.PDF_WORKER_CONCURRENCY) || 4,
   },
 );
 

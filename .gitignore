@@ -44,3 +44,7 @@ Thumbs.db
 
 # Local media files
 uploads/
+
+# Scratch & OCR cache
+scratch/
+*.traineddata

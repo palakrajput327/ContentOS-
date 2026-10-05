@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Delete,
   Req,
   NotFoundException,
   BadRequestException,
@@ -15,6 +16,9 @@ import { pool, transaction, audit } from "../db.js";
 import { WorkspaceRequired, assertPermission, type AuthedRequest } from "../security.js";
 import { Queue } from "bullmq";
 import { redis } from "../queues.js";
+import { KnowledgeService } from "./knowledge.service.js";
+
+const knowledgeService = new KnowledgeService();
 
 const contentGenQueue = new Queue("content-generation", {
   connection: redis,
@@ -31,17 +35,17 @@ export const updateKnowledgeStatusSchema = z.object({
   value: z.any().optional(),
 });
 
-@Controller()
+@Controller("documents")
 export class KnowledgeController {
   @WorkspaceRequired()
-  @Post("api/v1/documents/:documentId/knowledge/extract")
+  @Post(":documentId/knowledge/extract")
   async triggerExtraction(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
     assertPermission(r.workspace.role, "edit");
     const w = r.workspace.id;
 
     // Verify document exists and is READY
     const docRes = await pool.query(
-      "SELECT id, original_filename, status FROM documents WHERE id = $1 AND workspace_id = $2",
+      "SELECT id, original_filename, status, page_count FROM documents WHERE id = $1 AND workspace_id = $2",
       [documentId, w],
     );
 
@@ -50,22 +54,50 @@ export class KnowledgeController {
     }
 
     const doc = docRes.rows[0];
-    if (doc.status !== "READY") {
-      throw new BadRequestException(`Document must be in READY status before knowledge extraction (current: ${doc.status}).`);
+    if (doc.status === "QUEUED" || doc.status === "PROCESSING" || doc.status === "EXTRACTING" || doc.status === "CHUNKING") {
+      // Proactively start PDF extraction in case worker had queue delay
+      import("../pdf-worker.js")
+        .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
+        .catch((err) => console.warn(`[Knowledge Trigger PDF] Warning for ${documentId}:`, err?.message || err));
+
+      return {
+        generationId: "in_progress",
+        documentId,
+        status: doc.status,
+        message: "Document text extraction is currently in progress. Knowledge extraction will run automatically upon completion.",
+      };
     }
+    if (doc.status !== "READY") {
+      throw new BadRequestException(`Document status is ${doc.status}. Please wait or re-process the document.`);
+    }
+
+    // Verify document has chunks; if not (or if an old run produced <= 2 chunks on a multi-page PDF), re-extract chunks
+    const chunkCheck = await pool.query(
+      "SELECT COUNT(*) FROM document_chunks WHERE document_id = $1 AND workspace_id = $2",
+      [documentId, w],
+    );
+    const chunkCount = parseInt(chunkCheck.rows[0]?.count || "0", 10);
+    if (chunkCount === 0 || (doc.page_count > 5 && chunkCount <= 2)) {
+      console.log(`[KnowledgeController] Document ${documentId} (pages: ${doc.page_count}) has ${chunkCount} chunks. Running processPDFDocument...`);
+      const { processPDFDocument } = await import("../pdf-worker.js");
+      await processPDFDocument(documentId, w, { force: true });
+    }
+
+    // Clean up previously extracted knowledge so new comprehensive set populates cleanly
+    await pool.query("DELETE FROM document_knowledge WHERE document_id = $1 AND status = 'EXTRACTED'", [documentId]);
 
     const generationId = randomUUID();
 
-    return transaction(async (db) => {
+    const result = await transaction(async (db) => {
       await db.query(
         `INSERT INTO ai_generations(
-          id, workspace_id, actor_id, provider, generation_type, status, input
-        ) VALUES ($1, $2, $3, $4, 'DOCUMENT_KNOWLEDGE', 'QUEUED', $5)`,
+          id, workspace_id, actor_id, provider, generation_type, status, input, output
+        ) VALUES ($1, $2, $3, $4, 'DOCUMENT_KNOWLEDGE', 'QUEUED', $5, '{}')`,
         [
           generationId,
           w,
           r.user.id,
-          process.env.LLM_PROVIDER || "openai-compatible",
+          process.env.LLM_PROVIDER || "groq",
           JSON.stringify({ documentId }),
         ],
       );
@@ -98,10 +130,17 @@ export class KnowledgeController {
         status: "QUEUED",
       };
     });
+
+    // Proactively start knowledge extraction immediately
+    knowledgeService
+      .processKnowledgeExtraction(generationId, documentId, w)
+      .catch((err) => console.warn(`[Knowledge Direct Trigger] For ${documentId}:`, err?.message || err));
+
+    return result;
   }
 
   @WorkspaceRequired()
-  @Get("api/v1/documents/:documentId/knowledge")
+  @Get(":documentId/knowledge")
   async listDocumentKnowledge(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
     const w = r.workspace.id;
 
@@ -126,7 +165,7 @@ export class KnowledgeController {
   }
 
   @WorkspaceRequired()
-  @Get("api/v1/documents/:documentId/knowledge/:knowledgeId")
+  @Get(":documentId/knowledge/:knowledgeId")
   async getKnowledgeItem(
     @Req() r: AuthedRequest,
     @Param("documentId") documentId: string,
@@ -150,7 +189,7 @@ export class KnowledgeController {
   }
 
   @WorkspaceRequired()
-  @Get("api/v1/documents/:documentId/knowledge/:knowledgeId/sources")
+  @Get(":documentId/knowledge/:knowledgeId/sources")
   async getKnowledgeSources(
     @Req() r: AuthedRequest,
     @Param("documentId") documentId: string,
@@ -182,7 +221,7 @@ export class KnowledgeController {
   }
 
   @WorkspaceRequired()
-  @Get("api/v1/ai/generations/:generationId")
+  @Get("generations/:generationId")
   async getAIGeneration(@Req() r: AuthedRequest, @Param("generationId") generationId: string) {
     const w = r.workspace.id;
 
@@ -202,7 +241,7 @@ export class KnowledgeController {
   }
 
   @WorkspaceRequired()
-  @Patch("api/v1/documents/:documentId/knowledge/:knowledgeId")
+  @Patch(":documentId/knowledge/:knowledgeId")
   async updateKnowledgeItem(
     @Req() r: AuthedRequest,
     @Param("documentId") documentId: string,
@@ -250,5 +289,34 @@ export class KnowledgeController {
 
       return { item: updateRes.rows[0] };
     });
+  }
+
+  @WorkspaceRequired()
+  @Delete(":documentId/knowledge/:knowledgeId")
+  async deleteKnowledgeItem(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+    @Param("knowledgeId") knowledgeId: string,
+  ) {
+    const w = r.workspace.id;
+    await pool.query(
+      "DELETE FROM document_knowledge WHERE id = $1 AND document_id = $2 AND workspace_id = $3",
+      [knowledgeId, documentId, w],
+    );
+    return { ok: true, deletedId: knowledgeId };
+  }
+
+  @WorkspaceRequired()
+  @Delete(":documentId/knowledge")
+  async clearAllKnowledge(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+  ) {
+    const w = r.workspace.id;
+    await pool.query(
+      "DELETE FROM document_knowledge WHERE document_id = $1 AND workspace_id = $2",
+      [documentId, w],
+    );
+    return { ok: true };
   }
 }

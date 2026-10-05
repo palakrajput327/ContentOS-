@@ -10,6 +10,8 @@ import {
 } from "./youtube.service.js";
 import { createPublishPlan } from "./publish-planner.js";
 import type { Platform } from "./platform-capabilities.js";
+import { pdfWorker } from "./pdf-worker.js";
+import { aiWorker } from "./ai-worker.js";
 
 async function aggregate(
   db: DB,
@@ -310,7 +312,7 @@ const maintenance = new Worker(
   },
   { connection: redis, concurrency: 1 },
 );
-for (const w of [worker, maintenance]) {
+for (const w of [worker, maintenance, pdfWorker, aiWorker]) {
   w.on("failed", (j) =>
     console.error(
       JSON.stringify({ event: "queue_failed", queue: w.name, jobId: j?.id }),
@@ -321,10 +323,14 @@ for (const w of [worker, maintenance]) {
   );
 }
 async function shutdown() {
-  await maintenance.close();
-  await worker.close();
-  await maintenanceQueue.close();
-  await publishingQueue.close();
+  await Promise.allSettled([
+    maintenance.close(),
+    worker.close(),
+    pdfWorker.close(),
+    aiWorker.close(),
+    maintenanceQueue.close(),
+    publishingQueue.close(),
+  ]);
   await redis.quit();
   await pool.end();
 }
@@ -333,6 +339,11 @@ process.on("SIGINT", () => void shutdown());
 console.log(
   JSON.stringify({
     event: "workers_ready",
-    queues: ["social-publishing", "scheduler-maintenance"],
+    queues: [
+      "social-publishing",
+      "scheduler-maintenance",
+      "pdf-processing",
+      "content-generation",
+    ],
   }),
 );

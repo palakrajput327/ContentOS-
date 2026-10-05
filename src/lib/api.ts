@@ -117,7 +117,7 @@ export interface DocItem {
   media_asset_id?: string;
   original_filename: string;
   mime_type: string;
-  status: "QUEUED" | "PROCESSING" | "READY" | "FAILED";
+  status: "QUEUED" | "PROCESSING" | "EXTRACTING" | "CHUNKING" | "READY" | "FAILED";
   page_count?: number;
   failure_code?: string;
   failure_message?: string;
@@ -192,6 +192,48 @@ export const documentsApi = {
       { mediaAssetId: presign.assetId },
     );
     return docRes;
+  },
+
+  uploadBatchPdfs: async (
+    files: File[],
+    onProgress?: (completed: number, total: number, currentName: string) => void,
+  ): Promise<{ documentId: string; status: string; filename: string }[]> => {
+    const results: { documentId: string; status: string; filename: string }[] = [];
+    let completedCount = 0;
+
+    const queue = [...files];
+    const worker = async () => {
+      while (queue.length > 0) {
+        const file = queue.shift();
+        if (!file) break;
+        try {
+          const res = await documentsApi.uploadPdf(file);
+          results.push(res);
+        } catch (err: any) {
+          console.error(`Failed uploading ${file.name}:`, err);
+        } finally {
+          completedCount++;
+          if (onProgress) {
+            onProgress(completedCount, files.length, file.name);
+          }
+        }
+      }
+    };
+
+    const concurrency = Math.min(files.length, 4);
+    const workers = Array.from({ length: concurrency }, () => worker());
+    await Promise.all(workers);
+
+    return results;
+  },
+
+  fastTrack: async (
+    id: string,
+  ): Promise<{ documentId: string; status: string; pageCount?: number; chunkCount?: number }> => {
+    if (useSession.getState().demo) {
+      return { documentId: id, status: "READY", pageCount: 12 };
+    }
+    return request(`/documents/${id}/fast-track`, "POST");
   },
 
   list: async (): Promise<DocItem[]> => {
@@ -322,6 +364,16 @@ export const documentsApi = {
       return { success: true, documentId: id };
     }
     return request(`/documents/${id}`, "DELETE");
+  },
+
+  deleteKnowledge: async (documentId: string, knowledgeId: string): Promise<void> => {
+    if (useSession.getState().demo) return;
+    await request(`/documents/${documentId}/knowledge/${knowledgeId}`, "DELETE");
+  },
+
+  clearAllKnowledge: async (documentId: string): Promise<void> => {
+    if (useSession.getState().demo) return;
+    await request(`/documents/${documentId}/knowledge`, "DELETE");
   },
 };
 

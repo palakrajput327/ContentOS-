@@ -2,10 +2,14 @@ import { Pool, type PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 15,
-  connectionTimeoutMillis: 5000,
-  statement_timeout: 15000,
-});
+  max: 20,
+  connectionTimeoutMillis: 30000,
+  idleTimeoutMillis: 60000,
+  ssl: {
+    rejectUnauthorized: false,
+    servername: "ep-odd-wind-b309rvnv.c-4.ap-southeast-1.aws.neon.tech",
+  },
+} as any);
 export type DB = Pick<PoolClient, "query">;
 export async function transaction<T>(fn: (db: DB) => Promise<T>): Promise<T> {
   const client = await pool.connect();

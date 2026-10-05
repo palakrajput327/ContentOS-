@@ -15,22 +15,93 @@ export function chunkDocumentPages(
   pages: DocumentPageResult[],
   options?: ChunkerOptions,
 ): DocumentChunkResult[] {
-  const targetTokens = options?.targetTokens || Number(process.env.PDF_CHUNK_TARGET_TOKENS) || 300;
-  const overlapTokens = options?.overlapTokens || Number(process.env.PDF_CHUNK_OVERLAP_TOKENS) || 50;
+  const isOcr = pages.some((p) => p.ocrUsed);
+  const targetTokens = options?.targetTokens || Number(process.env.PDF_CHUNK_TARGET_TOKENS) || (isOcr ? 100 : 300);
+  const overlapTokens = options?.overlapTokens || Number(process.env.PDF_CHUNK_OVERLAP_TOKENS) || (isOcr ? 20 : 50);
 
   const targetChars = targetTokens * 4;
   const overlapChars = overlapTokens * 4;
 
   const chunks: DocumentChunkResult[] = [];
+  let chunkIndex = 0;
+
+  // Filter pages that actually have content
+  const contentPages = pages.filter((p) => p.cleanText && p.cleanText.trim().length > 0);
+
+  if (isOcr) {
+    // For OCR/scanned notes, preserve page boundary isolation so each sampled page creates its own targeted chunk(s)
+    for (const page of contentPages) {
+      const text = page.cleanText.trim();
+      if (text.length < 15) continue;
+
+      if (text.length <= targetChars * 1.5) {
+        const contentHash = createHash("sha256").update(text).digest("hex");
+        chunks.push({
+          chunkIndex: chunkIndex++,
+          pageStart: page.pageNumber,
+          pageEnd: page.pageNumber,
+          content: text,
+          characterCount: text.length,
+          tokenCount: estimateTokens(text),
+          contentHash,
+        });
+      } else {
+        const sentences = text.split(/(?<=[.!?\n])\s+/).filter(Boolean);
+        let cur = "";
+        for (const s of sentences) {
+          cur += (cur ? " " : "") + s;
+          if (cur.length >= targetChars) {
+            const trimmed = cur.trim();
+            chunks.push({
+              chunkIndex: chunkIndex++,
+              pageStart: page.pageNumber,
+              pageEnd: page.pageNumber,
+              content: trimmed,
+              characterCount: trimmed.length,
+              tokenCount: estimateTokens(trimmed),
+              contentHash: createHash("sha256").update(trimmed).digest("hex"),
+            });
+            cur = trimmed.substring(Math.max(0, trimmed.length - overlapChars));
+          }
+        }
+        if (cur.trim().length > 0) {
+          const trimmed = cur.trim();
+          chunks.push({
+            chunkIndex: chunkIndex++,
+            pageStart: page.pageNumber,
+            pageEnd: page.pageNumber,
+            content: trimmed,
+            characterCount: trimmed.length,
+            tokenCount: estimateTokens(trimmed),
+            contentHash: createHash("sha256").update(trimmed).digest("hex"),
+          });
+        }
+      }
+    }
+    return chunks;
+  }
+
+  // Standard continuous document chunking
   let currentChunkText = "";
   let currentStartPage = 0;
   let currentEndPage = 0;
-  let chunkIndex = 0;
+  let lastSeenPage = -1;
 
-  for (const page of pages) {
-    if (!page.cleanText || page.cleanText.trim().length === 0) {
-      continue;
+  for (const page of contentPages) {
+    if (lastSeenPage !== -1 && page.pageNumber > lastSeenPage + 1 && currentChunkText.trim().length > 0) {
+      const content = currentChunkText.trim();
+      chunks.push({
+        chunkIndex: chunkIndex++,
+        pageStart: currentStartPage,
+        pageEnd: currentEndPage,
+        content,
+        characterCount: content.length,
+        tokenCount: estimateTokens(content),
+        contentHash: createHash("sha256").update(content).digest("hex"),
+      });
+      currentChunkText = "";
     }
+    lastSeenPage = page.pageNumber;
 
     const sentences = page.cleanText.split(/(?<=[.!?])\s+/);
 
@@ -49,7 +120,7 @@ export function chunkDocumentPages(
         const contentHash = createHash("sha256").update(content).digest("hex");
 
         chunks.push({
-          chunkIndex,
+          chunkIndex: chunkIndex++,
           pageStart: currentStartPage,
           pageEnd: currentEndPage,
           content,
@@ -58,9 +129,6 @@ export function chunkDocumentPages(
           contentHash,
         });
 
-        chunkIndex++;
-
-        // Keep trailing overlap text for continuity
         const overlapText = content.substring(Math.max(0, content.length - overlapChars));
         currentChunkText = overlapText;
         currentStartPage = currentEndPage;
@@ -74,7 +142,7 @@ export function chunkDocumentPages(
     const contentHash = createHash("sha256").update(content).digest("hex");
 
     chunks.push({
-      chunkIndex,
+      chunkIndex: chunkIndex++,
       pageStart: currentStartPage,
       pageEnd: currentEndPage,
       content,

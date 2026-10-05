@@ -64,10 +64,28 @@ export class OpenAICompatibleProvider implements LLMProvider {
         if (!response.ok) {
           const status = response.status;
           const isRetryable = status === 429 || status >= 500;
-          await response.body?.cancel();
+          const errText = await response.text().catch(() => "");
+          console.error(`[LLM Provider Error] ${this.providerName} (${status}):`, errText);
+
+          let suggestedWaitMs = 0;
+          const matchWait = errText.match(/try again in (\d+(?:\.\d+)?)s/i);
+          if (matchWait) {
+            suggestedWaitMs = Math.ceil(parseFloat(matchWait[1]) * 1000) + 1200;
+          }
+
+          if (status === 400) {
+            try {
+              const parsedErr = JSON.parse(errText);
+              if (parsedErr.error?.failed_generation) {
+                let partial = parsedErr.error.failed_generation.trim();
+                if (!partial.endsWith("}")) partial += "]}";
+                return { choices: [{ message: { content: partial } }] };
+              }
+            } catch {}
+          }
 
           const err = new LLMProviderException(
-            `LLM API request failed (${status}).`,
+            `LLM API request failed (${status}): ${errText.slice(0, 120)}`,
             status,
             isRetryable,
           );
@@ -77,6 +95,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
           }
 
           lastError = err;
+          attempt++;
+          const baseBackoff = Math.min(2000 * Math.pow(2, attempt), 15000);
+          const backoffMs = Math.max(suggestedWaitMs, baseBackoff);
+          await new Promise((res) => setTimeout(res, backoffMs));
+          continue;
         } else {
           return await response.json();
         }
@@ -94,11 +117,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
             true,
           );
         }
+        attempt++;
+        const backoffMs = Math.min(2000 * Math.pow(2, attempt), 15000);
+        await new Promise((res) => setTimeout(res, backoffMs));
       }
-
-      attempt++;
-      const backoffMs = Math.min(1000 * Math.pow(2, attempt), 10000);
-      await new Promise((res) => setTimeout(res, backoffMs));
     }
 
     throw lastError || new LLMProviderException("LLM request failed.");
@@ -146,16 +168,20 @@ export class OpenAICompatibleProvider implements LLMProvider {
           },
         ];
 
-    const payload = {
+    const payload: any = {
       model: this.model,
       messages,
       temperature: input.temperature ?? 0.1,
-      max_tokens: input.maxTokens,
+      max_tokens: input.maxTokens ?? 2048,
       response_format: { type: "json_object" },
     };
 
     const res = await this.fetchWithRetry(endpoint, payload);
-    const rawText = res.choices?.[0]?.message?.content || "";
+    const choice = res.choices?.[0];
+    let rawText = choice?.message?.content || "";
+    if (!rawText.trim() && choice?.message?.reasoning) {
+      rawText = choice.message.reasoning;
+    }
 
     let parsedJson: unknown;
     try {
@@ -177,8 +203,36 @@ export class OpenAICompatibleProvider implements LLMProvider {
         }
       }
       if (!parsedJson) {
+        const firstBracket = rawText.indexOf("[");
+        const lastBracket = rawText.lastIndexOf("]");
+        if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+          try {
+            const arr = JSON.parse(rawText.slice(firstBracket, lastBracket + 1));
+            parsedJson = { facts: arr };
+          } catch {}
+        }
+      }
+      if (!parsedJson) {
+        // Salvage parser for partial or truncated facts
+        const firstBrace = rawText.indexOf("{");
+        if (firstBrace !== -1) {
+          const fromBrace = rawText.slice(firstBrace);
+          const lastFactEnd = fromBrace.lastIndexOf("}");
+          if (lastFactEnd !== -1) {
+            const candidate = fromBrace.slice(0, lastFactEnd + 1);
+            for (const suffix of ["", "]}", "}"]) {
+              try {
+                parsedJson = JSON.parse(candidate + suffix);
+                if (parsedJson) break;
+              } catch {}
+            }
+          }
+        }
+      }
+      if (!parsedJson) {
+        console.error(`[${this.providerName}] Failed to parse JSON. Raw text:`, rawText);
         throw new LLMProviderException(
-          "LLM returned invalid non-JSON output in structured mode.",
+          `LLM returned invalid non-JSON output in structured mode: ${rawText.slice(0, 120)}`,
         );
       }
     }

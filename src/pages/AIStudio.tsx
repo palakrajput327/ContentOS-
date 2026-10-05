@@ -35,6 +35,23 @@ import { useSession } from "../lib/session";
 import { PublishPreviewModal } from "../components/PublishPreviewModal";
 import { BatchProgressIndicator } from "../components/BatchProgressIndicator";
 
+function formatExcerpt(text: string | null | undefined): string {
+  if (!text) return "";
+  const clean = text
+    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gi, "")
+    .replace(/\b(?:https?:\/\/|www\.)[^\s/$.?#].[^\s]*/gi, "")
+    .replace(/\b[a-zA-Z0-9-]+\.(?:tk|com|net|org|in|io)\b/gi, "")
+    .replace(/\[Page\s*\d+\]/gi, "")
+    .replace(/[-_=|~]{2,}/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const words = clean.split(/\s+/).filter((w) => w.length >= 3 && /^[a-zA-Z0-9]+$/.test(w));
+  if (words.length < 3) return "";
+
+  return clean.length > 160 ? clean.substring(0, 160) + "..." : clean;
+}
+
 export default function AIStudio() {
   const s = useOutletContext<Snapshot>();
   const nav = useNavigate();
@@ -66,6 +83,11 @@ export default function AIStudio() {
   const [extractingKnowledge, setExtractingKnowledge] = useState(false);
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [loadingKnowledge, setLoadingKnowledge] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{
+    total: number;
+    completed: number;
+    currentName: string;
+  } | null>(null);
 
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
@@ -91,28 +113,47 @@ export default function AIStudio() {
     }
   }, [activeTab]);
 
-  // Poll active document status if QUEUED or PROCESSING
+  // Poll active document status if QUEUED, PROCESSING, EXTRACTING, CHUNKING
   useEffect(() => {
     if (!selectedDocId || activeTab !== "pdf") return;
 
     let timer: NodeJS.Timeout;
+    let isCancelled = false;
+
     const checkDoc = async () => {
       try {
         const doc = await documentsApi.get(selectedDocId);
+        if (isCancelled) return;
+
         setActiveDoc(doc);
+        setDocuments((prev) =>
+          prev.map((d) => (d.id === doc.id ? { ...d, ...doc } : d))
+        );
+
         if (doc.status === "READY") {
           // Load knowledge automatically when document is ready
           fetchKnowledge(selectedDocId);
-        } else if (doc.status === "QUEUED" || doc.status === "PROCESSING") {
-          timer = setTimeout(checkDoc, 3000);
+        } else if (doc.status !== "FAILED") {
+          // Stream knowledge items in real time as they arrive
+          fetchKnowledge(selectedDocId, 0, true);
+          // Keep polling while QUEUED, PROCESSING, EXTRACTING, CHUNKING
+          timer = setTimeout(checkDoc, 1500);
         }
-      } catch (err) {
+      } catch (err: any) {
+        if (err?.message?.includes("404") || err?.status === 404) {
+          setSelectedDocId(null);
+          setActiveDoc(null);
+          return;
+        }
         console.error("Doc status check error:", err);
       }
     };
 
     checkDoc();
-    return () => clearTimeout(timer);
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
   }, [selectedDocId, activeTab]);
 
   async function fetchDocuments() {
@@ -134,17 +175,37 @@ export default function AIStudio() {
     }
   }
 
-  async function fetchKnowledge(docId: string) {
+  async function fetchKnowledge(docId: string, retryCount = 0, silent = false) {
     try {
-      setLoadingKnowledge(true);
+      if (!silent && retryCount === 0 && knowledgeItems.length === 0) setLoadingKnowledge(true);
       const items = await documentsApi.listKnowledge(docId);
-      setKnowledgeItems(items);
-      // Select all confirmed items by default
-      setSelectedKnowledgeIds(items.map((k) => k.id));
+      if (items.length > 0) {
+        setKnowledgeItems(items);
+        setSelectedKnowledgeIds((prev) => {
+          const newIds = items.map((k) => k.id);
+          return Array.from(new Set([...prev, ...newIds]));
+        });
+        setLoadingKnowledge(false);
+        setExtractingKnowledge(false);
+        return;
+      }
+
+      // If document is READY but worker auto-extraction is still finishing in the background
+      if (items.length === 0 && !silent && retryCount < 12) {
+        setTimeout(() => {
+          fetchKnowledge(docId, retryCount + 1, false);
+        }, 1500);
+      } else if (!silent) {
+        setKnowledgeItems([]);
+        setLoadingKnowledge(false);
+        setExtractingKnowledge(false);
+      }
     } catch (err) {
       console.error("Error fetching knowledge:", err);
-    } finally {
-      setLoadingKnowledge(false);
+      if (!silent) {
+        setLoadingKnowledge(false);
+        setExtractingKnowledge(false);
+      }
     }
   }
 
@@ -166,22 +227,50 @@ export default function AIStudio() {
   }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.type !== "application/pdf" && !file.name.endsWith(".pdf")) {
-      toast.error("Please select a PDF file.");
+    const rawFiles = Array.from(e.target.files || []);
+    if (!rawFiles.length) return;
+    const files = rawFiles.filter(
+      (f) =>
+        f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"),
+    );
+    if (!files.length) {
+      toast.error("Please select valid PDF files.");
       return;
     }
 
     try {
       setUploadingPdf(true);
       setError(null);
-      const res = await documentsApi.uploadPdf(file);
-      toast.success(`PDF uploaded: ${file.name}`);
-      setSelectedDocId(res.documentId);
-      await fetchDocuments();
-      if (res.status === "READY") {
-        await fetchKnowledge(res.documentId);
+
+      if (files.length === 1) {
+        const file = files[0];
+        const res = await documentsApi.uploadPdf(file);
+        toast.success(`PDF uploaded: ${file.name}`);
+        setSelectedDocId(res.documentId);
+        await fetchDocuments();
+        if (res.status === "READY") {
+          await fetchKnowledge(res.documentId);
+        }
+      } else {
+        // High-speed parallel batch upload
+        setBatchProgress({
+          total: files.length,
+          completed: 0,
+          currentName: files[0].name,
+        });
+        const uploaded = await documentsApi.uploadBatchPdfs(
+          files,
+          (completed, total, currentName) => {
+            setBatchProgress({ total, completed, currentName });
+          },
+        );
+        toast.success(
+          `Batch upload completed: ${uploaded.length} of ${files.length} PDFs uploaded successfully!`,
+        );
+        if (uploaded.length > 0) {
+          setSelectedDocId(uploaded[0].documentId);
+        }
+        await fetchDocuments();
       }
     } catch (err) {
       const msg = (err as Error).message;
@@ -189,6 +278,35 @@ export default function AIStudio() {
       toast.error(`Upload failed: ${msg}`);
     } finally {
       setUploadingPdf(false);
+      setBatchProgress(null);
+      e.target.value = "";
+    }
+  }
+
+  async function handleFastTrack(docId: string) {
+    try {
+      toast.info("Fast-tracking extraction & knowledge analysis...");
+      const res = await documentsApi.fastTrack(docId);
+      setActiveDoc((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "READY",
+              page_count: res.pageCount ?? prev.page_count,
+            }
+          : null,
+      );
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === docId
+            ? { ...d, status: "READY", page_count: res.pageCount ?? d.page_count }
+            : d,
+        ),
+      );
+      await fetchKnowledge(docId);
+      toast.success("PDF processing & knowledge extraction complete!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to fast-track PDF");
     }
   }
 
@@ -196,19 +314,24 @@ export default function AIStudio() {
     if (!selectedDocId) return;
     try {
       setExtractingKnowledge(true);
+      setLoadingKnowledge(true);
       setError(null);
-      await documentsApi.extractKnowledge(selectedDocId);
-      toast.success("Knowledge extraction started.");
-      // Fetch knowledge items
+      const res = await documentsApi.extractKnowledge(selectedDocId);
+      if (res.status === "PROCESSING" || res.status === "EXTRACTING" || res.status === "CHUNKING") {
+        toast.info("Document is currently extracting text. Knowledge will be extracted as soon as it's ready.");
+      } else {
+        toast.success("Extracting key insights & claims from document...");
+      }
+      // Poll knowledge items
       setTimeout(() => {
-        fetchKnowledge(selectedDocId);
+        fetchKnowledge(selectedDocId, 0);
       }, 1500);
     } catch (err) {
       const msg = (err as Error).message;
       setError(msg);
       toast.error(msg);
-    } finally {
       setExtractingKnowledge(false);
+      setLoadingKnowledge(false);
     }
   }
 
@@ -247,14 +370,15 @@ export default function AIStudio() {
         const knowledgeSummary = selectedItems
           .map(
             (k, idx) =>
-              `Point ${idx + 1} (${k.knowledge_type}): ${typeof k.value === "string" ? k.value : JSON.stringify(k.value)} ${
-                k.source_excerpt ? `[Source: "${k.source_excerpt}" Page ${k.page_start || 1}]` : ""
-              }`
+              `Point ${idx + 1} (${k.knowledge_type}): ${typeof k.value === "string" ? k.value : JSON.stringify(k.value)}`
           )
-          .join("\n");
-        promptTopic = `Generate social media posts based on the following verified PDF knowledge and evidence:\n\nDocument: ${
+          .join("\n\n");
+        promptTopic = `Generate social media posts based on the following verified PDF knowledge:\n\nDocument: ${
           activeDoc?.original_filename || "Attached PDF"
-        }\nTarget Audience: ${audience}\n\nExtracted Knowledge & Evidence:\n${knowledgeSummary}`;
+        }\nTarget Audience: ${audience}\n\nKey Knowledge & Insights:\n${knowledgeSummary}`;
+        if (promptTopic.length > 4000) {
+          promptTopic = promptTopic.slice(0, 4000);
+        }
       } else {
         if (promptTopic.length < 5) {
           throw new Error("Please provide a topic or prompt of at least 5 characters.");
@@ -340,7 +464,7 @@ export default function AIStudio() {
 
       setIsGenerating(true);
       const itemsPayload = selectedItems.map((k, idx) => ({
-        topic: `Knowledge Item ${idx + 1} (${k.knowledge_type}): ${typeof k.value === "string" ? k.value : JSON.stringify(k.value)} ${k.source_excerpt ? `[Source: "${k.source_excerpt}"]` : ""}`,
+        topic: `Knowledge Item ${idx + 1} (${k.knowledge_type}): ${typeof k.value === "string" ? k.value : JSON.stringify(k.value)}`.slice(0, 2000),
         tone,
         goal,
         platforms: selectedPlatforms,
@@ -583,14 +707,45 @@ export default function AIStudio() {
                   }}
                 >
                   <Upload size={32} style={{ color: "#6366f1", marginBottom: "10px" }} />
-                  <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem" }}>Upload PDF Document</h4>
+                  <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem" }}>Upload PDF Document(s)</h4>
                   <p style={{ margin: "0 0 14px", fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-                    Supports PDF documents up to 50MB. Extract structured claims with page citations.
+                    Supports batch uploading multiple PDFs up to 50MB each. Fast parallel extraction with AI evidence.
                   </p>
+                  
+                  {batchProgress && (
+                    <div style={{ margin: "0 auto 14px", maxWidth: "320px", background: "rgba(255,255,255,0.05)", borderRadius: "8px", padding: "10px", border: "1px solid rgba(255,255,255,0.1)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", marginBottom: "6px" }}>
+                        <span style={{ color: "#818cf8", fontWeight: 600 }}>Batch Processing: {batchProgress.completed}/{batchProgress.total}</span>
+                        <span style={{ color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "150px", whiteSpace: "nowrap" }}>
+                          {batchProgress.currentName}
+                        </span>
+                      </div>
+                      <div style={{ height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden" }}>
+                        <div
+                          style={{
+                            height: "100%",
+                            width: `${(batchProgress.completed / batchProgress.total) * 100}%`,
+                            background: "linear-gradient(90deg, #6366f1, #10b981)",
+                            transition: "width 0.3s ease",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
                   <label className="button primary" style={{ cursor: uploadingPdf ? "wait" : "pointer", display: "inline-flex", gap: "8px" }}>
                     <Upload size={15} />
-                    {uploadingPdf ? "Uploading & Initializing..." : "Select PDF File"}
-                    <input type="file" accept="application/pdf" style={{ display: "none" }} disabled={uploadingPdf} onChange={handleFileUpload} />
+                    {uploadingPdf
+                      ? (batchProgress ? `Uploading (${batchProgress.completed}/${batchProgress.total})...` : "Uploading & Initializing...")
+                      : "Select PDF File(s)"}
+                    <input
+                      type="file"
+                      multiple
+                      accept=".pdf,application/pdf"
+                      style={{ display: "none" }}
+                      disabled={uploadingPdf}
+                      onChange={handleFileUpload}
+                    />
                   </label>
                 </div>
 
@@ -648,7 +803,7 @@ export default function AIStudio() {
                             >
                               {doc.status}
                             </span>
-                            {doc.page_count && (
+                            {Boolean(doc.page_count && doc.page_count > 0) && (
                               <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
                                 {doc.page_count} pages
                               </span>
@@ -699,14 +854,20 @@ export default function AIStudio() {
                     </div>
 
                     <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      {activeDoc.status === "READY" ? (
+                      {activeDoc.status === "READY" || activeDoc.status === "FAILED" ? (
                         <Button
                           onClick={handleTriggerKnowledgeExtract}
                           disabled={extractingKnowledge || loadingKnowledge}
-                          style={{ fontSize: "0.85rem", padding: "6px 14px" }}
+                          style={{
+                            fontSize: "0.85rem",
+                            padding: "6px 14px",
+                            background: activeDoc.status === "FAILED" ? "rgba(239, 68, 68, 0.2)" : undefined,
+                            border: activeDoc.status === "FAILED" ? "1px solid rgba(239, 68, 68, 0.4)" : undefined,
+                            color: activeDoc.status === "FAILED" ? "#fca5a5" : undefined,
+                          }}
                         >
                           <RotateCw size={14} className={extractingKnowledge ? "animate-spin" : ""} />
-                          {extractingKnowledge ? "Extracting..." : "Re-extract Knowledge"}
+                          {extractingKnowledge ? "Extracting..." : activeDoc.status === "FAILED" ? "Retry Extraction" : "Re-extract Knowledge"}
                         </Button>
                       ) : (
                         <>
@@ -715,14 +876,7 @@ export default function AIStudio() {
                           </span>
                           <Button
                             variant="secondary"
-                            onClick={() => {
-                              setActiveDoc((prev) => prev ? { ...prev, status: "READY", page_count: prev.page_count || 12 } : null);
-                              setDocuments((prev) =>
-                                prev.map((d) => (d.id === activeDoc.id ? { ...d, status: "READY", page_count: d.page_count || 12 } : d))
-                              );
-                              fetchKnowledge(activeDoc.id);
-                              toast.success("Fast-tracked PDF to READY status!");
-                            }}
+                            onClick={() => handleFastTrack(activeDoc.id)}
                             style={{ fontSize: "0.8rem", padding: "4px 10px", border: "1px solid rgba(16, 185, 129, 0.4)", color: "#34d399", background: "rgba(16, 185, 129, 0.1)" }}
                           >
                             <Sparkles size={14} /> Fast-Track to READY
@@ -761,37 +915,75 @@ export default function AIStudio() {
                     <h3 style={{ fontSize: "1.1rem", fontWeight: 600, margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
                       <Quote size={18} style={{ color: "#34d399" }} />
                       Extracted Knowledge & Evidence ({knowledgeItems.length})
+                      {(activeDoc?.status === "EXTRACTING" || activeDoc?.status === "PROCESSING" || activeDoc?.status === "CHUNKING" || extractingKnowledge) && (
+                        <span style={{ fontSize: "0.75rem", padding: "3px 9px", borderRadius: "12px", background: "rgba(16, 185, 129, 0.15)", color: "#34d399", border: "1px solid rgba(16, 185, 129, 0.3)", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                          <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#10b981", display: "inline-block", boxShadow: "0 0 8px #10b981" }} />
+                          Live Streaming Facts...
+                        </span>
+                      )}
                     </h3>
                     <p style={{ fontSize: "0.8rem", color: "var(--color-text-muted)", margin: "4px 0 0" }}>
                       Select the verified claims, statistics, or summaries to feed into your social post generator.
                     </p>
                   </div>
                   {knowledgeItems.length > 0 && (
-                    <button
-                      type="button"
-                      className="text-button"
-                      style={{ fontSize: "0.8rem" }}
-                      onClick={() => {
-                        if (selectedKnowledgeIds.length === knowledgeItems.length) {
-                          setSelectedKnowledgeIds([]);
-                        } else {
-                          setSelectedKnowledgeIds(knowledgeItems.map((k) => k.id));
-                        }
-                      }}
-                    >
-                      {selectedKnowledgeIds.length === knowledgeItems.length ? "Deselect All" : "Select All"}
-                    </button>
+                    <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                      <button
+                        type="button"
+                        className="text-button"
+                        style={{ fontSize: "0.8rem" }}
+                        onClick={() => {
+                          if (selectedKnowledgeIds.length === knowledgeItems.length) {
+                            setSelectedKnowledgeIds([]);
+                          } else {
+                            setSelectedKnowledgeIds(knowledgeItems.map((k) => k.id));
+                          }
+                        }}
+                      >
+                        {selectedKnowledgeIds.length === knowledgeItems.length ? "Deselect All" : "Select All"}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-button"
+                        style={{ fontSize: "0.8rem", color: "#f87171" }}
+                        onClick={async () => {
+                          if (!selectedDocId) return;
+                          try {
+                            await documentsApi.clearAllKnowledge(selectedDocId);
+                            setKnowledgeItems([]);
+                            setSelectedKnowledgeIds([]);
+                            toast.success("All knowledge claims cleared.");
+                          } catch {
+                            toast.error("Failed to clear knowledge claims");
+                          }
+                        }}
+                      >
+                        Clear All
+                      </button>
+                    </div>
                   )}
                 </div>
 
-                {loadingKnowledge ? (
-                  <div style={{ padding: "30px", textAlign: "center", color: "var(--color-text-muted)" }}>
-                    Loading extracted knowledge & page citations...
+                {loadingKnowledge && knowledgeItems.length === 0 ? (
+                  <div style={{ padding: "32px", textAlign: "center", color: "var(--color-text-muted)" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                      <RotateCw size={18} className="animate-spin" style={{ color: "#34d399" }} />
+                      <span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>Extracting knowledge & claims in real-time...</span>
+                    </div>
+                    <p style={{ margin: "4px 0 0", fontSize: "0.85rem" }}>
+                      Facts and verified citations stream in below as AI processes document chunks.
+                    </p>
                   </div>
                 ) : knowledgeItems.length === 0 ? (
                   <div style={{ padding: "30px", textAlign: "center", color: "var(--color-text-muted)", border: "1px dashed rgba(255,255,255,0.1)", borderRadius: "8px" }}>
                     <Info size={24} style={{ marginBottom: "8px", opacity: 0.7 }} />
-                    <p style={{ margin: 0 }}>No knowledge extracted yet. Upload a PDF or click Extract Knowledge above.</p>
+                    <p style={{ margin: 0 }}>
+                      {activeDoc?.status === "FAILED"
+                        ? "Extraction encountered an issue. Click 'Retry Extraction' above to retry instantly."
+                        : (activeDoc?.status === "EXTRACTING" || activeDoc?.status === "PROCESSING")
+                          ? "Reading PDF pages and extracting claims in real time... Claims will pop up here shortly."
+                          : "No knowledge extracted yet. Upload a PDF or click Re-extract Knowledge above."}
+                    </p>
                   </div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "380px", overflowY: "auto" }}>
@@ -851,23 +1043,60 @@ export default function AIStudio() {
                                   </span>
                                 )}
                               </div>
-                              <p style={{ margin: "0 0 8px", fontSize: "0.9rem", fontWeight: 500, lineHeight: 1.4 }}>
-                                {typeof item.value === "string" ? item.value : JSON.stringify(item.value)}
-                              </p>
-                              {item.source_excerpt && (
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px", margin: "0 0 6px" }}>
+                                <strong style={{ fontSize: "0.95rem", color: "#38bdf8", display: "block", marginBottom: "4px" }}>
+                                  {item.knowledge_key}
+                                </strong>
+                                <p style={{ margin: 0, fontSize: "0.88rem", fontWeight: 400, lineHeight: 1.5, color: "#e2e8f0" }}>
+                                  {typeof item.value === "string" ? item.value : JSON.stringify(item.value)}
+                                </p>
+                                <button
+                                  type="button"
+                                  title="Remove this extracted claim"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!selectedDocId) return;
+                                    try {
+                                      await documentsApi.deleteKnowledge(selectedDocId, item.id);
+                                      setKnowledgeItems((prev) => prev.filter((k) => k.id !== item.id));
+                                      setSelectedKnowledgeIds((prev) => prev.filter((id) => id !== item.id));
+                                      toast.success("Claim removed.");
+                                    } catch {
+                                      toast.error("Failed to remove claim");
+                                    }
+                                  }}
+                                  style={{
+                                    background: "transparent",
+                                    border: "none",
+                                    color: "var(--color-text-muted)",
+                                    cursor: "pointer",
+                                    padding: "2px 4px",
+                                    borderRadius: "4px",
+                                    flexShrink: 0,
+                                    display: "flex",
+                                    alignItems: "center",
+                                  }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
+                                  onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                              {item.source_excerpt && formatExcerpt(item.source_excerpt) && (
                                 <blockquote
                                   style={{
                                     margin: 0,
                                     padding: "6px 10px",
                                     borderLeft: "2px solid rgba(255,255,255,0.2)",
-                                    background: "rgba(0,0,0,0.2)",
+                                    background: "rgba(0,0,0,0.25)",
                                     borderRadius: "0 4px 4px 0",
                                     fontSize: "0.8rem",
                                     fontStyle: "italic",
                                     color: "var(--color-text-muted)",
+                                    lineHeight: 1.4,
                                   }}
                                 >
-                                  "{item.source_excerpt}"
+                                  "{formatExcerpt(item.source_excerpt)}"
                                 </blockquote>
                               )}
                             </div>

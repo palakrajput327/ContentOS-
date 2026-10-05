@@ -18,7 +18,7 @@ import { platformSchema } from "./content.controller.js";
 import { getLLMProvider } from "./ai/llm.service.js";
 
 const brief = z.object({
-  topic: z.string().trim().min(5).max(2000),
+  topic: z.string().trim().min(5).max(15000),
   tone: z.string().max(50),
   goal: z.string().max(80),
   platforms: z.array(platformSchema).min(1).max(5),

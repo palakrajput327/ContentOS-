@@ -66,7 +66,7 @@ export class DocumentsController {
 
     const documentId = randomUUID();
 
-    return transaction(async (db) => {
+    const result = await transaction(async (db) => {
       await db.query(
         `INSERT INTO documents(id, workspace_id, media_asset_id, original_filename, mime_type, status, created_by)
          VALUES($1, $2, $3, $4, $5, 'QUEUED', $6)`,
@@ -106,6 +106,13 @@ export class DocumentsController {
         filename: asset.original_filename,
       };
     });
+
+    // Proactively start PDF extraction immediately
+    import("../pdf-worker.js")
+      .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
+      .catch((err) => console.warn(`[PDF Immediate Trigger] For ${documentId}:`, err?.message || err));
+
+    return result;
   }
 
   @WorkspaceRequired()
@@ -140,14 +147,11 @@ export class DocumentsController {
 
     const doc = res.rows[0];
 
-    // Fallback: If document is QUEUED for > 4 seconds without active worker, auto-promote to READY
-    if (doc.status === "QUEUED" && (Date.now() - new Date(doc.created_at).getTime()) > 4000) {
-      await pool.query(
-        "UPDATE documents SET status = 'READY', page_count = COALESCE(page_count, 14), processing_completed_at = NOW() WHERE id = $1",
-        [documentId],
-      );
-      doc.status = "READY";
-      doc.page_count = doc.page_count || 14;
+    // If document is QUEUED and not yet picked up by worker after 2s, trigger real processing
+    if (doc.status === "QUEUED" && (Date.now() - new Date(doc.created_at).getTime()) > 2000) {
+      import("../pdf-worker.js")
+        .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
+        .catch((err) => console.warn(`[PDF Direct Trigger] Failed for ${documentId}:`, err?.message || err));
     }
 
     return { document: doc };
@@ -238,7 +242,7 @@ export class DocumentsController {
       throw new NotFoundException("Document not found in this workspace.");
     }
 
-    return transaction(async (db) => {
+    const result = await transaction(async (db) => {
       await db.query(
         "UPDATE documents SET status = 'QUEUED', failure_code = NULL, failure_message = NULL, processing_version = processing_version + 1 WHERE id = $1 AND workspace_id = $2",
         [documentId, w],
@@ -266,6 +270,39 @@ export class DocumentsController {
 
       return { documentId, status: "QUEUED" };
     });
+
+    // Proactively start reprocess immediately
+    import("../pdf-worker.js")
+      .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
+      .catch((err) => console.warn(`[PDF Reprocess Trigger] For ${documentId}:`, err?.message || err));
+
+    return result;
+  }
+
+  @WorkspaceRequired()
+  @Post(":documentId/fast-track")
+  async fastTrackDocument(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
+    assertPermission(r.workspace.role, "edit");
+    const w = r.workspace.id;
+
+    const docRes = await pool.query(
+      "SELECT id, original_filename, status FROM documents WHERE id = $1 AND workspace_id = $2",
+      [documentId, w],
+    );
+
+    if (!docRes.rowCount) {
+      throw new NotFoundException("Document not found in this workspace.");
+    }
+
+    const { processPDFDocument } = await import("../pdf-worker.js");
+    const result = await processPDFDocument(documentId, w);
+
+    return {
+      documentId,
+      status: "READY",
+      pageCount: result.pageCount,
+      chunkCount: result.chunkCount,
+    };
   }
 
   @WorkspaceRequired()
