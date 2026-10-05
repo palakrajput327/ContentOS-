@@ -104,7 +104,12 @@ export function Channels() {
       setBusy(true);
       setError("");
       if (demo) {
-        throw new Error("Live connections are disabled in demo mode.");
+        const cleanChannel = channel.trim() || "@hindustan_social_network";
+        toast.success(`Demo: ${cleanChannel} connected successfully!`);
+        setToken("");
+        setChannel("");
+        setConnectTelegram(false);
+        return;
       }
       const cleanChannel = channel.trim();
       const cleanToken = token.trim();
@@ -760,8 +765,12 @@ export function Settings() {
     </>
   );
 }
+
 export function Analytics() {
   const s = useOutletContext<Snapshot>();
+  const [range, setRange] = useState<string>("30d");
+  const [platformFilter, setPlatformFilter] = useState<string>("ALL");
+
   const [aiInsights, setAiInsights] = useState<{
     healthScore: number;
     statusRating: string;
@@ -780,16 +789,33 @@ export function Analytics() {
   const [aiModel, setAiModel] = useState<string>("");
 
   const { data: overview, isLoading, refetch } = useQuery({
-    queryKey: ["analytics", "overview", s.workspace.id],
+    queryKey: ["analytics", "overview", s.workspace.id, range, platformFilter],
     queryFn: () =>
       request<{
+        range: string;
+        selectedPlatform: string;
         metrics: {
+          totalContent: number;
           published: number;
           scheduled: number;
+          failed: number;
           drafts: number;
           needsReview: number;
+          publishSuccessRate: number;
           channels: number;
-          completionRate: number;
+        };
+        contentSource: {
+          aiGenerated: number;
+          manual: number;
+        };
+        batchStats: {
+          totalBatches: number;
+          completedBatches: number;
+          partialBatches: number;
+          failedBatches: number;
+          totalChildItems: number;
+          completedChildItems: number;
+          failedChildItems: number;
         };
         accounts: Array<{ platform: string; name: string; state: string; last_sync: string | null }>;
         platformDistribution: Record<string, number>;
@@ -802,7 +828,7 @@ export function Analytics() {
           createdAt: string;
           scheduledAt: string | null;
         }>;
-      }>("/analytics/overview"),
+      }>(`/analytics/overview?range=${range}&platform=${platformFilter}`),
   });
 
   async function handleGenerateAiInsights() {
@@ -824,12 +850,29 @@ export function Analytics() {
   }
 
   const metrics = overview?.metrics || {
+    totalContent: s.posts.length,
     published: s.posts.filter((p) => p.status === "PUBLISHED").length,
     scheduled: s.posts.filter((p) => p.status === "SCHEDULED").length,
+    failed: s.posts.filter((p) => p.status === "FAILED").length,
     drafts: s.posts.filter((p) => p.status === "DRAFT").length,
     needsReview: s.posts.filter((p) => p.status === "NEEDS_REVIEW").length,
+    publishSuccessRate: 100,
     channels: s.accounts.length,
-    completionRate: 0,
+  };
+
+  const contentSource = overview?.contentSource || {
+    aiGenerated: s.posts.filter((p) => (p as any).variants?.aiGenerated || (p as any).variants?.generationPrompt).length,
+    manual: Math.max(0, s.posts.length - s.posts.filter((p) => (p as any).variants?.aiGenerated || (p as any).variants?.generationPrompt).length),
+  };
+
+  const batchStats = overview?.batchStats || {
+    totalBatches: 0,
+    completedBatches: 0,
+    partialBatches: 0,
+    failedBatches: 0,
+    totalChildItems: 0,
+    completedChildItems: 0,
+    failedChildItems: 0,
   };
 
   const platformsList = ["LinkedIn", "Instagram", "X", "YouTube", "Telegram"] as const;
@@ -844,7 +887,45 @@ export function Analytics() {
             Real-time workspace activity metrics and AI-driven publishing intelligence.
           </p>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          {/* Range Selector */}
+          <select
+            value={range}
+            onChange={(e) => setRange(e.target.value)}
+            style={{
+              background: "rgba(255, 255, 255, 0.05)",
+              border: "1px solid rgba(255, 255, 255, 0.12)",
+              color: "#fff",
+              padding: "6px 12px",
+              borderRadius: "8px",
+              fontSize: "0.8rem",
+            }}
+          >
+            <option value="7d" style={{ background: "#18181b" }}>Last 7 days</option>
+            <option value="30d" style={{ background: "#18181b" }}>Last 30 days</option>
+            <option value="90d" style={{ background: "#18181b" }}>Last 90 days</option>
+            <option value="all" style={{ background: "#18181b" }}>All time</option>
+          </select>
+
+          {/* Platform Selector */}
+          <select
+            value={platformFilter}
+            onChange={(e) => setPlatformFilter(e.target.value)}
+            style={{
+              background: "rgba(255, 255, 255, 0.05)",
+              border: "1px solid rgba(255, 255, 255, 0.12)",
+              color: "#fff",
+              padding: "6px 12px",
+              borderRadius: "8px",
+              fontSize: "0.8rem",
+            }}
+          >
+            <option value="ALL" style={{ background: "#18181b" }}>All Platforms</option>
+            {platformsList.map((p) => (
+              <option key={p} value={p} style={{ background: "#18181b" }}>{p}</option>
+            ))}
+          </select>
+
           <Button
             variant="secondary"
             onClick={() => refetch()}
@@ -854,11 +935,20 @@ export function Analytics() {
             <RefreshCw size={13} className={isLoading ? "spin" : ""} />
             Sync Data
           </Button>
-          <span className="badge">Real API Live Data</span>
         </div>
       </div>
 
-      <div className="stats-grid">
+      {/* Primary Metrics Grid */}
+      <div className="stats-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
+        <div className="stat-card">
+          <div>
+            Total Content
+            <Layers size={17} />
+          </div>
+          <strong>{metrics.totalContent}</strong>
+          <small>Created in range</small>
+        </div>
+
         <div className="stat-card">
           <div>
             Published Posts
@@ -879,20 +969,31 @@ export function Analytics() {
 
         <div className="stat-card">
           <div>
-            Draft Backlog
-            <Layers size={17} />
+            Success Rate
+            <TrendingUp size={17} style={{ color: "#34d399" }} />
           </div>
-          <strong>{metrics.drafts}</strong>
-          <small>Ideas &amp; in-progress</small>
+          <strong style={{ color: "#34d399" }}>{metrics.publishSuccessRate}%</strong>
+          <small>{metrics.failed} failed items</small>
         </div>
 
         <div className="stat-card">
           <div>
-            Connected Channels
-            <Zap size={17} />
+            AI vs Manual
+            <Sparkles size={17} style={{ color: "#a78bfa" }} />
           </div>
-          <strong>{metrics.channels}</strong>
-          <small>Active destinations</small>
+          <strong style={{ color: "#a78bfa" }}>
+            {contentSource.aiGenerated} : {contentSource.manual}
+          </strong>
+          <small>AI-assisted / Manual</small>
+        </div>
+
+        <div className="stat-card">
+          <div>
+            Batch Operations
+            <Zap size={17} style={{ color: "#fbbf24" }} />
+          </div>
+          <strong style={{ color: "#fbbf24" }}>{batchStats.totalBatches}</strong>
+          <small>{batchStats.completedBatches} completed jobs</small>
         </div>
       </div>
 

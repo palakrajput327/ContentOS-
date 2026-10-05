@@ -154,6 +154,10 @@ import { DocumentsController } from "./documents/documents.controller.js";
 import { KnowledgeController } from "./knowledge/knowledge.controller.js";
 import { AIController } from "./ai.controller.js";
 import { AnalyticsController } from "./analytics.controller.js";
+import { BatchController } from "./batch/batch.controller.js";
+import { CalendarController } from "./calendar/calendar.controller.js";
+import { NotificationsController } from "./notifications/notifications.controller.js";
+import { CommentsController } from "./comments/comments.controller.js";
 @Module({
   controllers: [
     PhaseAuthController,
@@ -169,6 +173,10 @@ import { AnalyticsController } from "./analytics.controller.js";
     KnowledgeController,
     AIController,
     AnalyticsController,
+    BatchController,
+    CalendarController,
+    NotificationsController,
+    CommentsController,
   ],
   providers: [AdminGuard, { provide: APP_GUARD, useClass: PhaseGuard }],
 })
@@ -193,6 +201,8 @@ export async function bootstrap() {
     new URL(config.APP_URL).origin,
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
   ];
   app.enableCors({
     origin: allowedOrigins,

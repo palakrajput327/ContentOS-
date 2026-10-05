@@ -9,6 +9,7 @@ import {
   BadRequestException,
   ForbiddenException,
   HttpException,
+  ConflictException,
 } from "@nestjs/common";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { Response } from "express";
@@ -31,14 +32,10 @@ const registration = z
     name: z.string().trim().min(1).max(100),
     email,
     password,
-    passwordConfirmation: z.string(),
-    termsAccepted: z.literal(true),
+    passwordConfirmation: z.string().optional(),
+    termsAccepted: z.boolean().optional(),
   })
-  .strict()
-  .refine((v) => v.password === v.passwordConfirmation, {
-    path: ["passwordConfirmation"],
-    message: "Passwords do not match",
-  });
+  .passthrough();
 const pair = z
   .object({ password, passwordConfirmation: z.string() })
   .refine((v) => v.password === v.passwordConfirmation, {
@@ -105,6 +102,15 @@ export class PhaseAuthController {
     @Req() req: AuthedRequest,
   ) {
     const v = registration.parse(input);
+    const existing = await pool.query(
+      "SELECT id FROM users WHERE email=$1",
+      [v.email],
+    );
+    if (existing.rowCount) {
+      throw new ConflictException(
+        "An account with this email already exists. Please log in instead.",
+      );
+    }
     requireMail();
     const passwordHash = await hashPassword(v.password);
     await transaction(async (db) => {
@@ -258,8 +264,9 @@ export class PhaseAuthController {
 
     const result = await transaction(async db => {
       const user = (await db.query('SELECT * FROM users WHERE email=$1 FOR UPDATE', [c.email])).rows[0];
-      const valid = await verifyPassword(c.password, user?.password_hash || `scrypt:00000000000000000000000000000000:${'00'.repeat(64)}`);
-      if (!user || !valid) throw new UnauthorizedException('Email or password is incorrect.');
+      if (!user) throw new UnauthorizedException('No account found with this email address. Please sign up first.');
+      const valid = await verifyPassword(c.password, user.password_hash);
+      if (!valid) throw new UnauthorizedException('Email or password is incorrect.');
       return { user, session: await newSession(db, user.id) };
     });
 

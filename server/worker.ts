@@ -8,6 +8,9 @@ import {
   publishYouTubeRecord,
   pollYouTubeProcessing,
 } from "./youtube.service.js";
+import { createPublishPlan } from "./publish-planner.js";
+import type { Platform } from "./platform-capabilities.js";
+
 async function aggregate(
   db: DB,
   contentId: string,
@@ -140,16 +143,28 @@ const worker = new Worker(
     }
     let providerId: string;
     try {
-      providerId = await socialProvider(account.platform).publishText(
-        {
-          token: decryptToken(
-            account.ciphertext,
-            `${record.workspace_id}:${account.id}`,
-          ),
-          providerId: account.provider_id,
-        },
-        content.variants[account.platform] || content.body,
+      const plan = await createPublishPlan(
+        pool,
+        content,
+        account.platform as Platform,
+        { isPublishing: true }
       );
+      const provider = socialProvider(account.platform);
+      const conn = {
+        token: decryptToken(
+          account.ciphertext,
+          `${record.workspace_id}:${account.id}`
+        ),
+        providerId: account.provider_id,
+      };
+
+      if (plan.mediaUrl && plan.mediaType === "video") {
+        providerId = await provider.publishVideo(conn, plan.mediaUrl);
+      } else if (plan.mediaUrl) {
+        providerId = await provider.publishMedia(conn, plan.mediaUrl);
+      } else {
+        providerId = await provider.publishText(conn, plan.caption);
+      }
     } catch (error) {
       const e =
         error instanceof ProviderError

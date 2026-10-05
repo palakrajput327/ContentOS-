@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Req,
+  Query,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { z } from "zod";
@@ -42,59 +43,129 @@ export type AIInsights = z.infer<typeof aiInsightsSchema>;
 @Controller("analytics")
 export class AnalyticsController {
   @Get("overview")
-  async getOverview(@Req() r: AuthedRequest) {
+  async getOverview(
+    @Req() r: AuthedRequest,
+    @Query("range") range?: string,
+    @Query("platform") platform?: string
+  ) {
     const w = r.workspace.id;
 
-    const [countsRes, accountsRes, recentRes, timelineRes, platformsRes] =
-      await Promise.all([
-        pool.query(
-          `SELECT
-            (SELECT COUNT(*)::int FROM content WHERE workspace_id = $1 AND status = 'PUBLISHED') AS published,
-            (SELECT COUNT(*)::int FROM content WHERE workspace_id = $1 AND status = 'SCHEDULED') AS scheduled,
-            (SELECT COUNT(*)::int FROM content WHERE workspace_id = $1 AND status = 'DRAFT') AS drafts,
-            (SELECT COUNT(*)::int FROM content WHERE workspace_id = $1 AND status = 'NEEDS_REVIEW') AS needs_review,
-            (SELECT COUNT(*)::int FROM social_accounts WHERE workspace_id = $1 AND LOWER(state) = 'connected') AS connected_channels`,
-          [w],
-        ),
-        pool.query(
-          `SELECT platform, name, state, last_sync FROM social_accounts WHERE workspace_id = $1`,
-          [w],
-        ),
-        pool.query(
-          `SELECT id, title, status, platforms, created_at, scheduled_at 
-           FROM content 
-           WHERE workspace_id = $1 
-           ORDER BY created_at DESC 
-           LIMIT 10`,
-          [w],
-        ),
-        pool.query(
-          `SELECT 
-             DATE(created_at) AS day,
-             COUNT(*)::int AS total,
-             COUNT(CASE WHEN status = 'PUBLISHED' THEN 1 END)::int AS published,
-             COUNT(CASE WHEN status = 'SCHEDULED' THEN 1 END)::int AS scheduled,
-             COUNT(CASE WHEN status = 'DRAFT' THEN 1 END)::int AS drafts
-           FROM content
-           WHERE workspace_id = $1 AND created_at >= NOW() - INTERVAL '14 days'
-           GROUP BY DATE(created_at)
-           ORDER BY DATE(created_at) ASC`,
-          [w],
-        ),
-        pool.query(
-          `SELECT p.platform, COUNT(*)::int as count 
-           FROM content c, jsonb_array_elements_text(c.platforms) as p(platform)
-           WHERE c.workspace_id = $1
-           GROUP BY p.platform`,
-          [w],
-        ),
-      ]);
+    // Determine interval days from range
+    let days = 30;
+    if (range === "7d") days = 7;
+    else if (range === "90d") days = 90;
+    else if (range === "all") days = 365;
+
+    const intervalSql = `NOW() - INTERVAL '${days} days'`;
+    const platformFilter = platform && platform !== "ALL" ? platform : null;
+
+    const [
+      countsRes,
+      accountsRes,
+      recentRes,
+      timelineRes,
+      platformsRes,
+      aiVsManualRes,
+      batchStatsRes,
+    ] = await Promise.all([
+      // 1. Content counts
+      pool.query(
+        `SELECT
+          COUNT(*)::int AS total_content,
+          COUNT(CASE WHEN status = 'PUBLISHED' THEN 1 END)::int AS published,
+          COUNT(CASE WHEN status = 'SCHEDULED' THEN 1 END)::int AS scheduled,
+          COUNT(CASE WHEN status = 'FAILED' THEN 1 END)::int AS failed,
+          COUNT(CASE WHEN status = 'DRAFT' THEN 1 END)::int AS drafts,
+          COUNT(CASE WHEN status = 'NEEDS_REVIEW' THEN 1 END)::int AS needs_review
+         FROM content
+         WHERE workspace_id = $1
+           AND created_at >= ${intervalSql}
+           AND ($2::text IS NULL OR $2 = ANY(platforms))`,
+        [w, platformFilter]
+      ),
+
+      // 2. Channels
+      pool.query(
+        `SELECT platform, name, state, last_sync FROM social_accounts WHERE workspace_id = $1`,
+        [w]
+      ),
+
+      // 3. Recent Content
+      pool.query(
+        `SELECT id, title, status, platforms, created_at, scheduled_at 
+         FROM content 
+         WHERE workspace_id = $1 AND ($2::text IS NULL OR $2 = ANY(platforms))
+         ORDER BY created_at DESC 
+         LIMIT 10`,
+        [w, platformFilter]
+      ),
+
+      // 4. Timeline
+      pool.query(
+        `SELECT 
+           DATE(created_at) AS day,
+           COUNT(*)::int AS total,
+           COUNT(CASE WHEN status = 'PUBLISHED' THEN 1 END)::int AS published,
+           COUNT(CASE WHEN status = 'SCHEDULED' THEN 1 END)::int AS scheduled,
+           COUNT(CASE WHEN status = 'FAILED' THEN 1 END)::int AS failed,
+           COUNT(CASE WHEN status = 'DRAFT' THEN 1 END)::int AS drafts
+         FROM content
+         WHERE workspace_id = $1 
+           AND created_at >= ${intervalSql}
+           AND ($2::text IS NULL OR $2 = ANY(platforms))
+         GROUP BY DATE(created_at)
+         ORDER BY DATE(created_at) ASC`,
+        [w, platformFilter]
+      ),
+
+      // 5. Platform Distribution
+      pool.query(
+        `SELECT p.platform, COUNT(*)::int as count 
+         FROM content c, jsonb_array_elements_text(c.platforms) as p(platform)
+         WHERE c.workspace_id = $1 AND c.created_at >= ${intervalSql}
+         GROUP BY p.platform`,
+        [w]
+      ),
+
+      // 6. AI vs Manual Content
+      pool.query(
+        `SELECT
+          COUNT(CASE WHEN (variants->>'generationPrompt' IS NOT NULL OR variants->>'aiGenerated' = 'true') THEN 1 END)::int AS ai_generated,
+          COUNT(CASE WHEN (variants->>'generationPrompt' IS NULL AND (variants->>'aiGenerated' IS NULL OR variants->>'aiGenerated' = 'false')) THEN 1 END)::int AS manual
+         FROM content
+         WHERE workspace_id = $1 AND created_at >= ${intervalSql}`,
+        [w]
+      ),
+
+      // 7. Batch Stats
+      pool.query(
+        `SELECT
+          COUNT(*)::int AS total_batches,
+          COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END)::int AS completed_batches,
+          COUNT(CASE WHEN status = 'PARTIAL' THEN 1 END)::int AS partial_batches,
+          COUNT(CASE WHEN status = 'FAILED' THEN 1 END)::int AS failed_batches,
+          COALESCE(SUM(total_items), 0)::int AS total_child_items,
+          COALESCE(SUM(completed_items), 0)::int AS completed_child_items,
+          COALESCE(SUM(failed_items), 0)::int AS failed_child_items
+         FROM batch_jobs
+         WHERE workspace_id = $1 AND created_at >= ${intervalSql}`,
+        [w]
+      ),
+    ]);
 
     const counts = countsRes.rows[0] || {};
+    const totalContent = Number(counts.total_content || 0);
     const published = Number(counts.published || 0);
     const scheduled = Number(counts.scheduled || 0);
+    const failed = Number(counts.failed || 0);
     const drafts = Number(counts.drafts || 0);
-    const channels = Number(counts.connected_channels || 0);
+    const needsReview = Number(counts.needs_review || 0);
+
+    const totalPublishedOrFailed = published + failed;
+    const publishSuccessRate =
+      totalPublishedOrFailed > 0
+        ? Math.round((published / totalPublishedOrFailed) * 100)
+        : 100;
 
     const platformDistribution: Record<string, number> = {
       LinkedIn: 0,
@@ -110,17 +181,42 @@ export class AnalyticsController {
       }
     }
 
+    const aiVsManual = aiVsManualRes.rows[0] || { ai_generated: 0, manual: 0 };
+    const batchStats = batchStatsRes.rows[0] || {
+      total_batches: 0,
+      completed_batches: 0,
+      partial_batches: 0,
+      failed_batches: 0,
+      total_child_items: 0,
+      completed_child_items: 0,
+      failed_child_items: 0,
+    };
+
     return {
+      range: range || "30d",
+      selectedPlatform: platform || "ALL",
       metrics: {
+        totalContent,
         published,
         scheduled,
+        failed,
         drafts,
-        needsReview: Number(counts.needs_review || 0),
-        channels,
-        completionRate:
-          published + drafts > 0
-            ? Math.round((published / (published + drafts)) * 100)
-            : 0,
+        needsReview,
+        publishSuccessRate,
+        channels: accountsRes.rows.filter((a: any) => a.state?.toLowerCase() === "connected").length,
+      },
+      contentSource: {
+        aiGenerated: Number(aiVsManual.ai_generated || 0),
+        manual: Number(aiVsManual.manual || 0),
+      },
+      batchStats: {
+        totalBatches: Number(batchStats.total_batches || 0),
+        completedBatches: Number(batchStats.completed_batches || 0),
+        partialBatches: Number(batchStats.partial_batches || 0),
+        failedBatches: Number(batchStats.failed_batches || 0),
+        totalChildItems: Number(batchStats.total_child_items || 0),
+        completedChildItems: Number(batchStats.completed_child_items || 0),
+        failedChildItems: Number(batchStats.failed_child_items || 0),
       },
       accounts: accountsRes.rows,
       platformDistribution,
@@ -213,7 +309,7 @@ Analyze the provided real workspace publishing data and return a JSON object wit
       "platform": "LinkedIn",
       "bestDays": "Tuesday, Thursday",
       "bestTimeSlots": "09:00 - 11:00 AM",
-      "rationale": "Peak professional engagement window."
+      "rationale": "Peak morning professional browsing and feed engagement."
     }
   ],
   "actionableRecommendations": [

@@ -8,6 +8,7 @@ import { useSession } from "./lib/session";
 import Shell from "./components/Shell";
 import Overview from "./pages/Overview";
 import Composer from "./pages/Composer";
+import AIStudio from "./pages/AIStudio";
 import Library from "./pages/Library";
 import Calendar from "./pages/Calendar";
 import {
@@ -74,7 +75,7 @@ export default function AuthApp() {
         }
       >
         <Route index element={<Overview />} />
-        <Route path="studio" element={<Composer key="studio" studio />} />
+        <Route path="studio" element={<AIStudio />} />
         <Route path="compose" element={<Composer key="compose" />} />
         <Route path="library" element={<Library />} />
         <Route path="approvals" element={<Library approvals />} />

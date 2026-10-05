@@ -34,6 +34,15 @@ import { youtubeSchema } from "./youtube.schema.js";
 import { pool } from "./db.js";
 import { serializePost } from "./workspace.controller.js";
 
+import {
+  PLATFORM_CAPABILITIES,
+  normalizeVariant,
+  validatePlatformVariant,
+  type Platform,
+} from "./platform-capabilities.js";
+import { createPublishPlan } from "./publish-planner.js";
+import { NotificationsService } from "./notifications/notifications.service.js";
+
 export const publishSchema = z.object({
   socialAccountId: z.string().uuid("Valid social account ID required"),
 });
@@ -44,20 +53,36 @@ export const platformSchema = z.enum([
   "YouTube",
   "Telegram",
 ]);
+
+export const variantObjectSchema = z.object({
+  caption: z.string().trim().max(10000).optional(),
+  title: z.string().trim().max(500).optional(),
+  mediaAssetId: z.string().uuid().optional(),
+  mediaUrl: z.string().optional(),
+  mediaType: z.enum(["text", "image", "video", "document"]).optional(),
+  metadata: z.record(z.any()).optional(),
+});
+
+export const variantSchema = z.union([
+  z.string().trim().max(10000),
+  variantObjectSchema,
+]);
+
 const inputSchema = z.object({
-  title: z.string().trim().min(1).max(160),
-  body: z.string().trim().max(10000),
+  title: z.string().trim().max(160).default(""),
+  body: z.string().trim().max(10000).default(""),
   platforms: z
     .array(platformSchema)
     .min(1)
     .max(5)
     .refine((a) => new Set(a).size === a.length, "Duplicate platforms"),
   variants: z
-    .record(platformSchema, z.string().trim().min(1).max(10000))
+    .record(platformSchema, variantSchema)
     .default({}),
   youtube: youtubeSchema.optional(),
   version: z.number().int().positive().optional(),
 });
+
 export function assertEditable(status: string) {
   if (!["DRAFT", "NEEDS_REVIEW", "APPROVED"].includes(status))
     throw new ConflictException(
@@ -304,6 +329,22 @@ export class ContentController {
     });
   }
 
+  @Post("preview")
+  async previewPublish(@Req() r: AuthedRequest, @Body() input: unknown) {
+    const v = inputSchema.parse(input);
+    const plans = await Promise.all(
+      v.platforms.map((p) =>
+        createPublishPlan(
+          pool,
+          { ...v, id: "preview", workspace_id: r.workspace.id },
+          p as Platform,
+          { isPublishing: false }
+        )
+      )
+    );
+    return { plans };
+  }
+
   @Post() async create(@Req() r: AuthedRequest, @Body() input: unknown) {
     assertPermission(r.workspace.role, "edit");
     const v = inputSchema.parse(input);
@@ -429,11 +470,36 @@ export class ContentController {
             "Only drafts can be submitted for review.",
           );
         status = "NEEDS_REVIEW";
+        const commentText = (input as any)?.comment ? String((input as any).comment).trim() : "";
+        if (commentText) {
+          await db.query(
+            "INSERT INTO content_comments(id, workspace_id, content_id, author_id, comment) VALUES($1,$2,$3,$4,$5)",
+            [randomUUID(), r.workspace.id, id, r.user.id, commentText]
+          );
+        }
+        // Notify workspace approvers/admins
+        const approversRes = await db.query(
+          "SELECT user_id FROM workspace_members WHERE workspace_id = $1 AND role IN ('Owner', 'Admin', 'Approver')",
+          [r.workspace.id]
+        );
+        for (const row of approversRes.rows) {
+          if (row.user_id !== r.user.id) {
+            await NotificationsService.createNotification(db as any, {
+              workspaceId: r.workspace.id,
+              userId: row.user_id,
+              type: "approval_requested",
+              title: "Approval Requested",
+              message: `${r.user.name} submitted "${p.title || "Content"}" for review.`,
+              data: { content_id: id },
+            });
+          }
+        }
       }
       if (action === "approve" || action === "reject") {
         if (p.status !== "NEEDS_REVIEW")
           throw new ConflictException("This post is not awaiting review.");
         status = action === "approve" ? "APPROVED" : "DRAFT";
+        const commentText = (input as any)?.comment ? String((input as any).comment).trim() : "";
         await db.query(
           "INSERT INTO approvals(id,workspace_id,content_id,version,actor_id,decision) VALUES($1,$2,$3,$4,$5,$6)",
           [randomUUID(), r.workspace.id, id, p.version, r.user.id, action],
@@ -442,6 +508,23 @@ export class ContentController {
           "UPDATE content SET approved_by=$3 WHERE id=$1 AND workspace_id=$2",
           [id, r.workspace.id, action === "approve" ? r.user.id : null],
         );
+        if (commentText) {
+          await db.query(
+            "INSERT INTO content_comments(id, workspace_id, content_id, author_id, comment) VALUES($1,$2,$3,$4,$5)",
+            [randomUUID(), r.workspace.id, id, r.user.id, `[${action.toUpperCase()}] ${commentText}`]
+          );
+        }
+        // Notify content creator
+        if (p.created_by && p.created_by !== r.user.id) {
+          await NotificationsService.createNotification(db as any, {
+            workspaceId: r.workspace.id,
+            userId: p.created_by,
+            type: action === "approve" ? "approved" : "rejected",
+            title: action === "approve" ? "Post Approved" : "Post Needs Revisions",
+            message: `${r.user.name} ${action === "approve" ? "approved" : "rejected"} "${p.title || "Content"}"${commentText ? `: "${commentText}"` : "."}`,
+            data: { content_id: id },
+          });
+        }
       }
       if (action === "schedule") {
         const v = z

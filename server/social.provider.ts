@@ -116,14 +116,17 @@ export class TelegramProvider implements SocialProvider {
       );
       const chatData = await chatRes.json();
       if (!chatRes.ok || !chatData.ok) {
+        const desc = chatData.description || "";
+        const isNotFound = desc === "Not Found" || desc.toLowerCase().includes("chat not found");
         return {
           valid: false,
           status: "DESTINATION_NOT_FOUND",
           providerId: chatId,
           name: botName,
           details: {
-            error:
-              chatData.description || "Destination channel/chat not found.",
+            error: isNotFound
+              ? `Channel '${chatId}' not found or Bot (@${botName}) is not an Administrator in the channel. Please add @${botName} as Admin in your channel '${chatId}' first, then click Connect.`
+              : desc || "Destination channel/chat not found.",
           },
         };
       }

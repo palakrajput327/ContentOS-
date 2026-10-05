@@ -111,3 +111,217 @@ export const data = {
     demo = demoSnapshot();
   },
 };
+
+export interface DocItem {
+  id: string;
+  media_asset_id?: string;
+  original_filename: string;
+  mime_type: string;
+  status: "QUEUED" | "PROCESSING" | "READY" | "FAILED";
+  page_count?: number;
+  failure_code?: string;
+  failure_message?: string;
+  created_at: string;
+  processing_completed_at?: string;
+}
+
+export interface KnowledgeItem {
+  id: string;
+  generation_id?: string;
+  knowledge_type: "claim" | "statistic" | "summary" | "topic" | "fact" | string;
+  knowledge_key: string;
+  value: any;
+  page_start?: number;
+  page_end?: number;
+  source_excerpt?: string;
+  confidence?: number;
+  status: "EXTRACTED" | "CONFIRMED" | "EDITED" | "REJECTED" | "LOCKED";
+  created_at: string;
+}
+
+export interface KnowledgeSource {
+  id: string;
+  generation_id: string;
+  document_id: string;
+  document_chunk_id?: string;
+  page_start: number;
+  page_end: number;
+  source_excerpt: string;
+  claim_key: string;
+  confidence?: number;
+  created_at: string;
+}
+
+export const documentsApi = {
+  uploadPdf: async (file: File): Promise<{ documentId: string; status: string; filename: string }> => {
+    if (useSession.getState().demo) {
+      return {
+        documentId: "demo-doc-" + Date.now(),
+        status: "READY",
+        filename: file.name,
+      };
+    }
+    const presign = await request<{ assetId: string; uploadUrl: string; headers?: Record<string, string> }>(
+      "/storage/uploads/presign",
+      "POST",
+      {
+        type: "DOCUMENT",
+        originalFilename: file.name,
+        mimeType: file.type || "application/pdf",
+        sizeBytes: file.size,
+      },
+    );
+
+    const uploadRes = await fetch(presign.uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": file.type || "application/pdf",
+        ...(presign.headers || {}),
+      },
+      body: file,
+    });
+
+    if (!uploadRes.ok) {
+      throw new Error("Failed to upload document file to storage.");
+    }
+
+    await request(`/storage/uploads/${presign.assetId}/complete`, "POST", {});
+    const docRes = await request<{ documentId: string; status: string; filename: string }>(
+      "/documents",
+      "POST",
+      { mediaAssetId: presign.assetId },
+    );
+    return docRes;
+  },
+
+  list: async (): Promise<DocItem[]> => {
+    if (useSession.getState().demo) {
+      return [
+        {
+          id: "demo-pdf-1",
+          original_filename: "Content_OS_Product_Strategy_2026.pdf",
+          mime_type: "application/pdf",
+          status: "READY",
+          page_count: 14,
+          created_at: new Date().toISOString(),
+        },
+      ];
+    }
+    const res = await request<{ documents: DocItem[] }>("/documents");
+    return res.documents;
+  },
+
+  get: async (id: string): Promise<DocItem> => {
+    if (useSession.getState().demo) {
+      return {
+        id,
+        original_filename: "Uploaded_Document.pdf",
+        mime_type: "application/pdf",
+        status: "READY",
+        page_count: 8,
+        created_at: new Date().toISOString(),
+      };
+    }
+    const res = await request<{ document: DocItem }>(`/documents/${id}`);
+    return res.document;
+  },
+
+  extractKnowledge: async (id: string): Promise<{ generationId: string; documentId: string; status: string }> => {
+    if (useSession.getState().demo) {
+      return { generationId: "demo-gen-1", documentId: id, status: "QUEUED" };
+    }
+    return request(`/documents/${id}/knowledge/extract`, "POST");
+  },
+
+  listKnowledge: async (id: string): Promise<KnowledgeItem[]> => {
+    if (useSession.getState().demo) {
+      return [
+        {
+          id: "k1",
+          knowledge_type: "summary",
+          knowledge_key: "executive_summary",
+          value: "ContentOS increases content distribution throughput by 3.5x using unified platform scheduling and brand voice enforcement.",
+          page_start: 1,
+          page_end: 2,
+          source_excerpt: "Executive Summary: ContentOS accelerates multi-channel publisher velocity from 1.2 to 4.2 weekly campaigns per editor.",
+          confidence: 0.98,
+          status: "CONFIRMED",
+          created_at: new Date().toISOString(),
+        },
+        {
+          id: "k2",
+          knowledge_type: "statistic",
+          knowledge_key: "productivity_gain",
+          value: "74% reduction in manual copy adaptation time across LinkedIn, X, and Instagram.",
+          page_start: 4,
+          page_end: 4,
+          source_excerpt: "Key Metrics: Benchmarks across 120 marketing teams showed 74% savings in adaptation overhead.",
+          confidence: 0.95,
+          status: "CONFIRMED",
+          created_at: new Date().toISOString(),
+        },
+        {
+          id: "k3",
+          knowledge_type: "claim",
+          knowledge_key: "brand_safety_guardrails",
+          value: "Real-time AI brand kit constraints prevent unapproved phrasing and unauthorized claims before post submission.",
+          page_start: 7,
+          page_end: 8,
+          source_excerpt: "Security & Compliance: Automated brand governance enforces tone guidelines and prohibited terminology.",
+          confidence: 0.92,
+          status: "EXTRACTED",
+          created_at: new Date().toISOString(),
+        },
+        {
+          id: "k4",
+          knowledge_type: "topic",
+          knowledge_key: "pdf_to_content_pipeline",
+          value: "PDF evidence extraction extracts claims and transforms structured PDF knowledge directly into platform-specific social posts.",
+          page_start: 11,
+          page_end: 12,
+          source_excerpt: "Module Architecture: PDF-to-Content pipeline converts long-form whitepapers into bite-sized social posts backed by page citations.",
+          confidence: 0.96,
+          status: "CONFIRMED",
+          created_at: new Date().toISOString(),
+        },
+      ];
+    }
+    const res = await request<{ knowledge: KnowledgeItem[] }>(`/documents/${id}/knowledge`);
+    return res.knowledge;
+  },
+
+  getKnowledgeSources: async (documentId: string, knowledgeId: string): Promise<KnowledgeSource[]> => {
+    if (useSession.getState().demo) {
+      return [
+        {
+          id: "s1",
+          generation_id: "demo-gen-1",
+          document_id: documentId,
+          page_start: 4,
+          page_end: 4,
+          source_excerpt: "Benchmarks across 120 marketing teams showed 74% savings in adaptation overhead.",
+          claim_key: "productivity_gain",
+          confidence: 0.95,
+          created_at: new Date().toISOString(),
+        },
+      ];
+    }
+    const res = await request<{ sources: KnowledgeSource[] }>(`/documents/${documentId}/knowledge/${knowledgeId}/sources`);
+    return res.sources;
+  },
+
+  reprocess: async (id: string): Promise<{ documentId: string; status: string }> => {
+    if (useSession.getState().demo) {
+      return { documentId: id, status: "QUEUED" };
+    }
+    return request(`/documents/${id}/reprocess`, "POST");
+  },
+
+  delete: async (id: string): Promise<{ success: boolean; documentId: string }> => {
+    if (useSession.getState().demo) {
+      return { success: true, documentId: id };
+    }
+    return request(`/documents/${id}`, "DELETE");
+  },
+};
+

@@ -11,6 +11,12 @@ import {
   X,
   Copy,
   ArrowUpRight,
+  Layers,
+  Send,
+  CheckSquare,
+  Square,
+  RotateCw,
+  MessageSquare,
 } from "lucide-react";
 import {
   Button,
@@ -19,8 +25,11 @@ import {
   Modal,
   Empty,
 } from "../components/ui";
-import { data } from "../lib/api";
+import { data, request } from "../lib/api";
 import { dateLabel, type Snapshot, type Post } from "../lib/model";
+import { BatchProgressIndicator } from "../components/BatchProgressIndicator";
+import { ContentDiscussionPanel } from "../components/ContentDiscussionPanel";
+
 export default function Library({
   approvals = false,
 }: {
@@ -38,6 +47,14 @@ export default function Library({
   const [date, setDate] = useState("");
   const [scheduleError, setScheduleError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Bulk Operations State
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+  const [showBulkScheduleModal, setShowBulkScheduleModal] = useState(false);
+  const [bulkScheduleDate, setBulkScheduleDate] = useState("");
+  const [discussionPost, setDiscussionPost] = useState<Post | null>(null);
+
   const role = s.workspace.role;
   const canApprove = ["Owner", "Admin", "Approver"].includes(role);
   const canSchedule = ["Owner", "Admin", "Content Manager"].includes(role);
@@ -51,6 +68,41 @@ export default function Library({
         .toLowerCase()
         .includes(search.toLowerCase()),
   );
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.length === posts.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(posts.map((p) => p.id));
+    }
+  }
+
+  async function handleBulkAction(endpoint: string, payload?: Record<string, any>) {
+    if (!selectedIds.length) return;
+    try {
+      setBusy(true);
+      const res = (await request(`/batch/${endpoint}`, "POST", {
+        contentIds: selectedIds,
+        ...payload,
+      })) as { batchId: string };
+      setActiveBatchId(res.batchId);
+      toast.success(`Batch ${endpoint.replace("bulk-", "")} initialized for ${selectedIds.length} items!`);
+      setSelectedIds([]);
+      await query.invalidateQueries({ queryKey: ["workspace"] });
+    } catch (e: any) {
+      toast.error(e.message || "Bulk operation failed.");
+    } finally {
+      setBusy(false);
+      setShowBulkScheduleModal(false);
+    }
+  }
+
   async function action(p: Post, a: string, options?: unknown) {
     try {
       setBusy(true);
@@ -74,6 +126,7 @@ export default function Library({
       setBusy(false);
     }
   }
+
   return (
     <>
       <div className="page-heading">
@@ -101,6 +154,17 @@ export default function Library({
           </Button>
         )}
       </div>
+
+      {/* Active Batch Progress Bar */}
+      {activeBatchId && (
+        <BatchProgressIndicator
+          batchId={activeBatchId}
+          onComplete={() => {
+            query.invalidateQueries({ queryKey: ["workspace"] });
+          }}
+        />
+      )}
+
       <div className="library-toolbar">
         <div className="tabs">
           {!approvals &&
@@ -117,7 +181,10 @@ export default function Library({
               <button
                 className={filter === v ? "active" : ""}
                 key={v}
-                onClick={() => setParams(v === "ALL" ? {} : { status: v })}
+                onClick={() => {
+                  setParams(v === "ALL" ? {} : { status: v });
+                  setSelectedIds([]);
+                }}
               >
                 {l}
               </button>
@@ -133,96 +200,219 @@ export default function Library({
           />
         </div>
       </div>
-      <div className="content-grid">
-        {posts.map((p) => (
-          <article className="content-card" key={p.id}>
-            <div className="content-card-head">
-              <div className="row">
-                {p.platforms.map((pl) => (
-                  <PlatformIcon platform={pl} key={pl} />
-                ))}
-              </div>
-              <StatusBadge status={p.status} />
-            </div>
-            <Link to={`/app/compose?id=${p.id}`}>
-              <h2>{p.title}</h2>
-              <p className="content-excerpt">{p.body}</p>
-            </Link>
-            <div className="content-card-meta">
-              <span className="avatar tiny">{p.creator[0]}</span>
-              <span>{p.creator}</span>
-              <small>
-                {p.scheduledAt
-                  ? dateLabel(p.scheduledAt, s.workspace.timezone)
-                  : "Unscheduled"}
-              </small>
-            </div>
-            <div className="content-card-actions">
-              <Button asChild variant="ghost">
-                <Link to={`/app/compose?id=${p.id}`}>
-                  Open <ArrowUpRight size={14} />
-                </Link>
-              </Button>
-              {p.status === "NEEDS_REVIEW" && canApprove ? (
-                <>
-                  <Button
-                    title="Return to drafts"
-                    aria-label={`Return ${p.title} to drafts`}
-                    onClick={() => action(p, "reject")}
-                    disabled={busy}
-                  >
-                    <X size={15} />
-                  </Button>
-                  <Button onClick={() => action(p, "approve")} disabled={busy}>
-                    <Check size={15} />
-                    Approve
-                  </Button>
-                </>
-              ) : p.status === "SCHEDULED" && canSchedule ? (
-                <Button onClick={() => action(p, "cancel")} disabled={busy}>
-                  Cancel schedule
-                </Button>
-              ) : (p.status === "APPROVED" ||
-                  (!s.workspace.requireApproval && p.status === "DRAFT")) &&
-                canSchedule ? (
-                <Button onClick={() => setSchedule(p)}>
-                  <CalendarDays size={15} />
-                  Schedule
-                </Button>
-              ) : canEdit ? (
+
+      {/* Multi-select Header Controls */}
+      {posts.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px", padding: "10px 14px", background: "rgba(255,255,255,0.02)", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <button
+            type="button"
+            className="text-button"
+            onClick={toggleSelectAll}
+            style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.85rem", cursor: "pointer", background: "none", border: "none", color: "#f1f5f9" }}
+          >
+            {selectedIds.length === posts.length ? <CheckSquare size={18} style={{ color: "#34d399" }} /> : <Square size={18} />}
+            Select All ({posts.length} posts)
+          </button>
+          {selectedIds.length > 0 && (
+            <span style={{ fontSize: "0.85rem", color: "#a5b4fc", fontWeight: 600 }}>
+              {selectedIds.length} item{selectedIds.length > 1 ? "s" : ""} selected for bulk action
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Floating Bulk Operations Bar */}
+      {selectedIds.length > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "24px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 99,
+            background: "#0f172a",
+            border: "1px solid rgba(99, 102, 241, 0.4)",
+            borderRadius: "16px",
+            padding: "12px 24px",
+            display: "flex",
+            alignItems: "center",
+            gap: "16px",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Layers size={18} style={{ color: "#6366f1" }} />
+            <strong style={{ fontSize: "0.9rem" }}>{selectedIds.length} Selected</strong>
+          </div>
+
+          <div style={{ display: "flex", gap: "8px" }}>
+            {canApprove && (
+              <>
                 <Button
-                  title="Duplicate draft"
-                  aria-label={`Duplicate ${p.title}`}
-                  onClick={async () => {
-                    try {
-                      await data.save({
-                        title: `${p.title} (copy)`,
-                        body: p.body,
-                        platforms: p.platforms,
-                        variants: p.variants,
-                        youtube: p.youtube,
-                      });
-                      await query.invalidateQueries({
-                        queryKey: ["workspace"],
-                      });
-                      toast.success("Draft duplicated");
-                    } catch (e) {
-                      toast.error((e as Error).message);
-                    }
-                  }}
+                  variant="secondary"
+                  onClick={() => handleBulkAction("bulk-approve")}
+                  disabled={busy}
+                  style={{ fontSize: "0.85rem" }}
                 >
-                  <Copy size={15} />
+                  <Check size={14} /> Bulk Approve
                 </Button>
-              ) : null}
-            </div>
-            {p.status === "UNCERTAIN" && (
-              <p className="error">
-                Publishing outcome needs manual verification. Automatic retry is
-                blocked to prevent duplicates.
-              </p>
+                <Button
+                  variant="secondary"
+                  onClick={() => handleBulkAction("bulk-reject")}
+                  disabled={busy}
+                  style={{ fontSize: "0.85rem" }}
+                >
+                  <X size={14} /> Bulk Return to Drafts
+                </Button>
+              </>
             )}
-          </article>
-        ))}
+
+            {canSchedule && (
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowBulkScheduleModal(true)}
+                  disabled={busy}
+                  style={{ fontSize: "0.85rem" }}
+                >
+                  <CalendarDays size={14} /> Bulk Schedule
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => handleBulkAction("bulk-publish")}
+                  disabled={busy}
+                  style={{ fontSize: "0.85rem" }}
+                >
+                  <Send size={14} /> Bulk Publish Now
+                </Button>
+              </>
+            )}
+
+            <Button
+              variant="ghost"
+              onClick={() => setSelectedIds([])}
+              style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}
+            >
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="content-grid">
+        {posts.map((p) => {
+          const isSelected = selectedIds.includes(p.id);
+          return (
+            <article
+              className="content-card"
+              key={p.id}
+              style={{
+                border: isSelected ? "1px solid #6366f1" : undefined,
+                background: isSelected ? "rgba(99, 102, 241, 0.05)" : undefined,
+              }}
+            >
+              <div className="content-card-head">
+                <div className="row" style={{ alignItems: "center", gap: "10px" }}>
+                  <button
+                    type="button"
+                    onClick={() => toggleSelect(p.id)}
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: isSelected ? "#34d399" : "var(--color-text-muted)" }}
+                  >
+                    {isSelected ? <CheckSquare size={18} /> : <Square size={18} />}
+                  </button>
+                  {p.platforms.map((pl) => (
+                    <PlatformIcon platform={pl} key={pl} />
+                  ))}
+                </div>
+                <StatusBadge status={p.status} />
+              </div>
+              <Link to={`/app/compose?id=${p.id}`}>
+                <h2>{p.title}</h2>
+                <p className="content-excerpt">{p.body}</p>
+              </Link>
+              <div className="content-card-meta">
+                <span className="avatar tiny">{p.creator[0]}</span>
+                <span>{p.creator}</span>
+                <small>
+                  {p.scheduledAt
+                    ? dateLabel(p.scheduledAt, s.workspace.timezone)
+                    : "Unscheduled"}
+                </small>
+              </div>
+              <div className="content-card-actions">
+                <Button asChild variant="ghost">
+                  <Link to={`/app/compose?id=${p.id}`}>
+                    Open <ArrowUpRight size={14} />
+                  </Link>
+                </Button>
+                <Button
+                  variant="ghost"
+                  title="Open Discussion & Activity Timeline"
+                  onClick={() => setDiscussionPost(p)}
+                >
+                  <MessageSquare size={14} /> Discuss
+                </Button>
+                {p.status === "NEEDS_REVIEW" && canApprove ? (
+                  <>
+                    <Button
+                      title="Return to drafts"
+                      aria-label={`Return ${p.title} to drafts`}
+                      onClick={() => action(p, "reject")}
+                      disabled={busy}
+                    >
+                      <X size={15} />
+                    </Button>
+                    <Button onClick={() => action(p, "approve")} disabled={busy}>
+                      <Check size={15} />
+                      Approve
+                    </Button>
+                  </>
+                ) : p.status === "SCHEDULED" && canSchedule ? (
+                  <Button onClick={() => action(p, "cancel")} disabled={busy}>
+                    Cancel schedule
+                  </Button>
+                ) : (p.status === "APPROVED" ||
+                    (!s.workspace.requireApproval && p.status === "DRAFT")) &&
+                  canSchedule ? (
+                  <Button onClick={() => setSchedule(p)}>
+                    <CalendarDays size={15} />
+                    Schedule
+                  </Button>
+                ) : canEdit ? (
+                  <Button
+                    title="Duplicate draft"
+                    aria-label={`Duplicate ${p.title}`}
+                    onClick={async () => {
+                      try {
+                        await data.save({
+                          title: `${p.title} (copy)`,
+                          body: p.body,
+                          platforms: p.platforms,
+                          variants: p.variants,
+                          youtube: p.youtube,
+                        });
+                        await query.invalidateQueries({
+                          queryKey: ["workspace"],
+                        });
+                        toast.success("Draft duplicated");
+                      } catch (e) {
+                        toast.error((e as Error).message);
+                      }
+                    }}
+                  >
+                    <Copy size={15} />
+                  </Button>
+                ) : null}
+              </div>
+              {p.status === "UNCERTAIN" && (
+                <p className="error">
+                  Publishing outcome needs manual verification. Automatic retry is
+                  blocked to prevent duplicates.
+                </p>
+              )}
+            </article>
+          );
+        })}
       </div>
       {!posts.length && (
         <Empty
@@ -236,6 +426,46 @@ export default function Library({
           </p>
         </Empty>
       )}
+
+      {/* Bulk Schedule Modal */}
+      <Modal
+        open={showBulkScheduleModal}
+        onOpenChange={(o) => setShowBulkScheduleModal(o)}
+        title="Bulk Schedule Selected Posts"
+        description={`Schedule ${selectedIds.length} posts simultaneously.`}
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const d = new Date(bulkScheduleDate);
+            if (!Number.isFinite(d.getTime()) || d.getTime() < Date.now() + 30000) {
+              toast.error("Choose a time at least 30 seconds in the future.");
+              return;
+            }
+            handleBulkAction("bulk-schedule", { scheduledAt: d.toISOString() });
+          }}
+        >
+          <label>
+            Publishing date and time
+            <input
+              type="datetime-local"
+              required
+              value={bulkScheduleDate}
+              onChange={(e) => setBulkScheduleDate(e.target.value)}
+            />
+          </label>
+          <p className="form-note">
+            Entered in {Intl.DateTimeFormat().resolvedOptions().timeZone}.
+            Displayed in your workspace timezone: {s.workspace.timezone}.
+          </p>
+          <Button type="submit" variant="primary" disabled={busy}>
+            <CalendarDays size={16} />
+            {busy ? "Scheduling..." : `Schedule ${selectedIds.length} Posts`}
+          </Button>
+        </form>
+      </Modal>
+
+      {/* Single Item Schedule Modal */}
       <Modal
         open={!!schedule}
         onOpenChange={(o) => {
@@ -288,6 +518,15 @@ export default function Library({
           </Button>
         </form>
       </Modal>
+
+      {/* Content Discussion Panel Drawer */}
+      <ContentDiscussionPanel
+        open={!!discussionPost}
+        onClose={() => setDiscussionPost(null)}
+        post={discussionPost}
+        members={s.members}
+      />
     </>
   );
 }
+

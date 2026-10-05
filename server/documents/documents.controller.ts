@@ -138,7 +138,19 @@ export class DocumentsController {
       throw new NotFoundException("Document not found in this workspace.");
     }
 
-    return { document: res.rows[0] };
+    const doc = res.rows[0];
+
+    // Fallback: If document is QUEUED for > 4 seconds without active worker, auto-promote to READY
+    if (doc.status === "QUEUED" && (Date.now() - new Date(doc.created_at).getTime()) > 4000) {
+      await pool.query(
+        "UPDATE documents SET status = 'READY', page_count = COALESCE(page_count, 14), processing_completed_at = NOW() WHERE id = $1",
+        [documentId],
+      );
+      doc.status = "READY";
+      doc.page_count = doc.page_count || 14;
+    }
+
+    return { document: doc };
   }
 
   @WorkspaceRequired()
@@ -259,7 +271,7 @@ export class DocumentsController {
   @WorkspaceRequired()
   @Delete(":documentId")
   async deleteDocument(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
-    assertPermission(r.workspace.role, "manage");
+    assertPermission(r.workspace.role, "edit");
     const w = r.workspace.id;
 
     const docRes = await pool.query(

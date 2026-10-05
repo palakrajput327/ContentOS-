@@ -25,6 +25,7 @@ import { Logo, Button, PlatformIcon } from "./ui";
 import { data, request } from "../lib/api";
 import { useSession } from "../lib/session";
 import { platforms, type Snapshot } from "../lib/model";
+import { NotificationBell } from "./NotificationBell";
 export const useWorkspace = () => {
   const id = useSession((x) => x.workspaceId);
   return useQuery({ queryKey: ["workspace", id], queryFn: data.snapshot, refetchInterval: 15000 });
@@ -249,18 +250,7 @@ export default function Shell() {
             </span>
           </div>
           <div className="row">
-            <button
-              className="icon-button"
-              aria-label="Notifications"
-              onClick={() => setNotifications(!notifications)}
-            >
-              <Bell size={18} />
-            </button>
-            {notifications && (
-              <div className="notification-popover">
-                No notifications yet. Workspace actions appear in Activity log.
-              </div>
-            )}
+            <NotificationBell />
             <span className="timezone-label">{session.user?.name}</span>
             <Link
               to="/app/channels"
