@@ -27,12 +27,14 @@ import {
   MessageSquare,
   Share2,
   Trash2,
+  Wand2,
 } from "lucide-react";
 import { Button, PlatformIcon, StatusBadge } from "../components/ui";
 import { platforms, type Platform, type Snapshot } from "../lib/model";
 import { data, request, documentsApi, type DocItem, type KnowledgeItem } from "../lib/api";
 import { useSession } from "../lib/session";
 import { PublishPreviewModal } from "../components/PublishPreviewModal";
+import { ClipdropImageModal } from "../components/ClipdropImageModal";
 import { BatchProgressIndicator } from "../components/BatchProgressIndicator";
 
 function formatExcerpt(text: string | null | undefined): string {
@@ -58,6 +60,7 @@ export default function AIStudio() {
   const query = useQueryClient();
   const demo = useSession((x) => x.demo);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [showClipdropModal, setShowClipdropModal] = useState(false);
 
   // Studio Mode: 'topic' | 'pdf'
   const [activeTab, setActiveTab] = useState<"topic" | "pdf">("topic");
@@ -1252,17 +1255,38 @@ export default function AIStudio() {
                     <label style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text-muted)" }}>
                       {activePreviewPlatform} Copy Variant
                     </label>
-                    <span
-                      style={{
-                        fontSize: "0.75rem",
-                        color:
-                          (generatedVariants[activePreviewPlatform]?.length || 0) > platformLimits[activePreviewPlatform]
-                            ? "#ef4444"
-                            : "var(--color-text-muted)",
-                      }}
-                    >
-                      {generatedVariants[activePreviewPlatform]?.length || 0} / {platformLimits[activePreviewPlatform]} chars
-                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowClipdropModal(true)}
+                        style={{
+                          background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))",
+                          border: "1px solid rgba(168, 85, 247, 0.4)",
+                          color: "#c084fc",
+                          padding: "4px 10px",
+                          borderRadius: "6px",
+                          fontSize: "0.75rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "5px",
+                        }}
+                      >
+                        <Wand2 size={13} /> 🎨 Generate Visual
+                      </button>
+                      <span
+                        style={{
+                          fontSize: "0.75rem",
+                          color:
+                            (generatedVariants[activePreviewPlatform]?.length || 0) > platformLimits[activePreviewPlatform]
+                              ? "#ef4444"
+                              : "var(--color-text-muted)",
+                        }}
+                      >
+                        {generatedVariants[activePreviewPlatform]?.length || 0} / {platformLimits[activePreviewPlatform]} chars
+                      </span>
+                    </div>
                   </div>
                   <textarea
                     rows={8}
@@ -1293,6 +1317,31 @@ export default function AIStudio() {
                   <p style={{ fontSize: "0.85rem", whiteSpace: "pre-wrap", margin: "0 0 12px", lineHeight: 1.45 }}>
                     {generatedVariants[activePreviewPlatform] || "No content for this platform variant yet."}
                   </p>
+
+                  <div style={{ margin: "10px 0" }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowClipdropModal(true)}
+                      style={{
+                        background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2))",
+                        border: "1px dashed rgba(168, 85, 247, 0.5)",
+                        color: "#c084fc",
+                        padding: "8px 12px",
+                        borderRadius: "8px",
+                        fontSize: "0.82rem",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        width: "100%",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Wand2 size={14} /> 🎨 Generate Visual with Clipdrop for {activePreviewPlatform}
+                    </button>
+                  </div>
+
                   <div className="social-reactions" style={{ display: "flex", gap: "16px", fontSize: "0.75rem", color: "var(--color-text-muted)", paddingTop: "8px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                     <span style={{ display: "flex", alignItems: "center", gap: "4px" }}><ThumbsUp size={13} /> Like</span>
                     <span style={{ display: "flex", alignItems: "center", gap: "4px" }}><MessageSquare size={13} /> Comment</span>
@@ -1302,6 +1351,22 @@ export default function AIStudio() {
 
                 {/* Save & Preview Actions */}
                 <div style={{ marginTop: "auto", paddingTop: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setShowClipdropModal(true)}
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      fontSize: "0.9rem",
+                      background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2))",
+                      border: "1px solid rgba(168, 85, 247, 0.4)",
+                      color: "#c084fc",
+                      fontWeight: 600,
+                    }}
+                  >
+                    <Wand2 size={16} />
+                    🎨 Generate Visual with Clipdrop AI
+                  </Button>
                   <Button
                     variant="secondary"
                     onClick={() => setShowPreviewModal(true)}
@@ -1334,6 +1399,22 @@ export default function AIStudio() {
         body={Object.values(generatedVariants)[0] || ""}
         platforms={selectedPlatforms}
         variants={generatedVariants}
+      />
+
+      <ClipdropImageModal
+        isOpen={showClipdropModal}
+        onClose={() => setShowClipdropModal(false)}
+        initialContentText={[
+          generatedVariants[activePreviewPlatform] || topic,
+          knowledgeItems
+            .filter((k) => selectedKnowledgeIds.includes(k.id))
+            .map((k) => `${k.knowledge_key}: ${typeof k.value === "string" ? k.value : JSON.stringify(k.value)}`)
+            .join("\n"),
+        ]
+          .filter(Boolean)
+          .join("\n\nExtracted Knowledge:\n")}
+        initialTitle={generatedTitle}
+        targetPlatform={activePreviewPlatform}
       />
     </div>
   );

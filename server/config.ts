@@ -41,6 +41,7 @@ export function loadConfig() {
       LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
       LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(10).default(3),
       FEATURE_KNOWLEDGE_ENGINE: z.string().default("true"),
+      CLIPDROP_API_KEY: z.string().optional(),
     })
     .parse(process.env);
   if (

@@ -79,7 +79,7 @@ const inputSchema = z.object({
   variants: z
     .record(platformSchema, variantSchema)
     .default({}),
-  youtube: youtubeSchema.optional(),
+  youtube: youtubeSchema.optional().nullable().transform((v) => (v === null ? undefined : v)),
   version: z.number().int().positive().optional(),
 });
 
@@ -231,12 +231,54 @@ export class ContentController {
         },
       );
 
-      // 4. Invoke Provider
+      // 4. Extract platform-specific variant caption & media URL
+      let textToPublish = content.body || "";
+      let mediaUrlToPublish: string | undefined = content.media_url || undefined;
+
+      if (content.variants) {
+        try {
+          const variants =
+            typeof content.variants === "string"
+              ? JSON.parse(content.variants)
+              : content.variants;
+          const platformKey = Object.keys(variants).find(
+            (k) => k.toLowerCase() === acc.platform.toLowerCase(),
+          );
+          const variant = platformKey ? variants[platformKey] : null;
+
+          if (variant) {
+            if (typeof variant === "string") {
+              textToPublish = variant;
+            } else if (typeof variant === "object") {
+              if (variant.caption) textToPublish = variant.caption;
+              if (variant.mediaUrl) mediaUrlToPublish = variant.mediaUrl;
+            }
+          }
+        } catch (e) {
+          // Fall back to default content.body
+        }
+      }
+
+      if (!mediaUrlToPublish && content.media_asset_id) {
+        const assetRes = await db.query(
+          "SELECT public_url FROM media_assets WHERE id = $1 AND workspace_id = $2",
+          [content.media_asset_id, w],
+        );
+        if (assetRes.rowCount && assetRes.rows[0].public_url) {
+          mediaUrlToPublish = assetRes.rows[0].public_url;
+        }
+      }
+
+      // 5. Invoke Provider
       const result = await provider.publishText(
         acc.platform === "telegram"
           ? { botToken, chatId: acc.provider_id }
           : { token: botToken, author: acc.provider_id },
-        { text: content.body, destination: acc.provider_id },
+        {
+          text: textToPublish,
+          destination: acc.provider_id,
+          mediaUrl: mediaUrlToPublish,
+        },
       );
 
       if (!result.success) {
@@ -348,7 +390,7 @@ export class ContentController {
   @Post() async create(@Req() r: AuthedRequest, @Body() input: unknown) {
     assertPermission(r.workspace.role, "edit");
     const v = inputSchema.parse(input);
-    if (v.platforms.includes("YouTube"))
+    if (v.platforms.includes("YouTube") && v.youtube)
       await validateYouTubeInput(pool, r.workspace.id, v.youtube);
     else if (!v.body) throw new BadRequestException("Post text is required.");
     const id = randomUUID();
@@ -393,15 +435,15 @@ export class ContentController {
   ) {
     assertPermission(r.workspace.role, "edit");
     const v = inputSchema
-      .extend({ version: z.number().int().positive() })
+      .extend({ version: z.number().int().positive().optional() })
       .parse(input);
     return transaction(async (db) => {
       const old = await locked(db, id, r.workspace.id);
-      if (v.platforms.includes("YouTube"))
+      if (v.platforms.includes("YouTube") && v.youtube)
         await validateYouTubeInput(db, r.workspace.id, v.youtube);
       else if (!v.body) throw new BadRequestException("Post text is required.");
       assertEditable(old.status);
-      if (old.version !== v.version)
+      if (v.version !== undefined && old.version !== v.version)
         throw new ConflictException(
           "This post changed since you opened it. Reload before editing.",
         );

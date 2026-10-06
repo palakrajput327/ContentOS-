@@ -29,12 +29,14 @@ import {
   Send as TelegramIcon,
   ShieldCheck,
   Zap,
+  Wand2,
 } from "lucide-react";
 import { Button, PlatformIcon, StatusBadge } from "../components/ui";
 import { platforms, type Platform, type Snapshot } from "../lib/model";
 import { data, request } from "../lib/api";
 import { useSession } from "../lib/session";
 import { PublishPreviewModal } from "../components/PublishPreviewModal";
+import { ClipdropImageModal } from "../components/ClipdropImageModal";
 import {
   PLATFORM_CAPABILITIES,
   validatePlatformVariant,
@@ -95,6 +97,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [showClipdropModal, setShowClipdropModal] = useState(false);
 
   // Permissions & editable states
   const editable =
@@ -132,10 +135,13 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         sizeBytes: file.size,
       });
 
+      const wid = useSession.getState().workspaceId;
       const res = await fetch(presign.uploadUrl, {
         method: "PUT",
+        credentials: "include",
         headers: {
           "Content-Type": file.type || "application/octet-stream",
+          ...(wid ? { "X-Workspace-Id": wid } : {}),
           ...(presign.headers || {}),
         },
         body: file,
@@ -208,16 +214,28 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       }
       setBusy("saving");
 
+      const cleanVariants: Record<string, any> = {};
+      selected.forEach((p) => {
+        if (variants[p]) {
+          cleanVariants[p] = variants[p];
+        } else {
+          cleanVariants[p] = {
+            title,
+            caption: body,
+            mediaType: postType,
+            mediaUrl: mediaUrl || undefined,
+            mediaAssetId: mediaAssetId || undefined,
+          };
+        }
+      });
+
       const saved = await data.save({
         ...post,
         title: title.trim(),
         body: body.trim(),
         platforms: selected,
-        variants: {
-          ...variants,
-          mediaType: postType,
-          mediaUrl: mediaUrl || undefined,
-        },
+        variants: cleanVariants,
+        youtube: post?.youtube || undefined,
       });
 
       if (review) await data.transition(saved.id, "review");
@@ -308,17 +326,29 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
 
       setBusy("publishing");
 
+      const cleanVariants: Record<string, any> = {};
+      selected.forEach((p) => {
+        if (variants[p]) {
+          cleanVariants[p] = variants[p];
+        } else {
+          cleanVariants[p] = {
+            title,
+            caption: body,
+            mediaType: postType,
+            mediaUrl: mediaUrl || undefined,
+            mediaAssetId: mediaAssetId || undefined,
+          };
+        }
+      });
+
       // 1. Save draft first
       const saved = await data.save({
         ...post,
         title: title.trim(),
         body: body.trim(),
         platforms: selected,
-        variants: {
-          ...variants,
-          mediaType: postType,
-          mediaUrl: mediaUrl || undefined,
-        },
+        variants: cleanVariants,
+        youtube: post?.youtube || undefined,
       });
 
       // 2. Identify target connected accounts for each selected platform
@@ -616,6 +646,28 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                   </div>
                 ) : (
                   <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPostType("image");
+                        setShowClipdropModal(true);
+                      }}
+                      style={{
+                        background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))",
+                        border: "1px solid rgba(168, 85, 247, 0.4)",
+                        color: "#c084fc",
+                        padding: "8px 14px",
+                        borderRadius: "8px",
+                        fontWeight: 600,
+                        fontSize: "0.85rem",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      <Wand2 size={14} /> Generate with Clipdrop
+                    </button>
                     <label
                       className="button primary"
                       style={{
@@ -814,15 +866,40 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                           <PlatformIcon platform={p} />
                           <strong style={{ fontSize: "1rem" }}>{p} Publishing Card</strong>
                         </div>
-                        {validation.valid ? (
-                          <span className="badge" style={{ background: "rgba(16,185,129,0.15)", color: "#34d399" }}>
-                            <CheckCircle2 size={12} /> Valid
-                          </span>
-                        ) : (
-                          <span className="badge" style={{ background: "rgba(239,68,68,0.15)", color: "#f87171" }}>
-                            <AlertTriangle size={12} /> Issues
-                          </span>
-                        )}
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPreview(p);
+                              setPostType("image");
+                              setShowClipdropModal(true);
+                            }}
+                            style={{
+                              background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))",
+                              border: "1px solid rgba(168, 85, 247, 0.4)",
+                              color: "#c084fc",
+                              padding: "4px 10px",
+                              borderRadius: "6px",
+                              fontSize: "0.75rem",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "5px",
+                            }}
+                          >
+                            <Wand2 size={13} /> 🎨 Generate Visual
+                          </button>
+                          {validation.valid ? (
+                            <span className="badge" style={{ background: "rgba(16,185,129,0.15)", color: "#34d399" }}>
+                              <CheckCircle2 size={12} /> Valid
+                            </span>
+                          ) : (
+                            <span className="badge" style={{ background: "rgba(239,68,68,0.15)", color: "#f87171" }}>
+                              <AlertTriangle size={12} /> Issues
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       {/* YouTube specific fields */}
@@ -1030,6 +1107,31 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         onClose={() => setShowDiscussion(false)}
         post={post || null}
         members={s.members}
+      />
+
+      <ClipdropImageModal
+        isOpen={showClipdropModal}
+        onClose={() => setShowClipdropModal(false)}
+        initialContentText={body || topic}
+        initialTitle={title}
+        targetPlatform={preview}
+        contentId={post?.id}
+        onAttach={(result) => {
+          setMediaUrl(result.url);
+          setMediaAssetId(result.assetId);
+          setPostType("image");
+          setVariants((prev) => {
+            const next = { ...prev };
+            selected.forEach((p) => {
+              const cur = next[p] || { caption: body, title: title };
+              cur.mediaType = "image";
+              cur.mediaUrl = result.url;
+              cur.mediaAssetId = result.assetId;
+              next[p] = cur;
+            });
+            return next;
+          });
+        }}
       />
     </>
   );

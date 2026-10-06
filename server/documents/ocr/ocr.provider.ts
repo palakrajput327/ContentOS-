@@ -40,6 +40,7 @@ export class TesseractOcrProvider implements OcrProvider {
 
   async extract(input: OcrInput): Promise<OcrResult> {
     try {
+      // @ts-ignore
       const { createWorker } = await import("tesseract.js");
       const worker = await createWorker("eng");
       try {
@@ -61,7 +62,9 @@ export class TesseractOcrProvider implements OcrProvider {
   async extractFromPDF(pdfBuffer: Buffer, maxOcrPages = 8, totalPages?: number): Promise<Map<number, string>> {
     const pageTexts = new Map<number, string>();
     try {
+      // @ts-ignore
       const { PDFParse } = await import("pdf-parse");
+      // @ts-ignore
       const { createWorker } = await import("tesseract.js");
       const parser = new PDFParse({ data: pdfBuffer });
       const worker = await createWorker("eng");

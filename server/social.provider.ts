@@ -1,9 +1,15 @@
 import { uploadYouTubeVideo } from "./youtube.api.js";
 import type { YouTubeInput } from "./youtube.schema.js";
 import { BadRequestException } from "@nestjs/common";
+import { getStorageProvider } from "./storage/storage.factory.js";
+import * as path from "node:path";
 
 export type SocialProviderName =
-  "telegram" | "linkedin" | "instagram" | "x" | "youtube";
+  | "telegram"
+  | "linkedin"
+  | "instagram"
+  | "x"
+  | "youtube";
 
 export interface SocialProviderCapabilities {
   text: boolean;
@@ -28,6 +34,7 @@ export interface ConnectionValidationResult {
 export interface PublishTextRequest {
   text: string;
   destination: string;
+  mediaUrl?: string;
 }
 
 export interface PublishResult {
@@ -60,6 +67,57 @@ export interface SocialProvider {
     session: string | null,
     saveSession: (url: string) => Promise<void>,
   ): Promise<any>;
+}
+
+async function getMediaBuffer(
+  imageUrl: string,
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  if (imageUrl.includes("/storage/local/download") || imageUrl.startsWith("/")) {
+    try {
+      const urlObj = new URL(imageUrl, "http://127.0.0.1:3001");
+      const bucket = urlObj.searchParams.get("bucket");
+      const key = urlObj.searchParams.get("key");
+      if (bucket && key) {
+        const { provider } = getStorageProvider();
+        const stream = await provider.read(bucket, key);
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        const buffer = Buffer.concat(chunks);
+        const ext = path.extname(key).toLowerCase();
+        const mimeType =
+          ext === ".jpg" || ext === ".jpeg"
+            ? "image/jpeg"
+            : ext === ".webp"
+            ? "image/webp"
+            : "image/png";
+        return { buffer, mimeType };
+      }
+    } catch (e) {
+      console.error("[Media Resolver] Error reading local storage stream:", e);
+    }
+  }
+
+  try {
+    let fullUrl = imageUrl;
+    if (imageUrl.startsWith("/")) {
+      const port = process.env.PORT || "3001";
+      const baseUrl =
+        process.env.PUBLIC_URL ||
+        process.env.APP_URL ||
+        `http://127.0.0.1:${port}`;
+      fullUrl = `${baseUrl}${imageUrl}`;
+    }
+    const res = await fetch(fullUrl);
+    if (!res.ok) return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const mimeType = res.headers.get("content-type") || "image/png";
+    return { buffer, mimeType };
+  } catch (err) {
+    console.error("[Media Resolver] Error fetching remote image:", err);
+    return null;
+  }
 }
 
 export class TelegramProvider implements SocialProvider {
@@ -104,7 +162,9 @@ export class TelegramProvider implements SocialProvider {
           status: "INVALID_CREDENTIALS",
           providerId: chatId,
           name: "Telegram Bot",
-          details: { error: meData.description || "Invalid bot token." },
+          details: {
+            error: meData.description || "Telegram Bot Token is expired or invalid.",
+          },
         };
       }
       const botName =
@@ -117,7 +177,8 @@ export class TelegramProvider implements SocialProvider {
       const chatData = await chatRes.json();
       if (!chatRes.ok || !chatData.ok) {
         const desc = chatData.description || "";
-        const isNotFound = desc === "Not Found" || desc.toLowerCase().includes("chat not found");
+        const isNotFound =
+          desc === "Not Found" || desc.toLowerCase().includes("chat not found");
         return {
           valid: false,
           status: "DESTINATION_NOT_FOUND",
@@ -140,7 +201,7 @@ export class TelegramProvider implements SocialProvider {
       );
       const memberData = await memberRes.json();
       if (memberRes.ok && memberData.ok) {
-        const memberStatus = memberData.result.status; // administrator, creator, member, left, restricted, kicked
+        const memberStatus = memberData.result.status;
         if (memberStatus === "administrator" || memberStatus === "creator") {
           const canPost = memberData.result.can_post_messages !== false;
           if (!canPost) {
@@ -190,6 +251,51 @@ export class TelegramProvider implements SocialProvider {
     }
 
     try {
+      if (request.mediaUrl) {
+        const mediaInfo = await getMediaBuffer(request.mediaUrl);
+        if (mediaInfo) {
+          const formData = new FormData();
+          formData.append("chat_id", chatId);
+          const blob = new Blob([new Uint8Array(mediaInfo.buffer)], {
+            type: mediaInfo.mimeType,
+          });
+          formData.append("photo", blob, "visual.png");
+          formData.append("caption", request.text);
+          formData.append("parse_mode", "HTML");
+
+          const res = await fetch(
+            `https://api.telegram.org/bot${botToken}/sendPhoto`,
+            {
+              method: "POST",
+              body: formData,
+            },
+          );
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            const desc = data.description || "";
+            const isTokenError =
+              res.status === 401 ||
+              res.status === 403 ||
+              desc.toLowerCase().includes("unauthorized") ||
+              desc.toLowerCase().includes("token");
+
+            return {
+              success: false,
+              publishedAt: new Date(),
+              error: isTokenError
+                ? "Telegram Bot Token has expired or is invalid. Please reconnect your Telegram channel with a valid Bot Token."
+                : desc || "Failed to publish photo to Telegram.",
+            };
+          }
+
+          return {
+            success: true,
+            providerPostId: String(data.result.message_id),
+            publishedAt: new Date(data.result.date * 1000),
+          };
+        }
+      }
+
       const res = await fetch(
         `https://api.telegram.org/bot${botToken}/sendMessage`,
         {
@@ -205,10 +311,19 @@ export class TelegramProvider implements SocialProvider {
 
       const data = await res.json();
       if (!res.ok || !data.ok) {
+        const desc = data.description || "";
+        const isTokenError =
+          res.status === 401 ||
+          res.status === 403 ||
+          desc.toLowerCase().includes("unauthorized") ||
+          desc.toLowerCase().includes("token");
+
         return {
           success: false,
           publishedAt: new Date(),
-          error: data.description || "Failed to publish message to Telegram.",
+          error: isTokenError
+            ? "Telegram Bot Token has expired or is invalid. Please reconnect your Telegram channel with a valid Bot Token."
+            : desc || "Failed to publish message to Telegram.",
         };
       }
 
@@ -227,6 +342,8 @@ export class TelegramProvider implements SocialProvider {
   }
 }
 
+
+
 export class LinkedInProvider implements SocialProvider {
   readonly provider: SocialProviderName = "linkedin";
   readonly capabilities: SocialProviderCapabilities = {
@@ -235,6 +352,81 @@ export class LinkedInProvider implements SocialProvider {
     video: false,
     document: false,
   };
+
+  private async uploadLinkedInImage(
+    token: string,
+    author: string,
+    mediaInfo: { buffer: Buffer; mimeType: string },
+  ): Promise<string | null> {
+    try {
+      const apiVersion = process.env.LINKEDIN_API_VERSION || "202609";
+      console.log(
+        `[LinkedIn Publish] Initializing image upload for author: ${author}, buffer size: ${mediaInfo.buffer.length} bytes`,
+      );
+
+      const initRes = await fetch(
+        "https://api.linkedin.com/rest/images?action=initializeUpload",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "LinkedIn-Version": apiVersion,
+            "X-Restli-Protocol-Version": "2.0.0",
+          },
+          body: JSON.stringify({
+            initializeUploadRequest: {
+              owner: author,
+            },
+          }),
+        },
+      );
+
+      const initText = await initRes.text();
+      console.log(
+        `[LinkedIn Publish] initializeUpload status: ${initRes.status}, body: ${initText}`,
+      );
+
+      if (!initRes.ok) return null;
+      const initData = JSON.parse(initText);
+      const uploadUrl = initData.value?.uploadUrl;
+      const imageUrn = initData.value?.image;
+
+      if (!uploadUrl || !imageUrn) {
+        console.error(
+          `[LinkedIn Publish] Missing uploadUrl or imageUrn in initializeUpload output:`,
+          initData,
+        );
+        return null;
+      }
+
+      console.log(
+        `[LinkedIn Publish] Got imageUrn: ${imageUrn}. Performing binary PUT upload...`,
+      );
+
+      const uploadRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": mediaInfo.mimeType,
+        },
+        body: new Uint8Array(mediaInfo.buffer),
+      });
+
+      console.log(
+        `[LinkedIn Publish] Binary PUT upload status: ${uploadRes.status}, statusText: ${uploadRes.statusText}`,
+      );
+
+      if (!uploadRes.ok && uploadRes.status !== 201) return null;
+      return imageUrn;
+    } catch (err: any) {
+      console.error(
+        "[LinkedIn Publish] Exception during uploadLinkedInImage:",
+        err,
+      );
+      return null;
+    }
+  }
 
   async validateConnection(
     config: unknown,
@@ -288,8 +480,63 @@ export class LinkedInProvider implements SocialProvider {
     const { token, author } = (config || {}) as any;
     if (!token)
       throw new BadRequestException("LinkedIn access token is required.");
+
     try {
       const apiVersion = process.env.LINKEDIN_API_VERSION || "202609";
+      let mediaPayload: any = undefined;
+
+      if (request.mediaUrl) {
+        console.log(
+          `[LinkedIn Publish] Resolving media buffer for URL: ${request.mediaUrl}`,
+        );
+        const mediaInfo = await getMediaBuffer(request.mediaUrl);
+        if (mediaInfo) {
+          console.log(
+            `[LinkedIn Publish] Media buffer resolved successfully. Buffer size: ${mediaInfo.buffer.length}, mimeType: ${mediaInfo.mimeType}`,
+          );
+          const imageUrn = await this.uploadLinkedInImage(
+            token,
+            author,
+            mediaInfo,
+          );
+          if (imageUrn) {
+            console.log(
+              `[LinkedIn Publish] LinkedIn image uploaded successfully, imageUrn: ${imageUrn}`,
+            );
+            mediaPayload = {
+              media: {
+                id: imageUrn,
+              },
+            };
+          } else {
+            console.error(
+              `[LinkedIn Publish] uploadLinkedInImage returned null for author: ${author}`,
+            );
+          }
+        } else {
+          console.error(
+            `[LinkedIn Publish] Could not fetch or resolve media buffer from URL: ${request.mediaUrl}`,
+          );
+        }
+      }
+
+      const postBody: any = {
+        author,
+        commentary: request.text,
+        visibility: "PUBLIC",
+        distribution: {
+          feedDistribution: "MAIN_FEED",
+          targetEntities: [],
+          thirdPartyDistributionChannels: [],
+        },
+        lifecycleState: "PUBLISHED",
+        isReshareDisabledByAuthor: false,
+      };
+
+      if (mediaPayload) {
+        postBody.content = mediaPayload;
+      }
+
       const res = await fetch("https://api.linkedin.com/rest/posts", {
         method: "POST",
         headers: {
@@ -298,19 +545,9 @@ export class LinkedInProvider implements SocialProvider {
           "LinkedIn-Version": apiVersion,
           "X-Restli-Protocol-Version": "2.0.0",
         },
-        body: JSON.stringify({
-          author,
-          commentary: request.text,
-          visibility: "PUBLIC",
-          distribution: {
-            feedDistribution: "MAIN_FEED",
-            targetEntities: [],
-            thirdPartyDistributionChannels: [],
-          },
-          lifecycleState: "PUBLISHED",
-          isReshareDisabledByAuthor: false,
-        }),
+        body: JSON.stringify(postBody),
       });
+
       if (!res.ok) {
         const body = await res.text();
         return {

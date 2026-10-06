@@ -99,7 +99,7 @@ class ErrorFilter implements ExceptionFilter {
     if (e instanceof ZodError) {
       status = 400;
       message = e.issues
-        .map((i) => `${i.path.join(".")}: ${i.message}`)
+        .map((i) => `${i.path.length > 0 ? i.path.join(".") : "Validation"}: ${i.message}`)
         .join("; ");
     } else if (e instanceof HttpException) {
       status = e.getStatus();
@@ -158,6 +158,8 @@ import { BatchController } from "./batch/batch.controller.js";
 import { CalendarController } from "./calendar/calendar.controller.js";
 import { NotificationsController } from "./notifications/notifications.controller.js";
 import { CommentsController } from "./comments/comments.controller.js";
+import { ClipdropController } from "./clipdrop/clipdrop.controller.js";
+import { ClipdropService } from "./clipdrop/clipdrop.service.js";
 @Module({
   controllers: [
     PhaseAuthController,
@@ -177,8 +179,9 @@ import { CommentsController } from "./comments/comments.controller.js";
     CalendarController,
     NotificationsController,
     CommentsController,
+    ClipdropController,
   ],
-  providers: [AdminGuard, { provide: APP_GUARD, useClass: PhaseGuard }],
+  providers: [AdminGuard, { provide: APP_GUARD, useClass: PhaseGuard }, ClipdropService],
 })
 class PhaseModule {}
 export async function bootstrap() {
@@ -367,7 +370,7 @@ export async function bootstrap() {
 //     );
 //     process.exit(1);
 //   });
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (process.argv[1] && fileURLToPath(import.meta.url).toLowerCase() === process.argv[1].toLowerCase()) {
   bootstrap().catch((error) => {
     console.error("Authentication API startup failed:", error);
     process.exit(1);

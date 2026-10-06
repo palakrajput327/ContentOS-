@@ -127,3 +127,15 @@ Processes AI/PDF jobs via BullMQ.
 | **Readiness** | http://localhost:3001/api/v1/health/ready |
 
 Make sure your [.env](cci:7://file:///d:/smm-panel-5/.env:0:0-0:0) file is configured (copy from [.env.example](cci:7://file:///d:/smm-panel-5/.env.example:0:0-0:0) if needed). Let me know if you want me to check or set anything up!
+
+# Terminal 1: Backend API
+npm run start:api
+
+# Terminal 2: Background PDF/Media Worker
+npm run start:worker
+
+# Terminal 3: Mail Worker
+npm run start:mail
+
+# Terminal 4: Frontend Application
+npm run dev

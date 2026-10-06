@@ -23,6 +23,8 @@ import { ContentController } from "./content.controller.js";
 import { SocialController } from "./social.controller.js";
 import { AIController } from "./ai.controller.js";
 import { AnalyticsController } from "./analytics.controller.js";
+import { ClipdropController } from "./clipdrop/clipdrop.controller.js";
+import { ClipdropService } from "./clipdrop/clipdrop.service.js";
 import { ProviderError } from "./providers/social.js";
 import { pool } from "./db.js";
 @Catch()
@@ -72,8 +74,9 @@ class ErrorFilter implements ExceptionFilter {
     SocialController,
     AIController,
     AnalyticsController,
+    ClipdropController,
   ],
-  providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
+  providers: [{ provide: APP_GUARD, useClass: AuthGuard }, ClipdropService],
 })
 class AppModule {}
 export async function bootstrap() {
