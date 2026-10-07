@@ -383,18 +383,21 @@ export const documentsApi = {
 export const clipdropApi = {
   suggestPrompt: async (contentText: string, platform?: string, contextInfo?: string): Promise<{ prompt: string }> => {
     if (useSession.getState().demo) {
-      return { prompt: `Modern 3D digital illustration about ${contentText.slice(0, 50)}, vibrant colors, 8k resolution` };
+      return { prompt: `Futuristic 3D minimalist digital workspace representing ${contentText.slice(0, 50)}, glowing holographic data interface, soft studio lighting, 8k resolution` };
     }
     return request("/clipdrop/suggest-prompt", "POST", { contentText, platform, contextInfo });
   },
 
   generateImage: async (input: {
     prompt: string;
+    engine?: "clipdrop" | "flux";
+    stylePreset?: string;
     aspectRatio?: "1:1" | "4:5" | "9:16" | "16:9";
     headline?: string;
     logoText?: string;
     websiteUrl?: string;
     cta?: string;
+    enableOverlay?: boolean;
     contentId?: string;
     platform?: string;
     idempotencyKey?: string;
@@ -403,6 +406,7 @@ export const clipdropApi = {
     url: string;
     filename: string;
     mimeType: string;
+    engine?: string;
     remainingCredits: number | null;
     cached?: boolean;
     contentId?: string;
@@ -414,6 +418,7 @@ export const clipdropApi = {
         url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1000&q=80",
         filename: "clipdrop_demo.png",
         mimeType: "image/png",
+        engine: input.engine || "clipdrop",
         remainingCredits: 99,
         cached: false,
         contentId: input.contentId,
@@ -440,6 +445,39 @@ export const clipdropApi = {
       };
     }
     return request("/clipdrop/remove-background", "POST", { assetId });
+  },
+
+  attachAndSave: async (input: {
+    contentId?: string;
+    title: string;
+    body: string;
+    platforms: string[];
+    assetId: string;
+    mediaUrl: string;
+    status?: "DRAFT" | "NEEDS_REVIEW";
+  }): Promise<{
+    id: string;
+    title: string;
+    status: string;
+    platforms: string[];
+    mediaAssetId: string;
+    mediaUrl: string;
+  }> => {
+    if (useSession.getState().demo) {
+      return {
+        id: input.contentId || "demo-content-" + Date.now(),
+        title: input.title,
+        status: input.status || "NEEDS_REVIEW",
+        platforms: input.platforms,
+        mediaAssetId: input.assetId,
+        mediaUrl: input.mediaUrl,
+      };
+    }
+    return request("/clipdrop/attach-and-save", "POST", input);
+  },
+
+  publishPost: async (contentId: string, socialAccountId: string): Promise<any> => {
+    return request(`/content/${contentId}/publish`, "POST", { socialAccountId });
   },
 };
 

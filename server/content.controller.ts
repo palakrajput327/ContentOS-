@@ -188,8 +188,15 @@ export class ContentController {
           "This post is currently being published.",
         );
       }
-      if (content.status === "PUBLISHED") {
-        throw new BadRequestException("This post has already been published.");
+      // Check if already published to this specific social account
+      const alreadyPub = await db.query(
+        "SELECT 1 FROM scheduled_posts WHERE content_id = $1 AND account_id = $2 AND state = 'PUBLISHED'",
+        [contentId, v.socialAccountId],
+      );
+      if (alreadyPub.rowCount) {
+        throw new BadRequestException(
+          "This post has already been published to this account.",
+        );
       }
 
       // 2. Lock and load social account belonging to same workspace
@@ -283,7 +290,7 @@ export class ContentController {
 
       if (!result.success) {
         await db.query(
-          "UPDATE content SET status = 'FAILED', updated_at = NOW(), updated_by = $1 WHERE id = $2 AND workspace_id = $3",
+          "UPDATE content SET status = CASE WHEN status = 'PUBLISHED' THEN 'PUBLISHED' ELSE 'FAILED' END, updated_at = NOW(), updated_by = $1 WHERE id = $2 AND workspace_id = $3",
           [r.user.id, contentId, w],
         );
 

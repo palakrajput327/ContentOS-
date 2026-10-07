@@ -214,7 +214,11 @@ export function Login({
               if (me?.user) await onLogin(me.user);
               nav("/app");
             }
-          } catch (e) {
+          } catch (e: any) {
+            if (e?.message?.toLowerCase()?.includes("verify your email")) {
+              nav("/check-email", { state: { email: values.email } });
+              return;
+            }
             setError((e as Error).message);
           }
         })}

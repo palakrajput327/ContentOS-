@@ -17,11 +17,14 @@ const suggestPromptSchema = z.object({
 
 const generateImageSchema = z.object({
   prompt: z.string().trim().min(3).max(2000),
+  engine: z.enum(["clipdrop", "flux"]).default("clipdrop"),
+  stylePreset: z.string().optional(),
   aspectRatio: z.enum(["1:1", "4:5", "9:16", "16:9"]).default("1:1"),
   headline: z.string().max(200).optional(),
   logoText: z.string().max(80).optional(),
   websiteUrl: z.string().max(120).optional(),
   cta: z.string().max(100).optional(),
+  enableOverlay: z.boolean().default(false),
   contentId: z.string().uuid().optional(),
   platform: z.string().optional(),
   idempotencyKey: z.string().optional(),
@@ -29,6 +32,28 @@ const generateImageSchema = z.object({
 
 const removeBgSchema = z.object({
   assetId: z.string().uuid(),
+});
+
+const attachAndSaveSchema = z.object({
+  contentId: z.string().uuid().optional(),
+  title: z
+    .string()
+    .trim()
+    .max(200)
+    .optional()
+    .transform((v) => (v && v.trim() ? v : "AI Visual Post"))
+    .default("AI Visual Post"),
+  body: z
+    .string()
+    .trim()
+    .max(10000)
+    .optional()
+    .transform((v) => (v && v.trim() ? v : "Visual created with AI Studio"))
+    .default("Visual created with AI Studio"),
+  platforms: z.array(z.string()).min(1),
+  assetId: z.string().uuid(),
+  mediaUrl: z.string().min(1),
+  status: z.enum(["DRAFT", "NEEDS_REVIEW"]).default("NEEDS_REVIEW"),
 });
 
 @WorkspaceRequired()
@@ -52,11 +77,14 @@ export class ClipdropController {
       workspaceId: r.workspace.id,
       userId: r.user.id,
       prompt: v.prompt,
+      engine: v.engine,
+      stylePreset: v.stylePreset,
       aspectRatio: v.aspectRatio,
       headline: v.headline,
       logoText: v.logoText,
       websiteUrl: v.websiteUrl,
       cta: v.cta,
+      enableOverlay: v.enableOverlay,
       contentId: v.contentId,
       platform: v.platform,
       idempotencyKey: v.idempotencyKey,
@@ -72,6 +100,24 @@ export class ClipdropController {
       workspaceId: r.workspace.id,
       userId: r.user.id,
       assetId: v.assetId,
+    });
+  }
+
+  @Post("attach-and-save")
+  async attachAndSave(@Req() r: AuthedRequest, @Body() input: unknown) {
+    assertPermission(r.workspace.role, "edit");
+    const v = attachAndSaveSchema.parse(input);
+
+    return this.clipdropService.attachAndSave({
+      workspaceId: r.workspace.id,
+      userId: r.user.id,
+      contentId: v.contentId,
+      title: v.title,
+      body: v.body,
+      platforms: v.platforms,
+      assetId: v.assetId,
+      mediaUrl: v.mediaUrl,
+      status: v.status,
     });
   }
 }

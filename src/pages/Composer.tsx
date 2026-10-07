@@ -1116,6 +1116,10 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         initialTitle={title}
         targetPlatform={preview}
         contentId={post?.id}
+        accounts={s?.accounts || []}
+        brandName={s?.brand?.name}
+        brandWebsite={s?.brand?.website}
+        brandCta={s?.brand?.cta}
         onAttach={(result) => {
           setMediaUrl(result.url);
           setMediaAssetId(result.assetId);

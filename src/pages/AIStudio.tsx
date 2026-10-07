@@ -61,6 +61,7 @@ export default function AIStudio() {
   const demo = useSession((x) => x.demo);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showClipdropModal, setShowClipdropModal] = useState(false);
+  const [attachedVisual, setAttachedVisual] = useState<{ assetId: string; url: string; filename: string } | null>(null);
 
   // Studio Mode: 'topic' | 'pdf'
   const [activeTab, setActiveTab] = useState<"topic" | "pdf">("topic");
@@ -498,11 +499,26 @@ export default function AIStudio() {
       const firstPlatform = selectedPlatforms[0] || "LinkedIn";
       const baseBody = generatedVariants[firstPlatform] || Object.values(generatedVariants)[0] || "";
 
+      // Attach visual media asset to variants if generated
+      const finalVariants: Record<string, any> = {};
+      for (const [p, val] of Object.entries(generatedVariants)) {
+        if (attachedVisual) {
+          finalVariants[p] = {
+            caption: typeof val === "string" ? val : (val as any)?.caption || "",
+            mediaAssetId: attachedVisual.assetId,
+            mediaUrl: attachedVisual.url,
+            mediaType: "image",
+          };
+        } else {
+          finalVariants[p] = val;
+        }
+      }
+
       const saved = await data.save({
         title: generatedTitle,
         body: baseBody,
         platforms: selectedPlatforms,
-        variants: generatedVariants,
+        variants: finalVariants,
       });
 
       await query.invalidateQueries({ queryKey: ["workspace"] });
@@ -530,8 +546,7 @@ export default function AIStudio() {
         />
       )}
 
-      {/* Page Header */}
-      <div className="page-heading">
+            <div className="page-heading">
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
             <span
@@ -554,7 +569,7 @@ export default function AIStudio() {
             AI Studio & PDF-to-Content Workflow
           </h1>
           <p style={{ color: "var(--color-text-muted, #94a3b8)", margin: 0 }}>
-            Transform topic prompts or verified PDF documents into tailored social media posts.
+            Transform topic prompts or verified PDF documents into tailored social media posts and visuals.
           </p>
         </div>
       </div>
@@ -1154,19 +1169,43 @@ export default function AIStudio() {
             )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              <Button
-                variant="primary"
-                onClick={handleGeneratePosts}
-                disabled={isGenerating || (activeTab === "pdf" && !selectedKnowledgeIds.length)}
-                style={{ width: "100%", padding: "12px", fontSize: "0.95rem", fontWeight: 600 }}
-              >
-                <Sparkles size={18} />
-                {isGenerating
-                  ? "Generating Platform Posts..."
-                  : activeTab === "pdf"
-                  ? `Generate Single Post from Knowledge (${selectedKnowledgeIds.length} items)`
-                  : "Generate Platform-Specific Posts"}
-              </Button>
+              <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", gap: "10px" }}>
+                <Button
+                  variant="primary"
+                  onClick={handleGeneratePosts}
+                  disabled={isGenerating || (activeTab === "pdf" && !selectedKnowledgeIds.length)}
+                  style={{ width: "100%", padding: "12px", fontSize: "0.92rem", fontWeight: 700 }}
+                >
+                  <Sparkles size={17} />
+                  {isGenerating
+                    ? "Generating Platform Posts..."
+                    : activeTab === "pdf"
+                    ? `Generate Post (${selectedKnowledgeIds.length} items)`
+                    : "Generate Social Posts"}
+                </Button>
+
+                <Button
+                  type="button"
+                  onClick={() => setShowClipdropModal(true)}
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    fontSize: "0.9rem",
+                    fontWeight: 700,
+                    background: "linear-gradient(135deg, #ec4899, #8b5cf6)",
+                    border: "none",
+                    color: "#fff",
+                    boxShadow: "0 4px 15px rgba(236, 72, 153, 0.35)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <Wand2 size={17} />
+                  🎨 Generate Visual / Image
+                </Button>
+              </div>
 
               {activeTab === "pdf" && selectedKnowledgeIds.length > 1 && (
                 <Button
@@ -1225,14 +1264,36 @@ export default function AIStudio() {
 
             {/* Editor & Preview Area */}
             {Object.keys(generatedVariants).length === 0 ? (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px", textAlign: "center", color: "var(--color-text-muted)", border: "1px dashed rgba(255,255,255,0.1)", borderRadius: "10px" }}>
-                <Sparkles size={36} style={{ color: "#6366f1", marginBottom: "12px", opacity: 0.8 }} />
-                <h3 style={{ margin: "0 0 6px", fontSize: "1rem", color: "#f1f5f9" }}>Ready for Generation</h3>
-                <p style={{ margin: 0, fontSize: "0.85rem", maxWidth: "280px" }}>
-                  {activeTab === "pdf"
-                    ? "Select extracted knowledge claims from your PDF and click Generate to produce channel-specific copy."
-                    : "Fill in your topic prompt and click Generate to see live social post variants."}
-                </p>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px", textAlign: "center", color: "var(--color-text-muted)", border: "1px dashed rgba(255,255,255,0.1)", borderRadius: "10px", gap: "14px" }}>
+                <Sparkles size={38} style={{ color: "#818cf8", opacity: 0.8 }} />
+                <div>
+                  <h3 style={{ margin: "0 0 6px", fontSize: "1.05rem", color: "#f1f5f9", fontWeight: 700 }}>Ready for Generation</h3>
+                  <p style={{ margin: 0, fontSize: "0.85rem", maxWidth: "290px", lineHeight: 1.5 }}>
+                    {activeTab === "pdf"
+                      ? "Select extracted claims from your PDF and click Generate to produce channel-specific copy."
+                      : "Fill in your topic prompt and generate text posts, or design high-converting visual imagery directly!"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowClipdropModal(true)}
+                  style={{
+                    background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))",
+                    border: "1px solid rgba(168, 85, 247, 0.5)",
+                    color: "#d8b4fe",
+                    fontWeight: 600,
+                    fontSize: "0.88rem",
+                    padding: "10px 18px",
+                    borderRadius: "10px",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    boxShadow: "0 4px 12px rgba(168, 85, 247, 0.15)",
+                  }}
+                >
+                  <Wand2 size={16} /> 🎨 Create AI Visual & Image First
+                </button>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
@@ -1318,29 +1379,62 @@ export default function AIStudio() {
                     {generatedVariants[activePreviewPlatform] || "No content for this platform variant yet."}
                   </p>
 
-                  <div style={{ margin: "10px 0" }}>
-                    <button
-                      type="button"
-                      onClick={() => setShowClipdropModal(true)}
-                      style={{
-                        background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2))",
-                        border: "1px dashed rgba(168, 85, 247, 0.5)",
-                        color: "#c084fc",
-                        padding: "8px 12px",
-                        borderRadius: "8px",
-                        fontSize: "0.82rem",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "6px",
-                        width: "100%",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Wand2 size={14} /> 🎨 Generate Visual with Clipdrop for {activePreviewPlatform}
-                    </button>
-                  </div>
+                  {attachedVisual ? (
+                    <div style={{ margin: "10px 0", borderRadius: "10px", overflow: "hidden", position: "relative", border: "1px solid rgba(255,255,255,0.15)" }}>
+                      <img
+                        src={attachedVisual.url}
+                        alt="Attached Visual"
+                        style={{ width: "100%", maxHeight: "240px", objectFit: "cover", display: "block" }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowClipdropModal(true)}
+                        style={{
+                          position: "absolute",
+                          bottom: "8px",
+                          right: "8px",
+                          background: "rgba(15, 23, 42, 0.85)",
+                          border: "1px solid rgba(255,255,255,0.25)",
+                          color: "#fff",
+                          fontSize: "0.75rem",
+                          fontWeight: 600,
+                          padding: "5px 12px",
+                          borderRadius: "8px",
+                          cursor: "pointer",
+                          backdropFilter: "blur(6px)",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "5px",
+                        }}
+                      >
+                        <Wand2 size={13} /> Edit / Change Visual
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ margin: "10px 0" }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowClipdropModal(true)}
+                        style={{
+                          background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2))",
+                          border: "1px dashed rgba(168, 85, 247, 0.5)",
+                          color: "#c084fc",
+                          padding: "10px 14px",
+                          borderRadius: "10px",
+                          fontSize: "0.84rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          width: "100%",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Wand2 size={15} /> 🎨 Generate Visual with AI for {activePreviewPlatform}
+                      </button>
+                    </div>
+                  )}
 
                   <div className="social-reactions" style={{ display: "flex", gap: "16px", fontSize: "0.75rem", color: "var(--color-text-muted)", paddingTop: "8px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                     <span style={{ display: "flex", alignItems: "center", gap: "4px" }}><ThumbsUp size={13} /> Like</span>
@@ -1404,6 +1498,10 @@ export default function AIStudio() {
       <ClipdropImageModal
         isOpen={showClipdropModal}
         onClose={() => setShowClipdropModal(false)}
+        onAttach={(result) => {
+          setAttachedVisual(result);
+          toast.success("Attached visual to this draft post!");
+        }}
         initialContentText={[
           generatedVariants[activePreviewPlatform] || topic,
           knowledgeItems
@@ -1415,6 +1513,10 @@ export default function AIStudio() {
           .join("\n\nExtracted Knowledge:\n")}
         initialTitle={generatedTitle}
         targetPlatform={activePreviewPlatform}
+        accounts={s?.accounts || []}
+        brandName={s?.brand?.name}
+        brandWebsite={s?.brand?.website}
+        brandCta={s?.brand?.cta}
       />
     </div>
   );

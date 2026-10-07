@@ -74,6 +74,7 @@ function validateMimeType(type: MediaAssetType, mime: string) {
       "image/png",
       "image/jpeg",
       "image/webp",
+      "image/svg+xml",
       "video/mp4",
       "application/json",
     ],

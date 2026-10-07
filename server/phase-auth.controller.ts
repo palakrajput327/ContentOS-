@@ -245,7 +245,7 @@ export class PhaseAuthController {
   }
   @Public() @Post("login") async login(@Body() input:unknown,@Req() req:AuthedRequest,@Res({passthrough:true}) res:Response){
     const c=z.object({email,password:z.string().min(1).max(128)}).parse(input);
-    const requireOtp = process.env.REQUIRE_LOGIN_OTP === "true";
+    const requireOtp = false; // Login directly with email & password without OTP verification
     if (requireOtp) {
       const challenge=randomBytes(32).toString('base64url');
       await transaction(async db=>{
@@ -267,6 +267,16 @@ export class PhaseAuthController {
       if (!user) throw new UnauthorizedException('No account found with this email address. Please sign up first.');
       const valid = await verifyPassword(c.password, user.password_hash);
       if (!valid) throw new UnauthorizedException('Email or password is incorrect.');
+      
+      // Security Check: Only verified emails can log in!
+      // If someone signed up with a fake email and never entered the OTP, block them from logging in.
+      if (!user.email_verified_at) {
+        try {
+          await queueTokenEmail(db, user, "verify");
+        } catch {}
+        throw new UnauthorizedException('Please verify your email address. A 6-digit verification code has been sent to your email.');
+      }
+
       return { user, session: await newSession(db, user.id) };
     });
 

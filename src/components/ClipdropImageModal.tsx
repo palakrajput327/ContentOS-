@@ -9,12 +9,26 @@ import {
   X,
   Loader2,
   Layers,
-  LayoutGrid,
-  Maximize2,
-  RefreshCw,
   Zap,
+  Download,
+  Share2,
+  Send,
+  Eye,
+  RefreshCw,
+  Palette,
+  ExternalLink,
+  CheckCircle2,
+  Sliders,
+  Globe,
+  Maximize2,
+  Copy,
+  CheckCheck,
+  Type,
+  Crown,
+  Edit3,
 } from "lucide-react";
 import { clipdropApi } from "../lib/api";
+import type { Account } from "../lib/model";
 
 export interface ClipdropImageModalProps {
   isOpen: boolean;
@@ -24,6 +38,150 @@ export interface ClipdropImageModalProps {
   initialTitle?: string;
   contentId?: string;
   targetPlatform?: string;
+  accounts?: Account[];
+  brandName?: string;
+  brandWebsite?: string;
+  brandCta?: string;
+}
+
+/**
+ * Intelligently analyzes image generation prompts to classify intent:
+ * - Branded festive posters (Diwali, New Year, Christmas, Holi, Eid, Independence Day, etc.)
+ * - Corporate announcements & hiring posters
+ * - General visual art (e.g. "create a image of owl with red eyes", "cyberpunk street", "portrait of lion")
+ */
+function analyzePromptForBranding(text: string): {
+  isBrandedRequest: boolean;
+  detectedHeadline: string;
+  detectedSubtitle: string;
+  detectedCompany: string;
+} {
+  const p = text.trim();
+  if (!p) {
+    return {
+      isBrandedRequest: false,
+      detectedHeadline: "",
+      detectedSubtitle: "",
+      detectedCompany: "",
+    };
+  }
+
+  // 1. Detect Company / Brand Name if explicitly mentioned in prompt
+  let detectedCompany = "";
+  const companyMatch = p.match(/(?:with\s+company\s+(?:name\s+)?|company(?:\s+name)?\s*:\s*|by\s+|from\s+|for\s+|at\s+)([a-zA-Z0-9\s&]{2,45}?(?:pvt|private|limited|ltd|company|corp|solutions|tech|studio|agency|enterprises|ventures|[A-Z][a-zA-Z0-9\s&]{2,30}))/i);
+  if (companyMatch) {
+    let rawComp = companyMatch[1].trim();
+    rawComp = rawComp.replace(/\s+(?:poster|banner|image|graphic|post|with|and)$/i, "").trim();
+    if (rawComp.length >= 2) {
+      detectedCompany = rawComp.replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+  }
+
+  // 2. Check if user explicitly asked for a Poster, Greeting, Card, Banner, or Announcement
+  const isPosterOrBanner = /(?:poster|banner|flyer|greeting|card|announcement|wishing)/i.test(p);
+
+  // 3. Detect Festivals & Holidays
+  if (/diwali|deepavali/i.test(p)) {
+    if (detectedCompany || isPosterOrBanner) {
+      return {
+        isBrandedRequest: true,
+        detectedHeadline: "Happy Diwali",
+        detectedSubtitle: "Wishing joy, prosperity, and radiant light to you and your loved ones!",
+        detectedCompany,
+      };
+    }
+  } else if (/new\s*year/i.test(p)) {
+    if (detectedCompany || isPosterOrBanner) {
+      return {
+        isBrandedRequest: true,
+        detectedHeadline: "Happy New Year",
+        detectedSubtitle: "Wishing you 365 days of remarkable innovation, prosperity and inspiring success!",
+        detectedCompany,
+      };
+    }
+  } else if (/christmas|xmas/i.test(p)) {
+    if (detectedCompany || isPosterOrBanner) {
+      return {
+        isBrandedRequest: true,
+        detectedHeadline: "Merry Christmas",
+        detectedSubtitle: "Wishing you peace, cheer and happiness this holiday season!",
+        detectedCompany,
+      };
+    }
+  } else if (/holi/i.test(p)) {
+    if (detectedCompany || isPosterOrBanner) {
+      return {
+        isBrandedRequest: true,
+        detectedHeadline: "Happy Holi",
+        detectedSubtitle: "May your life be painted with vibrant colors of joy, good health and prosperity!",
+        detectedCompany,
+      };
+    }
+  } else if (/eid/i.test(p)) {
+    if (detectedCompany || isPosterOrBanner) {
+      return {
+        isBrandedRequest: true,
+        detectedHeadline: "Eid Mubarak",
+        detectedSubtitle: "May divine blessings, peace, harmony and happiness fill your home and life!",
+        detectedCompany,
+      };
+    }
+  } else if (/independence\s*day/i.test(p)) {
+    if (detectedCompany || isPosterOrBanner) {
+      return {
+        isBrandedRequest: true,
+        detectedHeadline: "Happy Independence Day",
+        detectedSubtitle: "Saluting the pride, unity and glorious freedom of our great nation!",
+        detectedCompany,
+      };
+    }
+  } else if (/republic\s*day/i.test(p)) {
+    if (detectedCompany || isPosterOrBanner) {
+      return {
+        isBrandedRequest: true,
+        detectedHeadline: "Happy Republic Day",
+        detectedSubtitle: "Celebrating democracy, unity and sovereignty with pride and dedication!",
+        detectedCompany,
+      };
+    }
+  }
+
+  // 4. Corporate Announcements (Hiring, Launch, Offer)
+  if (/we\s+are\s+hiring|job\s+vacancy|now\s+hiring|career\s+opportunity/i.test(p)) {
+    return {
+      isBrandedRequest: true,
+      detectedHeadline: "We Are Hiring",
+      detectedSubtitle: "Join our fast-growing team and build the future of technology with us!",
+      detectedCompany,
+    };
+  }
+
+  if (/product\s+launch|launching|announcing/i.test(p) && (isPosterOrBanner || detectedCompany)) {
+    return {
+      isBrandedRequest: true,
+      detectedHeadline: "Product Launch Announcement",
+      detectedSubtitle: "Discover next-generation capabilities designed to elevate your workflows.",
+      detectedCompany,
+    };
+  }
+
+  // 5. Explicit company poster requested
+  if (detectedCompany && isPosterOrBanner) {
+    return {
+      isBrandedRequest: true,
+      detectedHeadline: detectedCompany,
+      detectedSubtitle: "Empowering innovation and excellence in every milestone.",
+      detectedCompany,
+    };
+  }
+
+  // 6. DEFAULT: Pure visual, object, living being, nature, everything else
+  return {
+    isBrandedRequest: false,
+    detectedHeadline: "",
+    detectedSubtitle: "",
+    detectedCompany: "",
+  };
 }
 
 export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
@@ -34,38 +192,155 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
   initialTitle = "",
   contentId,
   targetPlatform = "LinkedIn",
+  accounts = [],
+  brandName = "Hindustan Software Solution",
+  brandWebsite = "hindustansoftwaresolution.com",
+  brandCta = "Learn More",
 }) => {
+  // Engine & Prompt
+  const [engine, setEngine] = useState<"clipdrop" | "flux">("clipdrop");
   const [prompt, setPrompt] = useState("");
+  const [stylePreset, setStylePreset] = useState<string>("3d-render");
   const [aspectRatio, setAspectRatio] = useState<"1:1" | "4:5" | "9:16" | "16:9">("1:1");
-  const [headline, setHeadline] = useState(initialTitle || "");
-  const [logoText, setLogoText] = useState("Hindustan Software Solution");
-  const [websiteUrl, setWebsiteUrl] = useState("hindustansoftwaresolution.com");
-  const [cta, setCta] = useState("Learn More");
-  const [enableBrandOverlay, setEnableBrandOverlay] = useState(true);
 
+  // Dynamic Prompt-Driven Overlay States
+  const [enableBrandOverlay, setEnableBrandOverlay] = useState(false);
+  const [headline, setHeadline] = useState("");
+  const [subtitle, setSubtitle] = useState("");
+  const [logoText, setLogoText] = useState("");
+
+  // Loading States
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRemovingBg, setIsRemovingBg] = useState(false);
+  const [isSavingPost, setIsSavingPost] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
 
+  // Result States
   const [generatedAsset, setGeneratedAsset] = useState<{
     assetId: string;
     url: string;
     filename: string;
+    engine?: string;
     remainingCredits: number | null;
   } | null>(null);
 
+  const [savedPostId, setSavedPostId] = useState<string | null>(contentId || null);
+  const [isAttached, setIsAttached] = useState(false);
+  const [publishedInfo, setPublishedInfo] = useState<{ channel: string; at: string } | null>(null);
+  const [selectedSocialAccountIds, setSelectedSocialAccountIds] = useState<string[]>([]);
+  const [postCaption, setPostCaption] = useState<string>(initialContentText || "");
+  const [captionManuallyEdited, setCaptionManuallyEdited] = useState(false);
+
+  // Memoized connected accounts from active workspace
+  const connectedAccounts = React.useMemo(() => {
+    return (accounts || []).filter((a) => a.state?.toLowerCase() === "connected");
+  }, [accounts]);
+
+  // Target accounts currently selected
+  const targetAccounts = React.useMemo(() => {
+    return connectedAccounts.filter((a) => selectedSocialAccountIds.includes(a.id));
+  }, [connectedAccounts, selectedSocialAccountIds]);
+
+  // ChatGPT / Midjourney Studio Generation States
+  const [generationStep, setGenerationStep] = useState(0);
+  const [generationPercent, setGenerationPercent] = useState(14);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  const [copiedImage, setCopiedImage] = useState(false);
+  const [isFullscreenZoom, setIsFullscreenZoom] = useState(false);
+
+  const generationSteps = [
+    { title: "Analyzing Creative Prompt", subtitle: "Parsing scene semantics, visual styling & composition...", color: "#818cf8", badge: "01 / 04" },
+    { title: "Constructing Scene Geometry", subtitle: "Balancing composition depth, 3D volume & lighting...", color: "#38bdf8", badge: "02 / 04" },
+    { title: "Synthesizing Neural Diffusion", subtitle: "Generating high-fidelity 8K textures, colors & atmosphere...", color: "#c084fc", badge: "03 / 04" },
+    { title: "Final Polish & Upscaling", subtitle: "Applying neural chromatic polish and balance...", color: "#34d399", badge: "04 / 04" },
+  ];
+
+  // Progressive percent counter while generating
+  useEffect(() => {
+    let timer: any;
+    if (isGenerating) {
+      setGenerationPercent(14);
+      timer = setInterval(() => {
+        setGenerationPercent((prev) => {
+          if (prev >= 96) return 96;
+          const jump = Math.floor(Math.random() * 8) + 4;
+          return Math.min(prev + jump, 96);
+        });
+      }, 400);
+    } else {
+      setGenerationPercent(100);
+    }
+    return () => clearInterval(timer);
+  }, [isGenerating]);
+
+  // Progressive generation steps
+  useEffect(() => {
+    let interval: any;
+    if (isGenerating) {
+      setGenerationStep(0);
+      setImageLoaded(false);
+      setImageError(false);
+      interval = setInterval(() => {
+        setGenerationStep((prev) => (prev + 1) % 4);
+      }, 2500);
+    }
+    return () => clearInterval(interval);
+  }, [isGenerating]);
+
+  // Dynamic prompt analyzer: adapts branding overlay strictly according to the active prompt intent
+  useEffect(() => {
+    if (!prompt || !prompt.trim()) {
+      setEnableBrandOverlay(false);
+      setHeadline("");
+      setSubtitle("");
+      return;
+    }
+
+    const analysis = analyzePromptForBranding(prompt);
+    if (analysis.isBrandedRequest) {
+      setEnableBrandOverlay(true);
+      setHeadline(analysis.detectedHeadline);
+      setSubtitle(analysis.detectedSubtitle);
+      if (analysis.detectedCompany) {
+        setLogoText(analysis.detectedCompany);
+      }
+    } else {
+      // General visual/art prompt (e.g. "create a image of owl with red eyes", "cyberpunk street", etc.)
+      setEnableBrandOverlay(false);
+      setHeadline("");
+      setSubtitle("");
+    }
+  }, [prompt]);
+
+  useEffect(() => {
+    if (!captionManuallyEdited && prompt && !initialContentText) {
+      setPostCaption(prompt);
+    }
+  }, [prompt, captionManuallyEdited, initialContentText]);
+
   useEffect(() => {
     if (isOpen) {
-      if (initialTitle) setHeadline(initialTitle);
       if (targetPlatform === "YouTube") setAspectRatio("16:9");
       else if (targetPlatform === "LinkedIn") setAspectRatio("1:1");
+      else if (targetPlatform === "Instagram") setAspectRatio("4:5");
       else if (targetPlatform === "Telegram") setAspectRatio("4:5");
 
-      if (initialContentText && !prompt) {
-        handleSuggestPrompt();
+      if (initialContentText && !captionManuallyEdited) {
+        setPostCaption(initialContentText);
+      }
+
+      // Pre-select connected social accounts reliably
+      if (connectedAccounts.length > 0) {
+        setSelectedSocialAccountIds((prev) => {
+          const valid = prev.filter((id) => connectedAccounts.some((a) => a.id === id));
+          if (valid.length > 0) return valid;
+          return connectedAccounts.map((a) => a.id);
+        });
       }
     }
-  }, [isOpen, initialContentText, initialTitle, targetPlatform]);
+  }, [isOpen, targetPlatform, connectedAccounts, initialContentText, captionManuallyEdited]);
 
   if (!isOpen) return null;
 
@@ -73,10 +348,11 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
     try {
       setIsSuggesting(true);
       const res = await clipdropApi.suggestPrompt(
-        initialContentText || headline || "AI content studio distribution platform",
+        initialContentText || headline || "AI technology transformation and productivity",
         targetPlatform,
       );
       setPrompt(res.prompt);
+      toast.success("AI suggested a high-impact visual prompt!");
     } catch (err: any) {
       console.error("Suggest prompt error:", err);
       toast.error("Could not suggest prompt automatically. You can type one below!");
@@ -85,7 +361,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
     }
   }
 
-  async function handleGenerate() {
+  async function handleGenerate(isVariation: boolean = false) {
     if (!prompt.trim()) {
       toast.error("Please enter an image prompt.");
       return;
@@ -93,30 +369,56 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
     try {
       setIsGenerating(true);
-      const res = await clipdropApi.generateImage({
-        prompt: prompt.trim(),
-        aspectRatio,
-        headline: enableBrandOverlay && headline.trim() ? headline.trim() : undefined,
-        logoText: enableBrandOverlay && logoText.trim() ? logoText.trim() : undefined,
-        websiteUrl: enableBrandOverlay && websiteUrl.trim() ? websiteUrl.trim() : undefined,
-        cta: enableBrandOverlay && cta.trim() ? cta.trim() : undefined,
-        contentId,
-        platform: targetPlatform,
-      });
+      const uniqueKey = isVariation ? `${Date.now()}_${Math.random().toString(36).substring(7)}` : undefined;
+
+      let res;
+      try {
+        res = await clipdropApi.generateImage({
+          prompt: prompt.trim(),
+          engine,
+          stylePreset,
+          aspectRatio,
+          enableOverlay: false,
+          contentId: savedPostId || undefined,
+          platform: targetPlatform,
+          idempotencyKey: uniqueKey,
+        });
+      } catch (firstErr: any) {
+        if (engine === "flux") {
+          toast.info("Free engine was busy. Switching to Clipdrop AI...");
+          res = await clipdropApi.generateImage({
+            prompt: prompt.trim(),
+            engine: "clipdrop",
+            stylePreset,
+            aspectRatio,
+            enableOverlay: false,
+            contentId: savedPostId || undefined,
+            platform: targetPlatform,
+            idempotencyKey: uniqueKey,
+          });
+          setEngine("clipdrop");
+        } else {
+          throw firstErr;
+        }
+      }
 
       setGeneratedAsset({
         assetId: res.assetId,
         url: res.url,
         filename: res.filename,
+        engine: res.engine || engine,
         remainingCredits: res.remainingCredits,
       });
 
+      setIsAttached(true);
+      if (res.contentId) {
+        setSavedPostId(res.contentId);
+      }
+
       toast.success(
-        res.cached
-          ? "Reused cached image (No credits spent!)"
-          : res.status === "NEEDS_REVIEW"
-          ? "Generated visual & attached to draft post (Status: Needs Review)!"
-          : "Image generated with Clipdrop successfully!"
+        res.engine === "flux"
+          ? "Generated with FLUX.1 Pro (Free & Unlimited)!"
+          : "Generated visual with Clipdrop AI!"
       );
 
       if (onAttach) {
@@ -127,9 +429,177 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
         });
       }
     } catch (err: any) {
-      toast.error(err.message || "Failed to generate image with Clipdrop.");
+      toast.error(err.message || "Failed to generate image.");
     } finally {
       setIsGenerating(false);
+    }
+  }
+
+  // 1-Click Clipboard Image Copy
+  async function handleCopyImage() {
+    if (!generatedAsset?.url) return;
+    try {
+      const res = await fetch(generatedAsset.url);
+      const blob = await res.blob();
+      await navigator.clipboard.write([
+        new ClipboardItem({ [blob.type]: blob })
+      ]);
+      setCopiedImage(true);
+      toast.success("Image copied to clipboard!");
+      setTimeout(() => setCopiedImage(false), 2000);
+    } catch (err) {
+      await navigator.clipboard.writeText(window.location.origin + generatedAsset.url);
+      toast.success("Image URL copied to clipboard!");
+    }
+  }
+
+  // High-Res Image & Branded Poster Download
+  async function handleDownloadImage() {
+    if (!generatedAsset?.url) return;
+    try {
+      if (!enableBrandOverlay || (!headline && !subtitle && !logoText)) {
+        toast.info("Downloading clean high-res visual...");
+        const res = await fetch(generatedAsset.url);
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        const cleanName = (headline || prompt || "visual")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .slice(0, 30);
+        a.download = `${cleanName || "ai_visual"}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+        toast.success("High-res visual downloaded successfully!");
+        return;
+      }
+
+      toast.info("Preparing branded poster with company name...");
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.src = generatedAsset.url;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+
+      const canvas = document.createElement("canvas");
+      const w = img.naturalWidth || 1024;
+      const h = img.naturalHeight || 1024;
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Could not create canvas context");
+
+      // 1. Draw base visual
+      ctx.drawImage(img, 0, 0, w, h);
+
+      // 2. Top Floating Frosted-Glass Pill Badge: Company Name (Only if logoText exists)
+      if (logoText) {
+        const compName = logoText.toUpperCase();
+        const badgeFontSize = Math.round(w * 0.024);
+        ctx.font = `bold ${badgeFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        const textMetrics = ctx.measureText(`✨  ${compName}  ✨`);
+        const badgeW = Math.min(w * 0.88, Math.max(280, textMetrics.width + 48));
+        const badgeH = Math.round(h * 0.055);
+        const badgeX = (w - badgeW) / 2;
+        const badgeY = Math.round(h * 0.038);
+
+        ctx.save();
+        ctx.fillStyle = "rgba(10, 15, 30, 0.82)";
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
+        ctx.lineWidth = Math.max(1, Math.round(w * 0.002));
+        ctx.beginPath();
+        if (typeof (ctx as any).roundRect === "function") {
+          (ctx as any).roundRect(badgeX, badgeY, badgeW, badgeH, badgeH / 2);
+        } else {
+          ctx.rect(badgeX, badgeY, badgeW, badgeH);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.shadowColor = "rgba(0, 0, 0, 0.9)";
+        ctx.shadowBlur = 8;
+        ctx.fillText(`✨  ${compName}  ✨`, w / 2, badgeY + badgeH / 2);
+        ctx.restore();
+      }
+
+      // 3. Bottom Floating Frosted-Glass Banner: Headline & Greeting Message
+      if (headline || subtitle) {
+        const cardW = Math.round(w * 0.9);
+        const cardH = Math.round(h * 0.175);
+        const cardX = (w - cardW) / 2;
+        const cardY = h - cardH - Math.round(h * 0.038);
+
+        ctx.save();
+        ctx.fillStyle = "rgba(8, 12, 24, 0.86)";
+        ctx.strokeStyle = "rgba(251, 191, 36, 0.4)";
+        ctx.lineWidth = Math.max(1, Math.round(w * 0.002));
+        ctx.beginPath();
+        if (typeof (ctx as any).roundRect === "function") {
+          (ctx as any).roundRect(cardX, cardY, cardW, cardH, 20);
+        } else {
+          ctx.rect(cardX, cardY, cardW, cardH);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        // Title / Headline
+        if (headline) {
+          ctx.font = `bold ${Math.round(cardH * 0.35)}px Georgia, serif`;
+          ctx.fillStyle = "#fef08a";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.shadowColor = "rgba(234, 179, 8, 0.6)";
+          ctx.shadowBlur = 14;
+          ctx.fillText(headline, w / 2, cardY + cardH * (subtitle ? 0.36 : 0.5));
+          ctx.shadowBlur = 0;
+        }
+
+        // Subtitle greeting / message
+        if (subtitle) {
+          ctx.font = `500 ${Math.round(cardH * 0.16)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+          ctx.fillStyle = "#f1f5f9";
+          ctx.textAlign = "center";
+          ctx.fillText(subtitle, w / 2, cardY + cardH * (headline ? 0.66 : 0.5));
+        }
+
+        // Sign-off
+        if (logoText) {
+          ctx.font = `600 ${Math.round(cardH * 0.12)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+          ctx.fillStyle = "#94a3b8";
+          ctx.textAlign = "center";
+          ctx.fillText(`Warm Greetings from ${logoText}`, w / 2, cardY + cardH * 0.86);
+        }
+        ctx.restore();
+      }
+
+      canvas.toBlob((blob) => {
+        if (!blob) throw new Error("Canvas export failed");
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        const cleanName = (headline || "poster").toLowerCase().replace(/[^a-z0-9]+/g, "_");
+        a.download = `poster_${cleanName}_${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+        toast.success("Branded poster with company name downloaded!");
+      }, "image/png");
+    } catch (err: any) {
+      console.warn("Direct download fallback:", err);
+      const a = document.createElement("a");
+      a.href = generatedAsset.url;
+      a.download = generatedAsset.filename || "ai_visual.png";
+      a.target = "_blank";
+      a.click();
     }
   }
 
@@ -150,7 +620,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
             }
           : null
       );
-      toast.success("Background removed cleanly with Clipdrop!");
+      toast.success("Background removed cleanly with Clipdrop AI!");
 
       if (onAttach) {
         onAttach({
@@ -166,6 +636,178 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
     }
   }
 
+  async function handleAttachToPost() {
+    if (!generatedAsset) {
+      toast.error("Generate an image first.");
+      return;
+    }
+
+    if (onAttach) {
+      onAttach({
+        assetId: generatedAsset.assetId,
+        url: generatedAsset.url,
+        filename: generatedAsset.filename,
+      });
+    }
+
+    setIsAttached(true);
+    toast.success("Visual attached to draft post in AI Studio!");
+  }
+
+  async function handleSavePostToLibrary() {
+    if (!generatedAsset) {
+      toast.error("Generate an image first.");
+      return;
+    }
+
+    try {
+      setIsSavingPost(true);
+      const res = await clipdropApi.attachAndSave({
+        contentId: savedPostId || undefined,
+        title: headline.trim() || initialTitle || "AI Studio Generated Post",
+        body: initialContentText || headline.trim(),
+        platforms: [targetPlatform],
+        assetId: generatedAsset.assetId,
+        mediaUrl: generatedAsset.url,
+        status: "NEEDS_REVIEW",
+      });
+
+      setSavedPostId(res.id);
+      setIsAttached(true);
+      toast.success("Post & Visual saved to Content Library (Status: Needs Review)!");
+
+      if (onAttach) {
+        onAttach({
+          assetId: generatedAsset.assetId,
+          url: generatedAsset.url,
+          filename: generatedAsset.filename,
+        });
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save post to library.");
+    } finally {
+      setIsSavingPost(false);
+    }
+  }
+
+  function toggleAccountSelection(accId: string) {
+    setSelectedSocialAccountIds((prev) =>
+      prev.includes(accId) ? prev.filter((id) => id !== accId) : [...prev, accId]
+    );
+  }
+
+  function selectAllAccounts() {
+    setSelectedSocialAccountIds(connectedAccounts.map((a) => a.id));
+  }
+
+  function deselectAllAccounts() {
+    setSelectedSocialAccountIds([]);
+  }
+
+  async function handlePublishDirectly() {
+    if (!generatedAsset) {
+      toast.error("Please generate an image first.");
+      return;
+    }
+
+    if (targetAccounts.length === 0) {
+      toast.error("Please select at least one connected social account to publish to.");
+      return;
+    }
+
+    try {
+      setIsPublishing(true);
+
+      // Safe non-empty caption / body
+      const bodyToPublish =
+        postCaption.trim() ||
+        prompt.trim() ||
+        headline.trim() ||
+        initialContentText?.trim() ||
+        "Visual generated with ContentOS AI Studio";
+
+      const titleToPublish =
+        headline.trim() ||
+        initialTitle?.trim() ||
+        (prompt ? prompt.slice(0, 60).trim() : "") ||
+        "AI Studio Visual Post";
+
+      const targetPlatforms = Array.from(
+        new Set(targetAccounts.map((a) => a.platform))
+      );
+
+      // 1. Ensure post is saved in database first with all target platforms
+      const saveRes = await clipdropApi.attachAndSave({
+        contentId: savedPostId || undefined,
+        title: titleToPublish,
+        body: bodyToPublish,
+        platforms: targetPlatforms,
+        assetId: generatedAsset.assetId,
+        mediaUrl: generatedAsset.url,
+        status: "NEEDS_REVIEW",
+      });
+
+      setSavedPostId(saveRes.id);
+
+      // 2. Publish to all selected social accounts
+      const results: { account: Account; success: boolean; error?: string }[] = [];
+
+      for (const acc of targetAccounts) {
+        if (acc.platform.toLowerCase() === "youtube") {
+          results.push({
+            account: acc,
+            success: false,
+            error: "YouTube only supports video uploads (images not supported)",
+          });
+          continue;
+        }
+
+        try {
+          await clipdropApi.publishPost(saveRes.id, acc.id);
+          results.push({ account: acc, success: true });
+        } catch (pubErr: any) {
+          console.error(`Publish error for ${acc.platform} (${acc.name}):`, pubErr);
+          results.push({
+            account: acc,
+            success: false,
+            error: pubErr?.message || "Publish request failed",
+          });
+        }
+      }
+
+      const succeeded = results.filter((r) => r.success);
+      const failed = results.filter((r) => !r.success);
+
+      if (succeeded.length > 0) {
+        const channelNames = succeeded
+          .map((r) => `${r.account.platform} (${r.account.name})`)
+          .join(", ");
+
+        setPublishedInfo({
+          channel: channelNames,
+          at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        });
+
+        if (failed.length === 0) {
+          toast.success(`🎉 Successfully published to: ${channelNames}!`);
+        } else {
+          toast.success(`Published to: ${channelNames}!`);
+          const failedDetails = failed.map((f) => `${f.account.platform}: ${f.error}`).join(" | ");
+          toast.info(`Note on skipped channels: ${failedDetails}`);
+        }
+      } else {
+        const failedDetails = failed.map((f) => `${f.account.platform}: ${f.error}`).join(" | ");
+        toast.error(`Publishing failed: ${failedDetails}`);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Publishing failed. Please check connected account tokens.");
+    } finally {
+      setIsPublishing(false);
+    }
+  }
+
+
+
   return (
     <div
       style={{
@@ -174,8 +816,8 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: "rgba(15, 23, 42, 0.8)",
-        backdropFilter: "blur(8px)",
+        backgroundColor: "rgba(11, 15, 25, 0.85)",
+        backdropFilter: "blur(12px)",
         zIndex: 9999,
         display: "flex",
         alignItems: "center",
@@ -186,127 +828,254 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
       <div
         style={{
           width: "100%",
-          maxWidth: "960px",
-          maxHeight: "90vh",
-          backgroundColor: "#0f172a",
-          border: "1px solid rgba(99, 102, 241, 0.3)",
-          borderRadius: "16px",
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+          maxWidth: "1060px",
+          maxHeight: "92vh",
+          backgroundColor: "#0d1322",
+          border: "1px solid rgba(99, 102, 241, 0.35)",
+          borderRadius: "20px",
+          boxShadow: "0 30px 60px -15px rgba(0, 0, 0, 0.7), 0 0 30px rgba(99, 102, 241, 0.15)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
         }}
       >
-        {/* Header */}
+        {/* Top Header */}
         <div
           style={{
-            padding: "20px 24px",
+            padding: "18px 24px",
             borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            background: "linear-gradient(90deg, rgba(99, 102, 241, 0.1), transparent)",
+            background: "linear-gradient(90deg, rgba(99, 102, 241, 0.15), rgba(168, 85, 247, 0.08), transparent)",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
             <div
               style={{
-                width: "38px",
-                height: "38px",
-                borderRadius: "10px",
+                width: "42px",
+                height: "42px",
+                borderRadius: "12px",
                 background: "linear-gradient(135deg, #6366f1, #a855f7)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 color: "#fff",
+                boxShadow: "0 4px 14px rgba(99, 102, 241, 0.4)",
               }}
             >
-              <Wand2 size={20} />
+              <Wand2 size={22} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 700, color: "#f8fafc" }}>
-                Clipdrop AI Image Generator & Brand Canvas
-              </h3>
-              <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "#94a3b8" }}>
-                Generate high-impact visuals for {targetPlatform} posts with brand overlay & background removal.
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 700, color: "#f8fafc", letterSpacing: "-0.01em" }}>
+                  AI Visual Studio & Brand Canvas
+                </h3>
+                <span
+                  style={{
+                    background: "rgba(99, 102, 241, 0.2)",
+                    border: "1px solid rgba(99, 102, 241, 0.4)",
+                    color: "#a5b4fc",
+                    fontSize: "0.72rem",
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: "20px",
+                  }}
+                >
+                  {targetPlatform}
+                </span>
+              </div>
+              <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#94a3b8" }}>
+                Generate high-impact visuals with AI, customize brand overlays, and publish directly to channels.
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "#94a3b8",
-              cursor: "pointer",
-              padding: "6px",
-              borderRadius: "8px",
-            }}
-          >
-            <X size={20} />
-          </button>
+
+          {/* Engine Selector Header Pills */}
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <div
+              style={{
+                background: "rgba(15, 23, 42, 0.8)",
+                border: "1px solid rgba(255, 255, 255, 0.1)",
+                borderRadius: "10px",
+                padding: "3px",
+                display: "flex",
+                gap: "4px",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setEngine("clipdrop")}
+                style={{
+                  padding: "5px 12px",
+                  borderRadius: "7px",
+                  border: "none",
+                  background: engine === "clipdrop" ? "linear-gradient(135deg, #6366f1, #4f46e5)" : "transparent",
+                  color: engine === "clipdrop" ? "#fff" : "#94a3b8",
+                  fontSize: "0.78rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  transition: "all 0.2s",
+                }}
+              >
+                <Zap size={13} style={{ color: engine === "clipdrop" ? "#38bdf8" : "#94a3b8" }} />
+                Clipdrop (SDXL)
+                {generatedAsset?.remainingCredits !== undefined && generatedAsset.remainingCredits !== null && (
+                  <span style={{ fontSize: "0.7rem", opacity: 0.8 }}>({generatedAsset.remainingCredits})</span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setEngine("flux")}
+                style={{
+                  padding: "5px 12px",
+                  borderRadius: "7px",
+                  border: "none",
+                  background: engine === "flux" ? "linear-gradient(135deg, #10b981, #059669)" : "transparent",
+                  color: engine === "flux" ? "#fff" : "#94a3b8",
+                  fontSize: "0.78rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  transition: "all 0.2s",
+                }}
+              >
+                <Sparkles size={13} style={{ color: engine === "flux" ? "#a7f3d0" : "#94a3b8" }} />
+                FLUX.1 Pro (Free)
+              </button>
+            </div>
+
+            <button
+              onClick={onClose}
+              style={{
+                background: "rgba(255, 255, 255, 0.05)",
+                border: "1px solid rgba(255, 255, 255, 0.1)",
+                color: "#94a3b8",
+                cursor: "pointer",
+                padding: "8px",
+                borderRadius: "10px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Content Body Grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 400px", flex: 1, overflowY: "auto" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1.05fr 0.95fr", flex: 1, overflowY: "auto" }}>
           {/* Controls Column */}
-          <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
+          <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "18px", borderRight: "1px solid rgba(255, 255, 255, 0.08)" }}>
+            
             {/* Visual Prompt Input */}
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                <label style={{ fontSize: "0.85rem", fontWeight: 600, color: "#cbd5e1" }}>
-                  Visual Prompt (Clipdrop Text-to-Image)
+                <label style={{ fontSize: "0.85rem", fontWeight: 700, color: "#e2e8f0", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <Wand2 size={15} style={{ color: "#818cf8" }} /> Visual Prompt
                 </label>
                 <button
                   type="button"
                   onClick={handleSuggestPrompt}
                   disabled={isSuggesting}
                   style={{
-                    background: "rgba(99, 102, 241, 0.15)",
-                    color: "#818cf8",
-                    border: "1px solid rgba(99, 102, 241, 0.3)",
-                    padding: "4px 10px",
-                    borderRadius: "6px",
-                    fontSize: "0.75rem",
+                    background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2))",
+                    color: "#c084fc",
+                    border: "1px solid rgba(168, 85, 247, 0.4)",
+                    padding: "5px 12px",
+                    borderRadius: "8px",
+                    fontSize: "0.78rem",
                     fontWeight: 600,
-                    cursor: "pointer",
+                    cursor: isSuggesting ? "wait" : "pointer",
                     display: "flex",
                     alignItems: "center",
                     gap: "6px",
                   }}
                 >
-                  {isSuggesting ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                  Suggest Prompt from Post
+                  {isSuggesting ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                  ✨ AI Magic Prompt from Post
                 </button>
               </div>
+
               <textarea
                 rows={3}
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="e.g. Modern futuristic 3D graphic representing AI content distribution, high contrast, studio lighting"
+                placeholder="e.g. Futuristic minimalist 3D workspace with glowing holographic graphs, floating glass cubes, sleek studio lighting..."
                 style={{
                   width: "100%",
-                  background: "rgba(15, 23, 42, 0.6)",
-                  border: "1px solid rgba(255, 255, 255, 0.12)",
-                  borderRadius: "8px",
-                  padding: "10px",
+                  background: "rgba(15, 23, 42, 0.7)",
+                  border: "1px solid rgba(99, 102, 241, 0.25)",
+                  borderRadius: "10px",
+                  padding: "12px",
                   color: "#f8fafc",
-                  fontSize: "0.9rem",
+                  fontSize: "0.88rem",
+                  lineHeight: "1.45",
                   outline: "none",
+                  resize: "vertical",
+                  boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)",
                 }}
               />
             </div>
 
+            {/* Style Presets */}
+            <div>
+              <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "#94a3b8", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                <Palette size={14} style={{ color: "#38bdf8" }} /> Visual Art Style Preset
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "6px" }}>
+                {[
+                  { id: "3d-render", label: "3D Glass", emoji: "🎨" },
+                  { id: "cinematic", label: "Cinematic", emoji: "📸" },
+                  { id: "minimal-saas", label: "SaaS Minimal", emoji: "💼" },
+                  { id: "cyberpunk", label: "Cyberpunk", emoji: "🌌" },
+                  { id: "editorial", label: "Editorial", emoji: "🖌️" },
+                ].map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setStylePreset(s.id)}
+                    style={{
+                      padding: "8px 4px",
+                      borderRadius: "8px",
+                      border: stylePreset === s.id ? "1.5px solid #818cf8" : "1px solid rgba(255, 255, 255, 0.08)",
+                      background: stylePreset === s.id ? "rgba(99, 102, 241, 0.25)" : "rgba(255, 255, 255, 0.03)",
+                      color: stylePreset === s.id ? "#c7d2fe" : "#94a3b8",
+                      fontSize: "0.76rem",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      textAlign: "center",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: "3px",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    <span>{s.emoji}</span>
+                    <span>{s.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Aspect Ratio Presets */}
             <div>
-              <label style={{ fontSize: "0.85rem", fontWeight: 600, color: "#cbd5e1", marginBottom: "8px", display: "block" }}>
-                Aspect Ratio Preset
+              <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "#94a3b8", marginBottom: "8px", display: "block" }}>
+                Target Aspect Ratio
               </label>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px" }}>
                 {[
                   { ratio: "1:1", label: "1:1 Square", sub: "LinkedIn / Feed" },
                   { ratio: "4:5", label: "4:5 Portrait", sub: "LinkedIn Post" },
-                  { ratio: "16:9", label: "16:9 Landscape", sub: "YouTube Thumb" },
+                  { ratio: "16:9", label: "16:9 Landscape", sub: "YouTube / X" },
                   { ratio: "9:16", label: "9:16 Story", sub: "Reels / Shorts" },
                 ].map((item) => (
                   <button
@@ -314,174 +1083,659 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     type="button"
                     onClick={() => setAspectRatio(item.ratio as any)}
                     style={{
-                      padding: "10px",
-                      borderRadius: "8px",
+                      padding: "10px 8px",
+                      borderRadius: "10px",
                       border: aspectRatio === item.ratio ? "2px solid #6366f1" : "1px solid rgba(255, 255, 255, 0.08)",
-                      background: aspectRatio === item.ratio ? "rgba(99, 102, 241, 0.2)" : "rgba(255, 255, 255, 0.03)",
-                      color: aspectRatio === item.ratio ? "#818cf8" : "#94a3b8",
+                      background: aspectRatio === item.ratio ? "rgba(99, 102, 241, 0.25)" : "rgba(255, 255, 255, 0.03)",
+                      color: aspectRatio === item.ratio ? "#a5b4fc" : "#94a3b8",
                       fontWeight: 600,
                       cursor: "pointer",
                       textAlign: "center",
+                      transition: "all 0.15s",
                     }}
                   >
-                    <div style={{ fontSize: "0.85rem" }}>{item.label}</div>
-                    <div style={{ fontSize: "0.7rem", opacity: 0.7 }}>{item.sub}</div>
+                    <div style={{ fontSize: "0.84rem" }}>{item.label}</div>
+                    <div style={{ fontSize: "0.68rem", opacity: 0.7 }}>{item.sub}</div>
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* ContentOS Brand Overlay Settings */}
-            <div style={{ background: "rgba(255, 255, 255, 0.03)", borderRadius: "12px", padding: "16px", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                <label style={{ fontSize: "0.85rem", fontWeight: 600, color: "#f8fafc", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <Layers size={15} style={{ color: "#34d399" }} /> ContentOS Brand Canvas Overlay
-                </label>
-                <input
-                  type="checkbox"
-                  checked={enableBrandOverlay}
-                  onChange={(e) => setEnableBrandOverlay(e.target.checked)}
-                  style={{ width: "16px", height: "16px", cursor: "pointer" }}
-                />
+            {/* Prompt Quick Inspiration Pills (ChatGPT / Midjourney style) */}
+            <div>
+              <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "#94a3b8", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                <Sparkles size={14} style={{ color: "#fbbf24" }} /> Quick Inspiration
+              </label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                {[
+                  { label: "🦉 Living Being / Animal", example: "A majestic owl with piercing glowing red eyes perched on a mossy ancient branch, cinematic studio lighting" },
+                  { label: "🪔 Festival Poster", example: "Happy Diwali festival celebration poster with company name Palak Private Limited, glowing clay diyas and golden lights" },
+                  { label: "🚗 Modern Object", example: "Sleek aerodynamic cyberpunk sports car drifting through wet neon Tokyo streets at midnight" },
+                  { label: "🏔️ Nature Landscape", example: "Breathtaking mountain waterfall with double rainbow arching over turquoise canyon lake at golden hour" },
+                  { label: "🏙️ Cyberpunk City", example: "Futuristic neon-lit megacity skyline with flying vehicles and glowing holographic billboards" },
+                  { label: "💼 SaaS 3D Icon", example: "Clean minimalist 3D glass isometric cube floating with glowing holographic AI nodes and data flows" },
+                ].map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setPrompt(item.example)}
+                    style={{
+                      background: "rgba(255, 255, 255, 0.04)",
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      borderRadius: "8px",
+                      padding: "6px 10px",
+                      color: "#cbd5e1",
+                      fontSize: "0.75rem",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      transition: "all 0.15s",
+                      textAlign: "left",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "rgba(99, 102, 241, 0.18)";
+                      e.currentTarget.style.borderColor = "rgba(99, 102, 241, 0.4)";
+                      e.currentTarget.style.color = "#fff";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "rgba(255, 255, 255, 0.04)";
+                      e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
+                      e.currentTarget.style.color = "#cbd5e1";
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Primary Generation Button */}
+            <button
+              type="button"
+              onClick={() => handleGenerate(false)}
+              disabled={isGenerating}
+              style={{
+                marginTop: "auto",
+                padding: "14px",
+                borderRadius: "12px",
+                border: "none",
+                background: engine === "flux"
+                  ? "linear-gradient(135deg, #10b981, #059669)"
+                  : "linear-gradient(135deg, #6366f1, #4f46e5)",
+                color: "#fff",
+                fontWeight: 700,
+                fontSize: "0.98rem",
+                cursor: isGenerating ? "wait" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "10px",
+                boxShadow: "0 8px 20px -4px rgba(99, 102, 241, 0.4)",
+                transition: "all 0.2s",
+              }}
+            >
+              {isGenerating ? <Loader2 size={20} className="animate-spin" /> : <Zap size={20} />}
+              {isGenerating
+                ? `Generating with ${engine === "flux" ? "FLUX.1 Pro" : "Clipdrop AI"}...`
+                : `Generate Visual with ${engine === "flux" ? "FLUX.1 Pro (Free)" : "Clipdrop AI"}`}
+            </button>
+          </div>
+
+          {/* Right Column: Live Visual Canvas & Actions */}
+          {/* Right Column: Ultra-Premium Studio Visual Canvas & Actions */}
+          <div
+            style={{
+              padding: "24px",
+              background: "linear-gradient(180deg, rgba(15, 23, 42, 0.4) 0%, rgba(2, 6, 23, 0.6) 100%)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "16px",
+              overflowY: "auto",
+            }}
+          >
+            {/* Top Studio Control & Typography Bar */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <span style={{ fontSize: "0.88rem", fontWeight: 800, color: "#f8fafc", letterSpacing: "-0.2px" }}>
+                  Studio Canvas
+                </span>
+
+                {/* Dynamic Status / Mode Badge */}
+                {enableBrandOverlay && (headline || logoText) ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "#fbbf24", background: "rgba(251, 191, 36, 0.15)", border: "1px solid rgba(251, 191, 36, 0.3)", padding: "3px 8px", borderRadius: "6px" }}>
+                      ✨ {headline || logoText} Poster
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setEnableBrandOverlay(!enableBrandOverlay)}
+                      style={{
+                        fontSize: "0.72rem",
+                        background: "rgba(255, 255, 255, 0.06)",
+                        border: "1px solid rgba(255, 255, 255, 0.12)",
+                        color: "#94a3b8",
+                        padding: "3px 8px",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {enableBrandOverlay ? "View Clean Art" : "View Poster"}
+                    </button>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: "0.74rem", fontWeight: 600, color: "#94a3b8", background: "rgba(255, 255, 255, 0.05)", border: "1px solid rgba(255, 255, 255, 0.08)", padding: "3px 8px", borderRadius: "6px" }}>
+                    🖼️ AI Visual
+                  </span>
+                )}
               </div>
 
-              {enableBrandOverlay && (
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <div>
-                    <label style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Headline Text</label>
-                    <input
-                      type="text"
-                      value={headline}
-                      onChange={(e) => setHeadline(e.target.value)}
-                      placeholder="e.g. 74% Reduction in Adaptation Overhead"
-                      style={{
-                        width: "100%",
-                        background: "rgba(0,0,0,0.3)",
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        borderRadius: "6px",
-                        padding: "8px",
-                        color: "#fff",
-                        fontSize: "0.85rem",
-                      }}
-                    />
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
-                    <div>
-                      <label style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Brand Badge / Logo</label>
-                      <input
-                        type="text"
-                        value={logoText}
-                        onChange={(e) => setLogoText(e.target.value)}
-                        placeholder="e.g. Hindustan Software Solution"
-                        style={{
-                          width: "100%",
-                          background: "rgba(0,0,0,0.3)",
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          borderRadius: "6px",
-                          padding: "8px",
-                          color: "#fff",
-                          fontSize: "0.85rem",
-                        }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Website Domain</label>
-                      <input
-                        type="text"
-                        value={websiteUrl}
-                        onChange={(e) => setWebsiteUrl(e.target.value)}
-                        placeholder="e.g. hindustansoftwaresolution.com"
-                        style={{
-                          width: "100%",
-                          background: "rgba(0,0,0,0.3)",
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          borderRadius: "6px",
-                          padding: "8px",
-                          color: "#fff",
-                          fontSize: "0.85rem",
-                        }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: "0.75rem", color: "#94a3b8" }}>CTA Button Text</label>
-                      <input
-                        type="text"
-                        value={cta}
-                        onChange={(e) => setCta(e.target.value)}
-                        placeholder="e.g. Learn More"
-                        style={{
-                          width: "100%",
-                          background: "rgba(0,0,0,0.3)",
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          borderRadius: "6px",
-                          padding: "8px",
-                          color: "#fff",
-                          fontSize: "0.85rem",
-                        }}
-                      />
-                    </div>
-                  </div>
+              {/* Quick Canvas Utilities */}
+              {generatedAsset && (
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <button
+                    type="button"
+                    onClick={handleCopyImage}
+                    title="Copy image to clipboard"
+                    style={{
+                      background: "rgba(255, 255, 255, 0.06)",
+                      border: "1px solid rgba(255, 255, 255, 0.12)",
+                      borderRadius: "7px",
+                      padding: "5px 9px",
+                      color: copiedImage ? "#34d399" : "#cbd5e1",
+                      fontSize: "0.75rem",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    {copiedImage ? <CheckCheck size={13} /> : <Copy size={13} />}
+                    {copiedImage ? "Copied" : "Copy"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsFullscreenZoom(true)}
+                    title="Fullscreen zoom"
+                    style={{
+                      background: "rgba(255, 255, 255, 0.06)",
+                      border: "1px solid rgba(255, 255, 255, 0.12)",
+                      borderRadius: "7px",
+                      padding: "5px 8px",
+                      color: "#cbd5e1",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                    }}
+                  >
+                    <Maximize2 size={13} />
+                  </button>
+
+                  <span
+                    style={{
+                      fontSize: "0.7rem",
+                      fontWeight: 700,
+                      color: "#94a3b8",
+                      background: "rgba(255, 255, 255, 0.05)",
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      padding: "4px 8px",
+                      borderRadius: "6px",
+                    }}
+                  >
+                    {aspectRatio} · UHD
+                  </span>
                 </div>
               )}
             </div>
 
-            {/* Action Buttons */}
-            <div style={{ marginTop: "auto", display: "flex", gap: "10px" }}>
-              <button
-                type="button"
-                onClick={handleGenerate}
-                disabled={isGenerating}
-                style={{
-                  flex: 1,
-                  padding: "12px",
-                  borderRadius: "10px",
-                  border: "none",
-                  background: "linear-gradient(135deg, #6366f1, #4f46e5)",
-                  color: "#fff",
-                  fontWeight: 700,
-                  fontSize: "0.95rem",
-                  cursor: isGenerating ? "wait" : "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "8px",
-                }}
-              >
-                {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <Zap size={18} />}
-                {isGenerating ? "Generating with Clipdrop..." : "Generate Visual (Clipdrop)"}
-              </button>
-            </div>
-          </div>
 
-          {/* Preview Column */}
-          <div
-            style={{
-              padding: "24px",
-              background: "rgba(0, 0, 0, 0.2)",
-              borderLeft: "1px solid rgba(255, 255, 255, 0.08)",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            {generatedAsset ? (
-              <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "16px", alignItems: "center" }}>
+
+            {/* Visual Canvas Display Viewport */}
+            <style>{`
+              @keyframes chatgptShimmer {
+                0% { left: -120%; }
+                100% { left: 220%; }
+              }
+              @keyframes chatgptBarFlow {
+                0% { background-position: 0% 0%; }
+                100% { background-position: 200% 0%; }
+              }
+              @keyframes pulseLaserGlow {
+                0%, 100% { filter: drop-shadow(0 0 10px rgba(129, 140, 248, 0.4)); }
+                50% { filter: drop-shadow(0 0 25px rgba(168, 85, 247, 0.8)); }
+              }
+            `}</style>
+
+            <div
+              style={{
+                width: "100%",
+                borderRadius: "16px",
+                border: "1px solid rgba(255, 255, 255, 0.12)",
+                background: "#030712",
+                minHeight: "370px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                position: "relative",
+                overflow: "hidden",
+                boxShadow: isGenerating
+                  ? "0 0 35px rgba(99, 102, 241, 0.25), inset 0 0 30px rgba(0,0,0,0.9)"
+                  : "0 10px 30px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,0,0,0.8)",
+              }}
+            >
+              {isGenerating ? (
+                /* 🌟 Ultra-Premium SaaS Generative Studio Animation Canvas */
                 <div
                   style={{
                     width: "100%",
-                    borderRadius: "12px",
-                    overflow: "hidden",
-                    border: "1px solid rgba(255, 255, 255, 0.15)",
-                    background: "#000",
+                    height: "100%",
+                    minHeight: "370px",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "36px 20px",
                     position: "relative",
+                    background: "radial-gradient(ellipse at 50% 30%, rgba(99, 102, 241, 0.2) 0%, rgba(15, 23, 42, 0.9) 65%, #020617 100%)",
+                    overflow: "hidden",
                   }}
                 >
-                  <img
-                    src={generatedAsset.url}
-                    alt="Generated Visual"
-                    style={{ width: "100%", display: "block", objectFit: "contain" }}
+                  {/* Dynamic Shimmer Light Beam */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: "-120%",
+                      width: "60%",
+                      height: "100%",
+                      background: "linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), rgba(129, 140, 248, 0.25), transparent)",
+                      transform: "skewX(-25deg)",
+                      animation: "chatgptShimmer 2.2s infinite ease-in-out",
+                      pointerEvents: "none",
+                    }}
                   />
+
+                  {/* Top Status Header */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "14px",
+                      left: "14px",
+                      right: "14px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        background: "rgba(15, 23, 42, 0.88)",
+                        border: "1px solid rgba(99, 102, 241, 0.4)",
+                        borderRadius: "20px",
+                        padding: "5px 12px",
+                        backdropFilter: "blur(10px)",
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          backgroundColor: "#10b981",
+                          boxShadow: "0 0 10px #10b981",
+                          display: "inline-block",
+                        }}
+                      />
+                      <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "#e2e8f0" }}>
+                        Neural Studio Active
+                      </span>
+                    </div>
+
+                    <span
+                      style={{
+                        fontSize: "0.72rem",
+                        fontWeight: 700,
+                        color: "#94a3b8",
+                        background: "rgba(15, 23, 42, 0.8)",
+                        border: "1px solid rgba(255, 255, 255, 0.1)",
+                        padding: "4px 10px",
+                        borderRadius: "12px",
+                        backdropFilter: "blur(8px)",
+                      }}
+                    >
+                      {engine === "flux" ? "FLUX.1 Pro Engine" : "Clipdrop SDXL Engine"} · {aspectRatio}
+                    </span>
+                  </div>
+
+                  {/* Center Holographic AI Studio Core */}
+                  <div
+                    style={{
+                      position: "relative",
+                      width: "120px",
+                      height: "120px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginBottom: "16px",
+                      marginTop: "16px",
+                    }}
+                  >
+                    {/* Outer Orbit */}
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        borderRadius: "50%",
+                        border: "2px dashed rgba(129, 140, 248, 0.45)",
+                        animation: "spin 10s linear infinite",
+                      }}
+                    />
+                    {/* Pulsing Aura */}
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: "10px",
+                        borderRadius: "50%",
+                        background: "radial-gradient(circle, rgba(168, 85, 247, 0.4) 0%, rgba(99, 102, 241, 0.25) 70%, transparent 100%)",
+                        filter: "blur(14px)",
+                      }}
+                    />
+                    {/* Core Sphere */}
+                    <div
+                      style={{
+                        position: "relative",
+                        width: "80px",
+                        height: "80px",
+                        borderRadius: "50%",
+                        background: "linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98))",
+                        border: "1.5px solid rgba(168, 85, 247, 0.6)",
+                        boxShadow: "0 0 30px rgba(99, 102, 241, 0.5), inset 0 0 16px rgba(168, 85, 247, 0.4)",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Sparkles
+                        size={28}
+                        style={{
+                          color: generationSteps[generationStep].color,
+                          filter: `drop-shadow(0 0 10px ${generationSteps[generationStep].color})`,
+                        }}
+                      />
+                      <span style={{ fontSize: "0.68rem", fontWeight: 800, color: "#fff", marginTop: "2px" }}>
+                        {generationPercent}%
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Step Progression Headline & Subtitle */}
+                  <div style={{ textAlign: "center", maxWidth: "340px", marginBottom: "14px" }}>
+                    <div
+                      style={{
+                        fontSize: "0.96rem",
+                        fontWeight: 700,
+                        color: "#f8fafc",
+                        marginBottom: "4px",
+                        letterSpacing: "-0.2px",
+                      }}
+                    >
+                      {generationSteps[generationStep].title}
+                    </div>
+                    <div style={{ fontSize: "0.78rem", color: "#94a3b8", lineHeight: "1.4" }}>
+                      {generationSteps[generationStep].subtitle}
+                    </div>
+                  </div>
+
+                  {/* Flowing Laser Progress Bar */}
+                  <div
+                    style={{
+                      width: "250px",
+                      height: "6px",
+                      background: "rgba(255, 255, 255, 0.08)",
+                      borderRadius: "10px",
+                      overflow: "hidden",
+                      position: "relative",
+                      marginBottom: "14px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        height: "100%",
+                        width: `${generationPercent}%`,
+                        background: "linear-gradient(90deg, #6366f1, #a855f7, #38bdf8, #6366f1)",
+                        backgroundSize: "200% 100%",
+                        animation: "chatgptBarFlow 1.6s linear infinite",
+                        borderRadius: "10px",
+                        transition: "width 0.4s ease",
+                      }}
+                    />
+                  </div>
+
+                  {/* Detected Entity Chips */}
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", justifyContent: "center", maxWidth: "340px" }}>
+                    {logoText && (
+                      <span style={{ background: "rgba(245, 158, 11, 0.15)", border: "1px solid rgba(245, 158, 11, 0.3)", color: "#fcd34d", fontSize: "0.7rem", fontWeight: 700, padding: "2px 8px", borderRadius: "10px" }}>
+                        🏛️ {logoText}
+                      </span>
+                    )}
+                    {headline && (
+                      <span style={{ background: "rgba(99, 102, 241, 0.15)", border: "1px solid rgba(99, 102, 241, 0.3)", color: "#c7d2fe", fontSize: "0.7rem", fontWeight: 700, padding: "2px 8px", borderRadius: "10px" }}>
+                        ✨ {headline}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : generatedAsset ? (
+                /* 🖼️ High-Res Generated Visual Canvas */
+                <>
+                  <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                    <img
+                      src={generatedAsset.url}
+                      alt="Generated Visual"
+                      onLoad={() => setImageLoaded(true)}
+                      onError={() => setImageError(true)}
+                      style={{
+                        width: "100%",
+                        height: "auto",
+                        maxHeight: "410px",
+                        display: "block",
+                        objectFit: "contain",
+                        transition: "opacity 0.3s ease",
+                        opacity: imageLoaded ? 1 : 0.85,
+                        borderRadius: "12px",
+                      }}
+                    />
+
+                    {/* ✨ Floating Glassmorphic Brand Overlay & Greetings (Rendered strictly when enabled and content exists) */}
+                    {enableBrandOverlay && (Boolean(logoText) || Boolean(headline) || Boolean(subtitle)) && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          display: "flex",
+                          flexDirection: "column",
+                          justifyContent: "space-between",
+                          padding: "16px",
+                          pointerEvents: "none",
+                        }}
+                      >
+                        {/* Top Floating Glass Badge: Company Name */}
+                        {logoText ? (
+                          <div style={{ display: "flex", justifyContent: "center" }}>
+                            <div
+                              style={{
+                                background: "rgba(10, 15, 30, 0.85)",
+                                backdropFilter: "blur(12px)",
+                                border: "1px solid rgba(255, 255, 255, 0.28)",
+                                borderRadius: "30px",
+                                padding: "6px 20px",
+                                boxShadow: "0 8px 24px rgba(0, 0, 0, 0.6)",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
+                            >
+                              <Sparkles size={14} style={{ color: "#fbbf24" }} />
+                              <span
+                                style={{
+                                  fontSize: "0.82rem",
+                                  fontWeight: 800,
+                                  color: "#ffffff",
+                                  letterSpacing: "1px",
+                                  textTransform: "uppercase",
+                                }}
+                              >
+                                {logoText}
+                              </span>
+                              <Sparkles size={14} style={{ color: "#fbbf24" }} />
+                            </div>
+                          </div>
+                        ) : <div />}
+
+                        {/* Bottom Floating Glass Card: Dynamic Headline & Subtitle */}
+                        {(Boolean(headline) || Boolean(subtitle)) && (
+                          <div
+                            style={{
+                              background: "rgba(8, 12, 24, 0.88)",
+                              backdropFilter: "blur(14px)",
+                              border: "1px solid rgba(251, 191, 36, 0.38)",
+                              borderRadius: "14px",
+                              padding: "12px 18px",
+                              textAlign: "center",
+                              boxShadow: "0 10px 30px rgba(0, 0, 0, 0.7)",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "4px",
+                            }}
+                          >
+                            {headline && (
+                              <div
+                                style={{
+                                  fontSize: "1.2rem",
+                                  fontWeight: 900,
+                                  fontFamily: "Georgia, serif",
+                                  color: "#fef08a",
+                                  letterSpacing: "0.5px",
+                                  textShadow: "0 2px 8px rgba(234, 179, 8, 0.5)",
+                                }}
+                              >
+                                {headline}
+                              </div>
+                            )}
+                            {subtitle && (
+                              <div style={{ fontSize: "0.75rem", color: "#f1f5f9", lineHeight: "1.3" }}>
+                                {subtitle}
+                              </div>
+                            )}
+                            {logoText && (
+                              <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", marginTop: "2px" }}>
+                                Warm Greetings from {logoText}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Error Recovery Card */}
+                  {imageError && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        background: "#050811",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "20px",
+                        textAlign: "center",
+                      }}
+                    >
+                      <ImageIcon size={44} style={{ color: "#ef4444", marginBottom: "8px" }} />
+                      <p style={{ color: "#f8fafc", fontWeight: 700, margin: 0, fontSize: "0.92rem" }}>
+                        Visual Preview Needs Refresh
+                      </p>
+                      <p style={{ color: "#94a3b8", fontSize: "0.78rem", margin: "4px 0 14px", maxWidth: "280px" }}>
+                        The visual file is saved. Click below to reload the image buffer.
+                      </p>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setImageError(false);
+                            setImageLoaded(false);
+                          }}
+                          style={{
+                            padding: "7px 14px",
+                            borderRadius: "8px",
+                            background: "#6366f1",
+                            color: "#fff",
+                            border: "none",
+                            fontSize: "0.8rem",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Reload Image
+                        </button>
+                        <a
+                          href={generatedAsset.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            padding: "7px 14px",
+                            borderRadius: "8px",
+                            background: "rgba(255,255,255,0.1)",
+                            color: "#fff",
+                            textDecoration: "none",
+                            fontSize: "0.8rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Open Direct URL
+                        </a>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Engine Tag */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "12px",
+                      left: "12px",
+                      display: "flex",
+                      gap: "6px",
+                      zIndex: 10,
+                    }}
+                  >
+                    <span
+                      style={{
+                        background: "rgba(15, 23, 42, 0.9)",
+                        border: "1px solid rgba(255,255,255,0.15)",
+                        color: "#f8fafc",
+                        fontSize: "0.72rem",
+                        padding: "3px 8px",
+                        borderRadius: "8px",
+                        fontWeight: 700,
+                        backdropFilter: "blur(6px)",
+                      }}
+                    >
+                      {generatedAsset.engine === "flux" ? "FLUX.1 Pro" : "Clipdrop SDXL"}
+                    </span>
+                  </div>
+
+                  {/* Credits Tag */}
                   {generatedAsset.remainingCredits !== null && (
                     <span
                       style={{
@@ -491,34 +1745,144 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                         background: "rgba(15, 23, 42, 0.92)",
                         border: "1px solid rgba(52, 211, 153, 0.4)",
                         color: "#34d399",
-                        fontSize: "0.75rem",
-                        padding: "4px 10px",
+                        fontSize: "0.72rem",
+                        padding: "3px 10px",
                         borderRadius: "12px",
                         fontWeight: 700,
                         boxShadow: "0 4px 12px rgba(0,0,0,0.6)",
-                        backdropFilter: "blur(4px)",
+                        zIndex: 10,
                       }}
                     >
-                      Clipdrop Credits: {generatedAsset.remainingCredits}
+                      Credits: {generatedAsset.remainingCredits}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <div style={{ textAlign: "center", color: "#64748b", padding: "40px 20px" }}>
+                  <ImageIcon size={52} style={{ opacity: 0.35, marginBottom: "12px", margin: "0 auto" }} />
+                  <p style={{ margin: 0, fontSize: "0.92rem", fontWeight: 600, color: "#94a3b8" }}>
+                    No visual generated yet
+                  </p>
+                  <p style={{ margin: "4px 0 0", fontSize: "0.8rem", color: "#64748b" }}>
+                    Choose your style, click "Generate Visual", and preview your post visual here.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* SaaS Studio Power Action Suite */}
+            {generatedAsset && (
+              <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: "8px" }}>
+                <button
+                  type="button"
+                  onClick={handleDownloadImage}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: "10px",
+                    border: "none",
+                    background: "linear-gradient(135deg, #10b981, #059669)",
+                    color: "#fff",
+                    fontSize: "0.84rem",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                    boxShadow: "0 4px 14px rgba(16, 185, 129, 0.3)",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  <Download size={15} />
+                  {enableBrandOverlay ? "Download Branded Poster (PNG)" : "Download Image (PNG)"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleRemoveBackground}
+                  disabled={isRemovingBg}
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: "10px",
+                    border: "1px solid rgba(168, 85, 247, 0.4)",
+                    background: "rgba(168, 85, 247, 0.15)",
+                    color: "#d8b4fe",
+                    fontSize: "0.8rem",
+                    fontWeight: 600,
+                    cursor: isRemovingBg ? "wait" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                  }}
+                >
+                  {isRemovingBg ? <Loader2 size={13} className="animate-spin" /> : <Scissors size={13} />}
+                  Cutout / No BG
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleGenerate(true)}
+                  disabled={isGenerating}
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: "10px",
+                    border: "1px solid rgba(255, 255, 255, 0.12)",
+                    background: "rgba(255, 255, 255, 0.05)",
+                    color: "#cbd5e1",
+                    fontSize: "0.8rem",
+                    fontWeight: 600,
+                    cursor: isGenerating ? "wait" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <RefreshCw size={13} />
+                  Variation
+                </button>
+              </div>
+            )}
+
+            {/* Studio Draft & Publishing Suite */}
+            {generatedAsset && (
+              <div
+                style={{
+                  background: "rgba(15, 23, 42, 0.8)",
+                  borderRadius: "14px",
+                  border: "1px solid rgba(99, 102, 241, 0.25)",
+                  padding: "16px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "12px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: "0.84rem", fontWeight: 700, color: "#f8fafc", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Share2 size={15} style={{ color: "#818cf8" }} />
+                    Publishing & Post Actions
+                  </span>
+                  {isAttached && (
+                    <span style={{ fontSize: "0.72rem", color: "#34d399", display: "flex", alignItems: "center", gap: "4px", fontWeight: 600 }}>
+                      <CheckCircle2 size={13} /> Attached to Draft
                     </span>
                   )}
                 </div>
 
-                {/* Additional Clipdrop Tools */}
-                <div style={{ width: "100%", display: "flex", gap: "10px" }}>
+                {/* Primary Action Buttons */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
                   <button
                     type="button"
-                    onClick={handleRemoveBackground}
-                    disabled={isRemovingBg}
+                    onClick={handleAttachToPost}
                     style={{
-                      flex: 1,
-                      padding: "8px 12px",
-                      borderRadius: "8px",
-                      border: "1px solid rgba(255,255,255,0.15)",
-                      background: "rgba(255,255,255,0.05)",
-                      color: "#cbd5e1",
-                      fontSize: "0.8rem",
-                      fontWeight: 600,
+                      padding: "10px 14px",
+                      borderRadius: "9px",
+                      border: "1px solid rgba(99, 102, 241, 0.5)",
+                      background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))",
+                      color: "#e0e7ff",
+                      fontSize: "0.84rem",
+                      fontWeight: 700,
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
@@ -526,35 +1890,389 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                       gap: "6px",
                     }}
                   >
-                    {isRemovingBg ? <Loader2 size={14} className="animate-spin" /> : <Scissors size={14} />}
-                    Remove Background
+                    <Check size={14} />
+                    Attach to Studio Draft
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSavePostToLibrary}
+                    disabled={isSavingPost}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: "9px",
+                      border: "1px solid rgba(52, 211, 153, 0.4)",
+                      background: "rgba(16, 185, 129, 0.15)",
+                      color: "#6ee7b7",
+                      fontSize: "0.84rem",
+                      fontWeight: 700,
+                      cursor: isSavingPost ? "wait" : "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    {isSavingPost ? <Loader2 size={14} className="animate-spin" /> : <Layers size={14} />}
+                    Save to Content Library
                   </button>
                 </div>
 
+                {/* 1-Click Multi-Account Social Channel Publishing */}
                 <div
                   style={{
-                    background: "rgba(16, 185, 129, 0.1)",
-                    border: "1px solid rgba(16, 185, 129, 0.2)",
-                    borderRadius: "8px",
-                    padding: "10px",
-                    width: "100%",
-                    textAlign: "center",
-                    fontSize: "0.8rem",
-                    color: "#34d399",
+                    background: "rgba(10, 15, 30, 0.6)",
+                    borderRadius: "12px",
+                    padding: "14px",
+                    border: "1px solid rgba(56, 189, 248, 0.2)",
+                    boxShadow: "0 8px 24px rgba(0, 0, 0, 0.3)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
                   }}
                 >
-                  ✓ Media saved as asset & attached to draft post. Draft status updated to <strong>NEEDS_REVIEW</strong>.
+                  {/* Header */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <label style={{ fontSize: "0.82rem", color: "#f1f5f9", fontWeight: 700, display: "flex", alignItems: "center", gap: "6px" }}>
+                      <Globe size={15} style={{ color: "#38bdf8" }} />
+                      Publish Directly to Social Accounts
+                    </label>
+                    {connectedAccounts.length > 0 && (
+                      <span style={{ fontSize: "0.72rem", color: "#38bdf8", background: "rgba(56, 189, 248, 0.12)", padding: "2px 8px", borderRadius: "20px", fontWeight: 600, border: "1px solid rgba(56, 189, 248, 0.25)" }}>
+                        {targetAccounts.length} of {connectedAccounts.length} selected
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Post Caption / Text Input */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <label style={{ fontSize: "0.74rem", color: "#94a3b8", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
+                        <Edit3 size={11} style={{ color: "#a78bfa" }} />
+                        Post Caption / Message
+                      </label>
+                      <span style={{ fontSize: "0.68rem", color: "#64748b" }}>
+                        Published along with image
+                      </span>
+                    </div>
+                    <textarea
+                      value={postCaption}
+                      onChange={(e) => {
+                        setPostCaption(e.target.value);
+                        setCaptionManuallyEdited(true);
+                      }}
+                      placeholder="Write the caption or message to accompany this visual..."
+                      rows={2}
+                      style={{
+                        width: "100%",
+                        background: "rgba(15, 23, 42, 0.75)",
+                        border: "1px solid rgba(255, 255, 255, 0.12)",
+                        borderRadius: "8px",
+                        padding: "8px 10px",
+                        color: "#f8fafc",
+                        fontSize: "0.8rem",
+                        lineHeight: "1.4",
+                        resize: "none",
+                        outline: "none",
+                        fontFamily: "inherit",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+
+                  {connectedAccounts.length > 0 ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                      {/* Selection Toolbar */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: "0.72rem", color: "#94a3b8", fontWeight: 600 }}>
+                          Select Accounts to Publish Simultaneously:
+                        </span>
+                        <div style={{ display: "flex", gap: "6px" }}>
+                          <button
+                            type="button"
+                            onClick={selectAllAccounts}
+                            style={{
+                              fontSize: "0.68rem",
+                              padding: "2px 8px",
+                              borderRadius: "4px",
+                              background: "rgba(56, 189, 248, 0.15)",
+                              color: "#38bdf8",
+                              border: "1px solid rgba(56, 189, 248, 0.3)",
+                              cursor: "pointer",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Select All
+                          </button>
+                          <button
+                            type="button"
+                            onClick={deselectAllAccounts}
+                            style={{
+                              fontSize: "0.68rem",
+                              padding: "2px 8px",
+                              borderRadius: "4px",
+                              background: "rgba(255, 255, 255, 0.05)",
+                              color: "#94a3b8",
+                              border: "1px solid rgba(255, 255, 255, 0.1)",
+                              cursor: "pointer",
+                              fontWeight: 500,
+                            }}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Accounts Cards List */}
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "6px",
+                          maxHeight: "160px",
+                          overflowY: "auto",
+                          paddingRight: "2px",
+                        }}
+                      >
+                        {connectedAccounts.map((acc) => {
+                          const isSelected = selectedSocialAccountIds.includes(acc.id);
+                          const isYouTube = acc.platform.toLowerCase() === "youtube";
+                          const isTelegram = acc.platform.toLowerCase() === "telegram";
+                          const isLinkedIn = acc.platform.toLowerCase() === "linkedin";
+
+                          const badgeBg = isTelegram
+                            ? "rgba(14, 165, 233, 0.18)"
+                            : isLinkedIn
+                            ? "rgba(59, 130, 246, 0.18)"
+                            : isYouTube
+                            ? "rgba(239, 68, 68, 0.18)"
+                            : "rgba(168, 85, 247, 0.18)";
+
+                          const badgeColor = isTelegram
+                            ? "#38bdf8"
+                            : isLinkedIn
+                            ? "#60a5fa"
+                            : isYouTube
+                            ? "#f87171"
+                            : "#c084fc";
+
+                          return (
+                            <div
+                              key={acc.id}
+                              onClick={() => toggleAccountSelection(acc.id)}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                padding: "8px 10px",
+                                borderRadius: "8px",
+                                background: isSelected
+                                  ? "linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(139, 92, 246, 0.1))"
+                                  : "rgba(15, 23, 42, 0.55)",
+                                border: isSelected
+                                  ? "1px solid rgba(56, 189, 248, 0.6)"
+                                  : "1px solid rgba(255, 255, 255, 0.08)",
+                                cursor: "pointer",
+                                transition: "all 0.18s ease",
+                              }}
+                            >
+                              <div style={{ display: "flex", alignItems: "center", gap: "9px", minWidth: 0 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => {}} // controlled via div onClick
+                                  style={{
+                                    accentColor: "#38bdf8",
+                                    cursor: "pointer",
+                                    width: "15px",
+                                    height: "15px",
+                                  }}
+                                />
+                                <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "nowrap" }}>
+                                    <span
+                                      style={{
+                                        fontSize: "0.8rem",
+                                        fontWeight: 600,
+                                        color: isSelected ? "#fff" : "#cbd5e1",
+                                        whiteSpace: "nowrap",
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                        maxWidth: "180px",
+                                      }}
+                                      title={acc.name}
+                                    >
+                                      {acc.name}
+                                    </span>
+                                    <span
+                                      style={{
+                                        fontSize: "0.64rem",
+                                        padding: "1px 6px",
+                                        borderRadius: "4px",
+                                        textTransform: "uppercase",
+                                        fontWeight: 700,
+                                        letterSpacing: "0.3px",
+                                        background: badgeBg,
+                                        color: badgeColor,
+                                        border: `1px solid ${badgeColor}33`,
+                                      }}
+                                    >
+                                      {acc.platform}
+                                    </span>
+                                  </div>
+                                  {isYouTube && (
+                                    <span style={{ fontSize: "0.67rem", color: "#f87171", marginTop: "1px" }}>
+                                      (Note: YouTube only supports video uploads)
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                {isSelected ? (
+                                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "18px", height: "18px", borderRadius: "50%", background: "#38bdf8", color: "#000" }}>
+                                    <Check size={11} strokeWidth={3} />
+                                  </span>
+                                ) : (
+                                  <span style={{ width: "18px", height: "18px", borderRadius: "50%", border: "1px solid rgba(255, 255, 255, 0.2)" }} />
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Publish Button */}
+                      <button
+                        type="button"
+                        onClick={handlePublishDirectly}
+                        disabled={isPublishing || targetAccounts.length === 0}
+                        style={{
+                          width: "100%",
+                          padding: "10px 16px",
+                          borderRadius: "9px",
+                          border: "none",
+                          background:
+                            targetAccounts.length === 0
+                              ? "rgba(255, 255, 255, 0.08)"
+                              : "linear-gradient(135deg, #ec4899 0%, #8b5cf6 50%, #3b82f6 100%)",
+                          color: targetAccounts.length === 0 ? "#64748b" : "#fff",
+                          fontSize: "0.85rem",
+                          fontWeight: 700,
+                          cursor: isPublishing
+                            ? "wait"
+                            : targetAccounts.length === 0
+                            ? "not-allowed"
+                            : "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "8px",
+                          boxShadow:
+                            targetAccounts.length > 0
+                              ? "0 4px 16px rgba(236, 72, 153, 0.35)"
+                              : "none",
+                          transition: "all 0.2s ease",
+                          marginTop: "2px",
+                        }}
+                      >
+                        {isPublishing ? (
+                          <>
+                            <Loader2 size={15} className="animate-spin" />
+                            Publishing to {targetAccounts.length} Accounts...
+                          </>
+                        ) : (
+                          <>
+                            <Send size={15} />
+                            🚀 Publish to {targetAccounts.length} Selected Account{targetAccounts.length === 1 ? "" : "s"}
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: "0.78rem", color: "#64748b", display: "flex", alignItems: "center", gap: "6px", padding: "6px 0" }}>
+                      <span>No social channel connected yet.</span>
+                      <a href="/app/manage" style={{ color: "#818cf8", textDecoration: "underline" }}>
+                        Connect in Settings →
+                      </a>
+                    </div>
+                  )}
+
+                  {publishedInfo && (
+                    <div
+                      style={{
+                        background: "rgba(16, 185, 129, 0.15)",
+                        border: "1px solid rgba(16, 185, 129, 0.35)",
+                        borderRadius: "8px",
+                        padding: "9px 12px",
+                        fontSize: "0.78rem",
+                        color: "#34d399",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
+                      <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
+                      <div>
+                        Post & visual published to <strong>{publishedInfo.channel}</strong> at {publishedInfo.at}!
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ) : (
-              <div style={{ textAlign: "center", color: "#64748b" }}>
-                <ImageIcon size={48} style={{ opacity: 0.4, marginBottom: "12px" }} />
-                <p style={{ margin: 0, fontSize: "0.85rem" }}>
-                  Generated Clipdrop visual and brand canvas will appear here.
-                </p>
               </div>
             )}
           </div>
+
+          {/* Fullscreen Lightbox Zoom Modal */}
+          {isFullscreenZoom && generatedAsset && (
+            <div
+              onClick={() => setIsFullscreenZoom(false)}
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.92)",
+                zIndex: 99999,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "40px",
+                backdropFilter: "blur(8px)",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setIsFullscreenZoom(false)}
+                style={{
+                  position: "absolute",
+                  top: "24px",
+                  right: "24px",
+                  background: "rgba(255,255,255,0.15)",
+                  border: "none",
+                  borderRadius: "50%",
+                  width: "40px",
+                  height: "40px",
+                  color: "#fff",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <X size={20} />
+              </button>
+              <img
+                src={generatedAsset.url}
+                alt="Fullscreen Preview"
+                style={{
+                  maxWidth: "90vw",
+                  maxHeight: "90vh",
+                  objectFit: "contain",
+                  borderRadius: "12px",
+                  boxShadow: "0 25px 60px rgba(0,0,0,0.8)",
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

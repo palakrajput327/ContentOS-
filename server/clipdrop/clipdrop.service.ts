@@ -8,11 +8,14 @@ export interface GenerateImageOptions {
   workspaceId: string;
   userId: string;
   prompt: string;
+  engine?: "clipdrop" | "flux";
+  stylePreset?: string;
   aspectRatio?: "1:1" | "4:5" | "9:16" | "16:9";
   headline?: string;
   logoText?: string;
   websiteUrl?: string;
   cta?: string;
+  enableOverlay?: boolean;
   contentId?: string;
   platform?: string;
   idempotencyKey?: string;
@@ -27,30 +30,41 @@ export interface RemoveBackgroundOptions {
   mimeType?: string;
 }
 
+export interface AttachAndSaveOptions {
+  workspaceId: string;
+  userId: string;
+  contentId?: string;
+  title: string;
+  body: string;
+  platforms: string[];
+  assetId: string;
+  mediaUrl: string;
+  status?: "DRAFT" | "NEEDS_REVIEW";
+}
+
 @Injectable()
 export class ClipdropService {
-  private getApiKey(): string {
+  private getApiKey(): string | null {
     const key = process.env.CLIPDROP_API_KEY;
-    if (!key || !key.trim()) {
-      throw new ServiceUnavailableException("CLIPDROP_API_KEY is not configured in environment.");
-    }
-    return key.trim();
+    return key && key.trim() ? key.trim() : null;
   }
 
   /**
-   * Generates a platform-optimized visual prompt using ContentOS LLM
+   * Generates a platform-optimized visual prompt using ContentOS LLM (Groq / Gemini / OpenRouter)
    */
   async suggestPrompt(contentText: string, platform?: string, contextInfo?: string): Promise<{ prompt: string }> {
     const provider = getLLMProvider();
-    const systemPrompt = `You are a world-class creative director. Generate a vivid, detailed image prompt for a text-to-image AI (like Clipdrop/DALL-E) based on the provided content text and platform target.
-    
-Guidelines:
-- Platform focus: ${platform || "General social media"}
-- Describe visual subjects, lighting, artistic style, color scheme, depth, and mood.
-- Keep prompt between 25 and 70 words.
-- Do NOT include text instructions or quote marks in the prompt. Return ONLY the raw image prompt string.`;
+    const systemPrompt = `You are an elite creative visual director for high-growth tech brands and social media marketing.
+Analyze the provided content and formulate a vivid, compelling image generation prompt for modern text-to-image AI (FLUX / Clipdrop / Midjourney).
 
-    const userMessage = `Content text:\n"${contentText.slice(0, 1500)}"\n${contextInfo ? `Context: ${contextInfo}` : ""}`;
+STRICT RULES:
+1. Extract the primary core concept, visual metaphor, or key message.
+2. Build a cinematic scene description: subject, environment, lighting (soft studio glow, rim light, volumetric lighting), style (clean 3D glassmorphic render, photorealistic, or sleek modern SaaS).
+3. Do NOT copy raw sentences or quote fragments from the post. Turn thoughts into tangible visual art!
+4. Do NOT include phrases like "Create an image of", "Illustration of", or quotation marks.
+5. Return 35 to 65 words of rich, descriptive visual keywords.`;
+
+    const userMessage = `Content text:\n"${contentText.slice(0, 1500)}"\n${contextInfo ? `Context: ${contextInfo}` : ""}\nTarget Platform: ${platform || "Social Media"}`;
 
     try {
       if (await provider.validateConfiguration()) {
@@ -67,37 +81,72 @@ Guidelines:
           schemaName: "ImagePromptSuggestion",
         });
         const promptVal = (res.data as any)?.prompt;
-        if (promptVal) {
-          return { prompt: promptVal };
+        if (promptVal && promptVal.trim().length > 15) {
+          return { prompt: promptVal.trim() };
         }
       }
     } catch (err) {
       console.warn("LLM prompt suggestion fallback:", err);
     }
 
-    // Fallback if LLM unavailable
-    const cleaned = contentText.replace(/[\n\r]+/g, " ").slice(0, 120);
+    // High quality thematic fallbacks if LLM unavailable
+    const subject = contentText.split(/[.\n]/)[0]?.replace(/[^a-zA-Z0-9 ]/g, " ").trim().slice(0, 80) || "digital innovation";
     return {
-      prompt: `Modern 3D digital illustration representing ${cleaned}, vibrant color palette, high resolution, 8k render, professional social media graphic`,
+      prompt: `Futuristic 3D minimalist digital workspace representing ${subject}, glowing holographic data interface, floating geometric glass cubes, sleek violet and cyan studio lighting, ultra-detailed 8k octane render`,
     };
   }
 
   /**
-   * Generates image via Clipdrop API, applies ContentOS brand overlay (headline/logo/cta),
-   * saves as media asset, attaches to existing content draft, and sets status to NEEDS_REVIEW.
+   * Generates image via Clipdrop API or FLUX.1 Pro, applies optional brand overlay,
+   * saves as media asset, and links to content draft.
    */
   async generateImage(opts: GenerateImageOptions) {
-    const apiKey = this.getApiKey();
     const aspectRatio = opts.aspectRatio || "1:1";
-    
-    // 1. Idempotency Check
-    const rawKey = opts.idempotencyKey || `${opts.workspaceId}:${opts.prompt}:${aspectRatio}:${opts.headline || ""}:${opts.contentId || ""}`;
+    const requestedEngine = opts.engine || "clipdrop";
+    // 1. Intelligent Prompt Optimization & Entity Extraction (ChatGPT / Gemini style)
+    const { visualPrompt, extractedHeadline, extractedCompany } = this.cleanAndOptimizePrompt(opts.prompt);
+
+    const headline = opts.headline || extractedHeadline;
+    const logoText = opts.logoText || extractedCompany;
+    const enableOverlay = Boolean(opts.enableOverlay);
+
+    // Style presets modifier
+    let finalPrompt = visualPrompt;
+    if (opts.stylePreset) {
+      switch (opts.stylePreset) {
+        case "3d-render":
+          finalPrompt += ", 3D digital render, octane render, smooth glassmorphism, soft ambient occlusion, 8k resolution";
+          break;
+        case "cinematic":
+          finalPrompt += ", cinematic photography, 35mm film photograph, dramatic rim lighting, depth of field, photorealistic";
+          break;
+        case "minimal-saas":
+          finalPrompt += ", modern SaaS product illustration, minimalist geometric composition, sleek pastel gradients, vector aesthetics";
+          break;
+        case "cyberpunk":
+          finalPrompt += ", futuristic cyberpunk aesthetic, glowing neon lights, holographic user interface, dark moody atmospheric lighting";
+          break;
+        case "editorial":
+          finalPrompt += ", high-fashion editorial magazine cover visual, bold color contrast, sophisticated minimalist art";
+          break;
+      }
+    }
+
+    // Aspect ratio composition instructions
+    if (aspectRatio === "16:9") finalPrompt += ", 16:9 widescreen composition";
+    else if (aspectRatio === "9:16") finalPrompt += ", 9:16 vertical story composition";
+    else if (aspectRatio === "4:5") finalPrompt += ", 4:5 vertical portrait composition";
+    else finalPrompt += ", 1:1 square centered composition";
+
+    // 2. Idempotency Check
+    const rawKey = opts.idempotencyKey || `${opts.workspaceId}:${finalPrompt}:${aspectRatio}:${enableOverlay ? headline || "" : "raw"}:${opts.contentId || ""}`;
     const keyHash = createHash("sha256").update(rawKey).digest("hex");
 
     const existingAssetRes = await pool.query(
       `SELECT * FROM media_assets 
        WHERE workspace_id = $1 
          AND deleted_at IS NULL 
+         AND mime_type != 'image/svg+xml'
          AND metadata->>'idempotency_key' = $2 
        ORDER BY created_at DESC LIMIT 1`,
       [opts.workspaceId, keyHash]
@@ -108,7 +157,6 @@ Guidelines:
       const { provider } = getStorageProvider();
       const downloadUrl = await provider.getSignedDownloadUrl(asset.bucket, asset.object_key, 3600);
 
-      // If contentId provided, ensure content item is linked & updated
       if (opts.contentId) {
         await this.attachAssetToContent(opts.workspaceId, opts.contentId, asset.id, downloadUrl, opts.userId, opts.platform);
       }
@@ -120,80 +168,117 @@ Guidelines:
         mimeType: asset.mime_type,
         remainingCredits: asset.metadata?.remaining_credits ?? null,
         cached: true,
+        engine: asset.metadata?.engine || requestedEngine,
         contentId: opts.contentId,
         status: opts.contentId ? "NEEDS_REVIEW" : asset.status,
+        extractedCompany,
+        extractedHeadline,
       };
     }
 
-    // 2. Format Prompt for Aspect Ratio & Style
-    let finalPrompt = opts.prompt.trim();
-    if (aspectRatio === "16:9") finalPrompt += ", 16:9 widescreen composition";
-    else if (aspectRatio === "9:16") finalPrompt += ", 9:16 vertical story composition";
-    else if (aspectRatio === "4:5") finalPrompt += ", 4:5 vertical portrait composition";
-    else finalPrompt += ", 1:1 square centered composition";
+    // 2. Execute Image Generation with Bidirectional Fallback
+    let imageBuffer: Buffer | null = null;
+    let mimeType = "image/png";
+    let usedEngine = requestedEngine;
+    let remainingCredits: number | null = null;
 
-    // 3. Call Clipdrop API (Text to Image)
-    const formData = new FormData();
-    formData.append("prompt", finalPrompt);
+    const clipdropKey = this.getApiKey();
 
-    let clipdropResponse: Response;
-    try {
-      clipdropResponse = await fetch("https://clipdrop-api.co/text-to-image/v1", {
-        method: "POST",
-        headers: {
-          "x-api-key": apiKey,
-        },
-        body: formData,
-      });
-    } catch (err: any) {
-      throw new ServiceUnavailableException(`Network connection to Clipdrop API failed: ${err?.message || err}`);
-    }
-
-    // Extract credit headers if provided by Clipdrop
-    const remainingCreditsHeader = clipdropResponse.headers.get("x-remaining-credits") || clipdropResponse.headers.get("x-credit-count");
-    const remainingCredits = remainingCreditsHeader ? parseInt(remainingCreditsHeader, 10) : null;
-
-    if (!clipdropResponse.ok) {
-      let errText = "";
+    const tryClipdrop = async (): Promise<boolean> => {
+      if (!clipdropKey) return false;
       try {
-        errText = await clipdropResponse.text();
-      } catch {}
-      
-      // Preserving draft content state on failure
-      throw new BadRequestException(`Clipdrop API Error (${clipdropResponse.status}): ${errText || "Image generation request failed"}`);
+        const formData = new FormData();
+        formData.append("prompt", finalPrompt);
+
+        const res = await fetch("https://clipdrop-api.co/text-to-image/v1", {
+          method: "POST",
+          headers: { "x-api-key": clipdropKey },
+          body: formData,
+          signal: AbortSignal.timeout(35000),
+        });
+
+        const creditsHdr = res.headers.get("x-remaining-credits") || res.headers.get("x-credit-count");
+        remainingCredits = creditsHdr ? parseInt(creditsHdr, 10) : null;
+
+        if (res.ok) {
+          const arr = await res.arrayBuffer();
+          imageBuffer = Buffer.from(new Uint8Array(arr));
+          mimeType = res.headers.get("content-type") || "image/png";
+          usedEngine = "clipdrop";
+          return true;
+        } else {
+          console.warn(`Clipdrop API returned status ${res.status}`);
+        }
+      } catch (err: any) {
+        console.warn("Clipdrop API call failed:", err?.message || err);
+      }
+      return false;
+    };
+
+    const tryFlux = async (): Promise<boolean> => {
+      let width = 1024;
+      let height = 1024;
+      if (aspectRatio === "16:9") { width = 1280; height = 720; }
+      else if (aspectRatio === "9:16") { width = 720; height = 1280; }
+      else if (aspectRatio === "4:5") { width = 1024; height = 1280; }
+
+      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
+        finalPrompt
+      )}?width=${width}&height=${height}&nologo=true`;
+
+      try {
+        const res = await fetch(pollinationsUrl, { signal: AbortSignal.timeout(35000) });
+        if (res.ok) {
+          const arr = await res.arrayBuffer();
+          imageBuffer = Buffer.from(new Uint8Array(arr));
+          mimeType = res.headers.get("content-type") || "image/jpeg";
+          usedEngine = "flux";
+          return true;
+        } else {
+          console.warn(`FLUX image generation returned HTTP ${res.status}`);
+        }
+      } catch (err: any) {
+        console.warn("FLUX image generation error:", err?.message || err);
+      }
+      return false;
+    };
+
+    if (requestedEngine === "clipdrop") {
+      const ok = await tryClipdrop();
+      if (!ok) {
+        console.warn("Clipdrop failed, falling back to FLUX engine");
+        await tryFlux();
+      }
+    } else {
+      const ok = await tryFlux();
+      if (!ok) {
+        console.warn("FLUX returned error/402, automatically falling back to Clipdrop SDXL");
+        await tryClipdrop();
+      }
     }
 
-    const imageArrayBuffer = await clipdropResponse.arrayBuffer();
-    let imageBuffer = Buffer.from(new Uint8Array(imageArrayBuffer));
-    let mimeType = clipdropResponse.headers.get("content-type") || "image/png";
-
-    // 4. ContentOS SVG/Canvas Brand Composite Overlay
-    if (opts.headline || opts.logoText || opts.websiteUrl || opts.cta) {
-      const composited = await this.renderBrandOverlay(imageBuffer, mimeType, aspectRatio, {
-        headline: opts.headline,
-        logoText: opts.logoText || "Hindustan Software Solution",
-        websiteUrl: opts.websiteUrl || "hindustansoftwaresolution.com",
-        cta: opts.cta,
-      });
-      imageBuffer = Buffer.from(composited.buffer);
-      mimeType = composited.mimeType;
+    if (!imageBuffer) {
+      throw new ServiceUnavailableException("All visual generation engines are currently busy. Please try again with a different prompt.");
     }
 
-    // 5. Store in Object Storage
+    const finalBuffer: Buffer = imageBuffer!;
+
+    // 3. Object Storage - Always store native high-res raster buffer (PNG/JPEG)
+    // Avoid SVG wrappers to ensure full browser compatibility and native social network publishing support
     const assetId = randomUUID();
     const { provider, bucket } = getStorageProvider();
-    const ext = mimeType.includes("jpeg") || mimeType.includes("jpg") ? ".jpg" : mimeType.includes("svg") ? ".svg" : ".png";
-    const objectKey = `workspaces/${opts.workspaceId}/generated_asset/${assetId}/clipdrop_visual${ext}`;
+    const ext = mimeType.includes("jpeg") || mimeType.includes("jpg") ? ".jpg" : ".png";
+    const objectKey = `workspaces/${opts.workspaceId}/generated_asset/${assetId}/visual_${usedEngine}${ext}`;
 
     await provider.upload({
       bucket,
       objectKey,
-      body: imageBuffer,
+      body: finalBuffer,
       mimeType,
     });
 
-    // 6. DB Record in media_assets
-    const filename = `clipdrop_${Date.now()}${ext}`;
+    // 5. DB Record in media_assets
+    const filename = `${usedEngine}_visual_${Date.now()}${ext}`;
     await pool.query(
       `INSERT INTO media_assets(id, workspace_id, type, storage_provider, bucket, object_key, mime_type, size_bytes, original_filename, status, metadata, created_by)
        VALUES($1, $2, 'GENERATED_ASSET', 's3', $3, $4, $5, $6, $7, 'COMPLETED', $8, $9)`,
@@ -203,11 +288,12 @@ Guidelines:
         bucket,
         objectKey,
         mimeType,
-        imageBuffer.length,
+        finalBuffer.length,
         filename,
         JSON.stringify({
           idempotency_key: keyHash,
           prompt: opts.prompt,
+          engine: usedEngine,
           aspect_ratio: aspectRatio,
           headline: opts.headline || null,
           logo_text: opts.logoText || null,
@@ -221,7 +307,7 @@ Guidelines:
 
     const downloadUrl = await provider.getSignedDownloadUrl(bucket, objectKey, 3600);
 
-    // 7. Attach to Content Item & set status to NEEDS_REVIEW
+    // 6. Attach to Content Item & set status to NEEDS_REVIEW
     if (opts.contentId) {
       await this.attachAssetToContent(opts.workspaceId, opts.contentId, assetId, downloadUrl, opts.userId, opts.platform);
     }
@@ -231,12 +317,12 @@ Guidelines:
       pool,
       opts.workspaceId,
       opts.userId,
-      "CLIPDROP_IMAGE_GENERATED",
+      "IMAGE_GENERATED",
       "media_asset",
       assetId,
       filename,
       null,
-      { prompt: opts.prompt, aspectRatio, remainingCredits }
+      { prompt: opts.prompt, aspectRatio, engine: usedEngine, remainingCredits }
     );
 
     return {
@@ -244,55 +330,56 @@ Guidelines:
       url: downloadUrl,
       filename,
       mimeType,
+      engine: usedEngine,
       remainingCredits,
       cached: false,
       contentId: opts.contentId,
       status: opts.contentId ? "NEEDS_REVIEW" : "COMPLETED",
+      extractedCompany,
+      extractedHeadline,
     };
   }
 
   /**
-   * Clipdrop Background Removal Endpoint
+   * Background Removal Endpoint (Clipdrop)
    */
   async removeBackground(opts: RemoveBackgroundOptions) {
     const apiKey = this.getApiKey();
-    let buffer: Buffer;
-    let originalName = "image_input.png";
+    if (!apiKey) {
+      throw new BadRequestException("Clipdrop API key is required for background removal.");
+    }
 
-    if (opts.fileBuffer) {
-      buffer = opts.fileBuffer;
-      originalName = opts.filename || originalName;
-    } else if (opts.assetId) {
+    let inputBuffer = opts.fileBuffer;
+    let originalName = opts.filename || "image.png";
+
+    if (opts.assetId) {
       const assetRes = await pool.query(
         "SELECT * FROM media_assets WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL",
         [opts.assetId, opts.workspaceId]
       );
-      if (!assetRes.rowCount) throw new NotFoundException("Asset not found in workspace.");
+      if (!assetRes.rowCount) throw new NotFoundException("Asset not found");
       const asset = assetRes.rows[0];
+      originalName = asset.original_filename;
       const { provider } = getStorageProvider();
-
-      // Read file buffer from storage
       const stream = await provider.read(asset.bucket, asset.object_key);
       const chunks: Buffer[] = [];
       for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-      buffer = Buffer.concat(chunks);
-      originalName = asset.original_filename;
-    } else {
-      throw new BadRequestException("Either assetId or fileBuffer must be supplied.");
+      inputBuffer = Buffer.concat(chunks);
     }
 
-    // Call Clipdrop API (Remove Background)
+    if (!inputBuffer) {
+      throw new BadRequestException("No valid image buffer or assetId provided.");
+    }
+
     const formData = new FormData();
-    const blob = new Blob([new Uint8Array(buffer)], { type: opts.mimeType || "image/png" });
-    formData.append("image_file", blob, originalName);
+    const blob = new Blob([new Uint8Array(inputBuffer)], { type: "image/png" });
+    formData.append("image_file", blob, "input.png");
 
     let clipdropResponse: Response;
     try {
       clipdropResponse = await fetch("https://clipdrop-api.co/remove-background/v1", {
         method: "POST",
-        headers: {
-          "x-api-key": apiKey,
-        },
+        headers: { "x-api-key": apiKey },
         body: formData,
       });
     } catch (err: any) {
@@ -309,13 +396,12 @@ Guidelines:
     }
 
     const outArrayBuffer = await clipdropResponse.arrayBuffer();
-    const outBuffer = Buffer.from(outArrayBuffer);
+    const outBuffer = Buffer.from(new Uint8Array(outArrayBuffer));
     const mimeType = "image/png";
 
-    // Store cleaned image
     const assetId = randomUUID();
     const { provider, bucket } = getStorageProvider();
-    const objectKey = `workspaces/${opts.workspaceId}/generated_asset/${assetId}/nobg_${assetId}.png`;
+    const objectKey = `workspaces/${opts.workspaceId}/generated_asset/${assetId}/nobg.png`;
 
     await provider.upload({
       bucket,
@@ -352,7 +438,93 @@ Guidelines:
   }
 
   /**
-   * Helper to attach media asset to existing content item and set status to NEEDS_REVIEW
+   * Saves post with attached visual asset and sets post to NEEDS_REVIEW or DRAFT
+   */
+  async attachAndSave(opts: AttachAndSaveOptions) {
+    const contentId = opts.contentId || randomUUID();
+    const status = opts.status || "NEEDS_REVIEW";
+
+    return transaction(async (db) => {
+      const existing = await db.query(
+        "SELECT * FROM content WHERE id = $1 AND workspace_id = $2 FOR UPDATE",
+        [contentId, opts.workspaceId]
+      );
+
+      const variants: Record<string, any> = {};
+      for (const p of opts.platforms) {
+        variants[p] = {
+          caption: opts.body,
+          mediaAssetId: opts.assetId,
+          mediaUrl: opts.mediaUrl,
+          mediaType: "image",
+        };
+      }
+
+      let postRow;
+      if (existing.rowCount) {
+        postRow = (
+          await db.query(
+            `UPDATE content 
+             SET title = $3, body = $4, variants = $5, platforms = $6, status = $7, updated_by = $8, updated_at = NOW()
+             WHERE id = $1 AND workspace_id = $2
+             RETURNING *`,
+            [
+              contentId,
+              opts.workspaceId,
+              opts.title,
+              opts.body,
+              JSON.stringify(variants),
+              JSON.stringify(opts.platforms),
+              status,
+              opts.userId,
+            ]
+          )
+        ).rows[0];
+      } else {
+        postRow = (
+          await db.query(
+            `INSERT INTO content(id, workspace_id, title, body, platforms, variants, status, created_by, updated_by)
+             VALUES($1, $2, $3, $4, $5, $6, $7, $8, $8)
+             RETURNING *`,
+            [
+              contentId,
+              opts.workspaceId,
+              opts.title,
+              opts.body,
+              JSON.stringify(opts.platforms),
+              JSON.stringify(variants),
+              status,
+              opts.userId,
+            ]
+          )
+        ).rows[0];
+      }
+
+      await audit(
+        db,
+        opts.workspaceId,
+        opts.userId,
+        "content_saved_with_visual",
+        "content",
+        contentId,
+        opts.title,
+        null,
+        { assetId: opts.assetId, mediaUrl: opts.mediaUrl, status }
+      );
+
+      return {
+        id: postRow.id,
+        title: postRow.title,
+        status: postRow.status,
+        platforms: postRow.platforms,
+        mediaAssetId: opts.assetId,
+        mediaUrl: opts.mediaUrl,
+      };
+    });
+  }
+
+  /**
+   * Helper to attach media asset to existing content item
    */
   private async attachAssetToContent(workspaceId: string, contentId: string, assetId: string, mediaUrl: string, userId: string, targetPlatform?: string) {
     await transaction(async (db) => {
@@ -366,7 +538,6 @@ Guidelines:
       const variants = typeof post.variants === "string" ? JSON.parse(post.variants) : (post.variants || {});
       const platforms = (post.platforms as string[]) || ["LinkedIn"];
 
-      // Update variant for target platform or all platforms
       const targetPlatforms = targetPlatform ? [targetPlatform] : platforms;
       for (const p of targetPlatforms) {
         const existing = variants[p] || {};
@@ -387,7 +558,72 @@ Guidelines:
   }
 
   /**
-   * Renders high quality SVG container with visual background + Hindustan Software Solution headline, logo, and website URL
+   * Cleans conversational filler words and enriches visual scene prompts (ChatGPT / Midjourney style)
+   */
+  private cleanAndOptimizePrompt(raw: string): {
+    visualPrompt: string;
+    extractedHeadline?: string;
+    extractedCompany?: string;
+  } {
+    let text = raw.trim();
+    let extractedCompany: string | undefined;
+    let extractedHeadline: string | undefined;
+
+    // 1. Detect Company / Brand Name
+    const companyMatch = text.match(/(?:by|from)\s+([a-zA-Z0-9\s&]{2,45}?(?:pvt|private|limited|ltd|company|corp|solutions|tech))/i);
+    if (companyMatch) {
+      extractedCompany = companyMatch[1].trim().replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+
+    // 2. Detect Occasion / Festivity
+    if (/diwali|deepavali/i.test(text)) {
+      extractedHeadline = "Happy Diwali";
+    } else if (/new\s*year/i.test(text)) {
+      extractedHeadline = "Happy New Year";
+    } else if (/christmas|xmas/i.test(text)) {
+      extractedHeadline = "Merry Christmas";
+    } else if (/eid/i.test(text)) {
+      extractedHeadline = "Eid Mubarak";
+    } else if (/independence\s*day/i.test(text)) {
+      extractedHeadline = "Happy Independence Day";
+    } else if (/holi/i.test(text)) {
+      extractedHeadline = "Happy Holi";
+    }
+
+    // 3. Remove conversational instruction phrases that confuse image diffusion models
+    let visual = text
+      .replace(/^generate\s+(?:an?\s+)?(?:image|poster|photo|picture|graphic|banner)\s+(?:of|for)?\s+/i, "")
+      .replace(/^create\s+(?:an?\s+)?(?:image|poster|photo|picture|graphic|banner)\s+(?:of|for)?\s+/i, "")
+      .replace(/^make\s+(?:an?\s+)?(?:image|poster|photo|picture|graphic|banner)\s+(?:of|for)?\s+/i, "")
+      .replace(/wishing\s+you\s+(?:all\s+)?(?:a\s+)?/gi, "")
+      .replace(/wish\s+by\s+[a-zA-Z0-9\s&]{2,45}?(?:company|limited|pvt|ltd)?/gi, "")
+      .replace(/by\s+[a-zA-Z0-9\s&]{2,45}?(?:private\s+limited|pvt\s+ltd|limited|company)/gi, "")
+      .replace(/having\s+good\s+greeting\s+for\s+[a-zA-Z0-9\s]+/gi, "")
+      .replace(/with\s+good\s+greeting\s+for\s+[a-zA-Z0-9\s]+/gi, "")
+      .replace(/having\s+good\s+greeting/gi, "")
+      .replace(/make\s+it\s+real(?:istic)?/gi, "")
+      .trim();
+
+    // 4. Enrich specific themes with rich visual metaphors (DALL-E 3 / Midjourney style)
+    // Diffusion models like SDXL produce garbled text when asked to write letters.
+    // Strictly generate pure, ultra-clean, photorealistic visuals with zero text/watermarks.
+    if (/diwali|deepavali/i.test(text)) {
+      visual = "A breathtaking, luxurious Diwali festival celebration, glowing traditional clay diyas with radiant warm flickering golden flames, intricate colorful floral rangoli mandala with fresh marigold petals, glowing floating sky lanterns against deep twilight evening sky, festive golden bokeh lights, warm celebratory Diwali atmosphere, ultra-detailed 8k, cinematic photography, rich vibrant colors, masterpiece, clean image, no text, no words, no letters, no watermark";
+    } else if (/waterfall/i.test(text) && /rainbow/i.test(text)) {
+      visual = "Majestic cascading mountain waterfall, vibrant bright double rainbow arching over crystal turquoise waters, lush green mossy canyon cliffs, sunrays piercing through morning mist, realistic 8k nature photography, ultra-detailed, cinematic lighting, no text, no words";
+    } else {
+      visual += ", clean focused visual composition, volumetric studio lighting, rich colors, 8k resolution, photorealistic, masterpiece, clean background, no text, no words, no letters";
+    }
+
+    return {
+      visualPrompt: visual,
+      extractedHeadline,
+      extractedCompany,
+    };
+  }
+
+  /**
+   * Renders high quality brand overlay with dynamic brand branding
    */
   private async renderBrandOverlay(
     baseImageBuffer: Buffer,
@@ -404,98 +640,72 @@ Guidelines:
 
     const base64Image = `data:${mimeType};base64,${baseImageBuffer.toString("base64")}`;
     const headlineText = brand.headline ? this.escapeXml(brand.headline) : "";
-    const logoText = this.escapeXml(brand.logoText || "Hindustan Software Solution");
-    const websiteUrl = this.escapeXml(brand.websiteUrl || "hindustansoftwaresolution.com");
+    const logoText = this.escapeXml(brand.logoText || "ContentOS");
+    const websiteUrl = brand.websiteUrl ? this.escapeXml(brand.websiteUrl) : "";
     const ctaText = brand.cta ? this.escapeXml(brand.cta) : "";
 
-    const overlayY = Math.floor(height * 0.52);
+    const overlayY = Math.floor(height * 0.65);
     const overlayHeight = height - overlayY;
+
+    const brandInitial = (logoText.replace(/[^a-zA-Z0-9]/g, "").charAt(0) || "B").toUpperCase();
 
     const svg = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="overlayGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#0b0f19" stop-opacity="0" />
-      <stop offset="35%" stop-color="#0b0f19" stop-opacity="0.80" />
-      <stop offset="100%" stop-color="#070a12" stop-opacity="0.98" />
+      <stop offset="0%" stop-color="#050811" stop-opacity="0" />
+      <stop offset="35%" stop-color="#050811" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#020409" stop-opacity="0.98" />
     </linearGradient>
     <linearGradient id="topBarGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#0f172a" stop-opacity="0.92" />
-      <stop offset="100%" stop-color="#1e1b4b" stop-opacity="0.92" />
+      <stop offset="0%" stop-color="#0f172a" stop-opacity="0.94" />
+      <stop offset="100%" stop-color="#1e1b4b" stop-opacity="0.94" />
+    </linearGradient>
+    <linearGradient id="badgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#a855f7" />
     </linearGradient>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.6"/>
     </filter>
   </defs>
 
-  <!-- Clipdrop Base Visual -->
+  <!-- Base Visual -->
   <image href="${base64Image}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" />
 
-  <!-- Top Glassmorphism Brand Bar (HSS Logo + Website URL) -->
+  <!-- Top Glassmorphism Brand Bar -->
   <g transform="translate(36, 28)" filter="url(#shadow)">
-    <rect width="${width - 72}" height="72" rx="18" fill="url(#topBarGrad)" stroke="rgba(239, 68, 68, 0.45)" stroke-width="1.5" />
+    <rect width="${width - 72}" height="64" rx="16" fill="url(#topBarGrad)" stroke="rgba(255, 255, 255, 0.15)" stroke-width="1.2" />
     
-    <!-- HSS Vector Logo Group -->
-    <g transform="translate(20, 7)">
-      <!-- Grey Matrix Squares -->
-      <rect x="22" y="0" width="8" height="8" rx="1.5" fill="#94a3b8" />
-      
-      <rect x="11" y="10" width="8" height="8" rx="1.5" fill="#94a3b8" />
-      <rect x="22" y="10" width="8" height="8" rx="1.5" fill="#94a3b8" />
-      <rect x="33" y="10" width="8" height="8" rx="1.5" fill="#94a3b8" />
-      <rect x="44" y="10" width="8" height="8" rx="1.5" fill="#94a3b8" />
-
-      <rect x="11" y="20" width="8" height="8" rx="1.5" fill="#94a3b8" />
-      <rect x="22" y="20" width="8" height="8" rx="1.5" fill="#94a3b8" />
-      <rect x="33" y="20" width="8" height="8" rx="1.5" fill="#94a3b8" />
-      <rect x="55" y="20" width="8" height="8" rx="1.5" fill="#94a3b8" />
-
-      <rect x="0" y="30" width="8" height="8" rx="1.5" fill="#94a3b8" />
-      
-      <!-- Red H S S Boxes -->
-      <rect x="22" y="30" width="9" height="9" rx="1.5" fill="#ef4444" />
-      <text x="26.5" y="37.5" font-family="Inter, Arial, sans-serif" font-size="7" font-weight="900" fill="#ffffff" text-anchor="middle">H</text>
-
-      <rect x="33" y="30" width="9" height="9" rx="1.5" fill="#ef4444" />
-      <text x="37.5" y="37.5" font-family="Inter, Arial, sans-serif" font-size="7" font-weight="900" fill="#ffffff" text-anchor="middle">S</text>
-
-      <rect x="44" y="30" width="9" height="9" rx="1.5" fill="#ef4444" />
-      <text x="48.5" y="37.5" font-family="Inter, Arial, sans-serif" font-size="7" font-weight="900" fill="#ffffff" text-anchor="middle">S</text>
-
-      <rect x="11" y="40" width="8" height="8" rx="1.5" fill="#94a3b8" />
-      <rect x="22" y="40" width="8" height="8" rx="1.5" fill="#94a3b8" />
-      <rect x="33" y="40" width="8" height="8" rx="1.5" fill="#94a3b8" />
-      <rect x="44" y="40" width="8" height="8" rx="1.5" fill="#94a3b8" />
-
-      <rect x="33" y="50" width="8" height="8" rx="1.5" fill="#94a3b8" />
-
-      <!-- Typography HINDUSTAN SOFTWARE SOLUTION -->
-      <text x="68" y="23" font-family="Inter, Helvetica, Arial, sans-serif" font-size="12" font-weight="900" fill="#f8fafc" letter-spacing="1">HINDUSTAN</text>
-      <text x="68" y="36" font-family="Inter, Helvetica, Arial, sans-serif" font-size="12" font-weight="900" fill="#cbd5e1" letter-spacing="1">SOFTWARE</text>
-      <text x="68" y="49" font-family="Inter, Helvetica, Arial, sans-serif" font-size="12" font-weight="900" fill="#94a3b8" letter-spacing="1">SOLUTION</text>
+    <g transform="translate(20, 14)">
+      <circle cx="18" cy="18" r="16" fill="url(#badgeGrad)" />
+      <text x="18" y="24" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="900" fill="#ffffff" text-anchor="middle">${brandInitial}</text>
+      <text x="44" y="24" font-family="Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="800" fill="#f8fafc" letter-spacing="0.5">${logoText.toUpperCase()}</text>
     </g>
 
-    <!-- Website URL (Right aligned) -->
-    <text x="${width - 96}" y="43" text-anchor="end" font-family="Inter, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#38bdf8" letter-spacing="0.5">🌐 ${websiteUrl}</text>
+    ${websiteUrl ? `<text x="${width - 96}" y="42" text-anchor="end" font-family="Inter, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#38bdf8" letter-spacing="0.5">🌐 ${websiteUrl}</text>` : ""}
   </g>
 
-  <!-- ContentOS Brand Overlay Gradient -->
+  <!-- Bottom Brand Overlay Gradient -->
   <rect x="0" y="${overlayY}" width="${width}" height="${overlayHeight}" fill="url(#overlayGrad)" />
 
-  <!-- Headline Text -->
   ${
     headlineText
-      ? `<text x="48" y="${overlayY + 80}" font-family="Inter, Helvetica, Arial, sans-serif" font-size="${height > 1500 ? 44 : 32}" font-weight="800" fill="#ffffff" filter="url(#shadow)">
-    ${headlineText}
-  </text>`
+      ? `<g transform="translate(48, ${overlayY + 65})">
+    <text x="0" y="0" font-family="Inter, Helvetica, Arial, sans-serif" font-size="${height > 1200 ? 46 : 38}" font-weight="900" fill="#ffffff" filter="url(#shadow)" letter-spacing="-0.5">
+      ${headlineText}
+    </text>
+    <text x="0" y="32" font-family="Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#cbd5e1" opacity="0.9">
+      Warmest greetings & best wishes from ${logoText}
+    </text>
+  </g>`
       : ""
   }
 
-  <!-- CTA Button Badge -->
   ${
     ctaText
-      ? `<g transform="translate(48, ${height - 85})">
-    <rect width="${Math.max(180, ctaText.length * 14 + 48)}" height="48" rx="24" fill="#6366f1" filter="url(#shadow)"/>
-    <text x="24" y="31" font-family="Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#ffffff">${ctaText} →</text>
+      ? `<g transform="translate(${width - 240}, ${height - 65})">
+    <rect width="190" height="42" rx="21" fill="url(#badgeGrad)" filter="url(#shadow)"/>
+    <text x="95" y="26" text-anchor="middle" font-family="Inter, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#ffffff">${ctaText} →</text>
   </g>`
       : ""
   }

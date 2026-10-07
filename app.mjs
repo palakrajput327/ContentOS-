@@ -1,15 +1,86 @@
 import { loadEnvFile } from "node:process";
 import dns from "node:dns";
+import net from "node:net";
+import { spawn } from "node:child_process";
 
+// 1. Resilient DNS fallback for Cloud Databases (Neon, AWS, etc.)
+const originalLookup = dns.lookup;
+const fallbackResolver = new dns.promises.Resolver();
 try {
-  dns.setDefaultResultOrder("ipv4first");
+  fallbackResolver.setServers(["8.8.8.8", "1.1.1.1"]);
 } catch {}
+
+dns.lookup = function (hostname, options, callback) {
+  if (typeof options === "function") {
+    callback = options;
+    options = {};
+  }
+  originalLookup(hostname, options, (err, address, family) => {
+    if (err && (err.code === "ENOTFOUND" || err.code === "EREFUSED")) {
+      fallbackResolver
+        .resolve4(hostname)
+        .then((addresses) => {
+          if (addresses && addresses.length > 0) {
+            if (options && options.all) {
+              return callback(
+                null,
+                addresses.map((a) => ({ address: a, family: 4 })),
+              );
+            }
+            return callback(null, addresses[0], 4);
+          }
+          callback(err, address, family);
+        })
+        .catch(() => {
+          callback(err, address, family);
+        });
+    } else {
+      callback(null, address, family);
+    }
+  });
+};
 
 try {
   loadEnvFile(".env");
 } catch (error) {
   console.error("Could not load .env:", error);
 }
+
+// 2. Automatically ensure local Redis is running
+async function ensureRedis() {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: "127.0.0.1", port: 6379 }, () => {
+      socket.destroy();
+      resolve();
+    });
+    socket.on("error", () => {
+      socket.destroy();
+      console.log("[ContentOS] Auto-starting local Redis services...");
+      try {
+        const proc = spawn("node", ["scripts/local-services.mjs"], {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        proc.unref();
+      } catch (err) {
+        console.warn("[ContentOS] Could not spawn local-services:", err.message);
+      }
+      setTimeout(resolve, 1500);
+    });
+  });
+}
+
+await ensureRedis();
+
+// 3. Process-level safety nets to prevent cloud timeouts from crashing the server
+process.on("unhandledRejection", (reason) => {
+  console.warn("[ContentOS] Handled unhandled rejection (server online):", reason?.message || reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.warn("[ContentOS] Handled uncaught exception (server online):", error?.message || error);
+});
 
 const { bootstrap } = await import("./dist-api/phase-main.js");
 

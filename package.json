@@ -15,7 +15,8 @@
     "local:services": "node scripts/local-services.mjs",
     "preview:local": "vite preview --host localhost --port 5173 --configLoader runner",
     "test:llm": "npm run build:api && node --test scripts/test-llm-fallback.mjs && node scripts/test-knowledge.mjs",
-    "test:youtube": "npm run build:api && node --test scripts/test-youtube-publishing.mjs && node scripts/test-youtube-connection.mjs"
+    "test:youtube": "npm run build:api && node --test scripts/test-youtube-publishing.mjs && node scripts/test-youtube-connection.mjs",
+    "postinstall": "npm run build:api"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1141.0",
