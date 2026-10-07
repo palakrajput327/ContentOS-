@@ -11,3 +11,5 @@ Run npm run build:api and npm run migrate, deploy/restart API and frontend, then
 Facebook text/image and Instagram image publishing are supported. Video requests fail explicitly. Meta tokens can be revoked; reconnect when required. Existing workspace connections are replaced only after selecting a Page with a linked Instagram account.
 
 The Meta dashboard settings and a real OAuth round trip require verification in the signed-in Meta app. Local code changes do not change the dashboard app mode.
+
+Meta callback returns to the origin of FACEBOOK_REDIRECT_URI, so a local APP_URL cannot send production Meta connections to localhost. Actual granted permissions and Page content creation access are checked before completing the connection.
