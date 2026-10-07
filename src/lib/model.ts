@@ -2,6 +2,7 @@ export const PRODUCT = import.meta.env.VITE_PRODUCT_NAME || "ContentOS";
 export const platforms = [
   "LinkedIn",
   "Instagram",
+  "Facebook",
   "X",
   "YouTube",
   "Telegram",

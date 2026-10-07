@@ -104,6 +104,7 @@ export default function AIStudio() {
   const platformLimits: Record<Platform, number> = {
     LinkedIn: 3000,
     Instagram: 2200,
+    Facebook: 63206,
     X: 280,
     Telegram: 4096,
     YouTube: 5000,
