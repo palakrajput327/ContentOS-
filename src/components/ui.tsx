@@ -9,6 +9,7 @@ import {
   ArrowUpRight,
   Linkedin,
   Instagram,
+  Facebook,
   Youtube,
   Send,
 } from "lucide-react";
@@ -55,7 +56,7 @@ export function PlatformIcon({ platform }: { platform: Platform }) {
   const Icon =
     platform === "LinkedIn"
       ? Linkedin
-      : platform === "Instagram"
+      : platform === "Facebook" ? Facebook : platform === "Instagram"
         ? Instagram
         : platform === "YouTube"
           ? Youtube

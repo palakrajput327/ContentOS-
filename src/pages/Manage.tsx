@@ -51,6 +51,13 @@ export function Channels() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [connectingPlatform, setConnectingPlatform] = useState<Platform | null>(null);
+  const [metaPages, setMetaPages] = useState<{id:string;name:string;instagram:string|null}[]>([]);
+  const [metaPage, setMetaPage] = useState('');
+  const metaPending = searchParams.get('meta_pending');
+  useEffect(() => {
+    if (!metaPending) return;
+    request<{pages: typeof metaPages}>('/social/meta/pages/' + metaPending).then(result => { setMetaPages(result.pages); setMetaPage(result.pages[0]?.id || ''); }).catch(err => setError(err.message));
+  }, [metaPending]);
   const [remove, setRemove] = useState<string | null>(null);
   const canManage = ["Owner", "Admin"].includes(s.workspace.role);
 
@@ -64,6 +71,7 @@ export function Channels() {
       setSearchParams({}, { replace: true });
     } else if (errorParam) {
       toast.error(errorParam);
+      setError(errorParam);
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, query, setSearchParams]);
@@ -79,7 +87,7 @@ export function Channels() {
 
     try {
       setConnectingPlatform(p);
-      const platformKey = p.toLowerCase();
+      const platformKey = ["Instagram", "Facebook"].includes(p) ? "meta" : p.toLowerCase();
       const res = await request<{ configured: boolean; url?: string; message?: string }>(
         `/social/accounts/${platformKey}/connect-oauth`,
         "POST",
@@ -145,6 +153,15 @@ export function Channels() {
         </span>
       </div>
 
+      {!metaPending && error && <p role="alert">{error}</p>}
+      {metaPending && <div className="panel" style={{padding:24,marginBottom:20}}>
+        <h2>Select your Facebook Page</h2><p>Connect this Page and its linked Instagram Business account.</p>
+        {error && <p role="alert">{error}</p>}
+        <select aria-label="Facebook Page" value={metaPage} onChange={e=>setMetaPage(e.target.value)}>
+          {metaPages.map(p=><option key={p.id} value={p.id}>{p.name} — {p.instagram ? '@'+p.instagram : 'No linked Instagram Business account'}</option>)}
+        </select>
+        <Button disabled={busy || !metaPage} onClick={async()=>{try {setBusy(true);setError('');await request('/social/meta/pages/'+metaPending+'/select','POST',{pageId:metaPage});setSearchParams({connected:'Meta'},{replace:true});}catch(err){setError((err as Error).message);}finally{setBusy(false);}}}>Connect Page + Instagram</Button>
+      </div>}
       <div className="channel-grid">
         {platforms.map((p) => {
           const accounts = s.accounts.filter(
@@ -171,7 +188,7 @@ export function Channels() {
                   ? "Professional ideas and meaningful conversations."
                   : p === "Telegram"
                     ? "Keep your community close and informed."
-                    : p === "Instagram"
+                    : p === "Facebook" ? "Publish updates and images to your Facebook Page." : p === "Instagram"
                       ? "Visual stories that bring your brand to life."
                       : p === "X"
                         ? "Join the conversation, one thought at a time."
@@ -226,7 +243,7 @@ export function Channels() {
                   {isConnecting
                     ? "Connecting…"
                     : supported
-                      ? (accounts.length ? "Add another channel" : "Connect account")
+                      ? (["Instagram", "Facebook"].includes(p) ? "Connect Meta" : accounts.length ? "Add another channel" : "Connect account")
                       : "Coming Later"}
                   {supported && !isConnecting && <ArrowUpRight size={14} />}
                 </Button>

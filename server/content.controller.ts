@@ -49,6 +49,7 @@ export const publishSchema = z.object({
 export const platformSchema = z.enum([
   "LinkedIn",
   "Instagram",
+  "Facebook",
   "X",
   "YouTube",
   "Telegram",

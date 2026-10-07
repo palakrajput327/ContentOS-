@@ -34,6 +34,14 @@ import {
   socialCredentialConfigured,
 } from "./social.oauth.js";
 
+import {
+  META_SCOPES,
+  metaVersion,
+  metaRequest,
+  metaPages,
+  metaPermissions,
+} from "./meta.api.js";
+
 export const telegramConnectSchema = z.object({
   botToken: z.string().trim().min(1, "Telegram Bot Token is required"),
   chatId: z.string().trim().min(1, "Target Chat/Channel ID is required"),
@@ -148,8 +156,11 @@ export class SocialController {
     @Param("platform") platformParam: string,
   ) {
     assertPermission(r.workspace.role, "manage");
-    const platform =
-      platformParam.toLowerCase() === "twitter"
+    const platform = ["meta", "instagram", "facebook"].includes(
+      platformParam.toLowerCase(),
+    )
+      ? "facebook"
+      : platformParam.toLowerCase() === "twitter"
         ? "x"
         : platformParam.toLowerCase();
     const redirectUri = socialRedirectUri(platform);
@@ -162,6 +173,11 @@ export class SocialController {
       clientId = process.env.LINKEDIN_CLIENT_ID;
       authUrlBase = "https://www.linkedin.com/oauth/v2/authorization";
       scope = "openid profile w_member_social";
+    } else if (platform === "facebook") {
+      clientId = process.env.FACEBOOK_APP_ID;
+      authUrlBase =
+        "https://www.facebook.com/" + metaVersion() + "/dialog/oauth";
+      scope = META_SCOPES;
     } else if (platform === "instagram") {
       clientId = process.env.INSTAGRAM_CLIENT_ID || process.env.META_CLIENT_ID;
       authUrlBase = "https://api.instagram.com/oauth/authorize";
@@ -181,12 +197,15 @@ export class SocialController {
     }
 
     const clientSecret =
-      platform === "instagram"
-        ? process.env.INSTAGRAM_CLIENT_SECRET || process.env.META_CLIENT_SECRET
-        : platform === "youtube"
-          ? process.env.YOUTUBE_CLIENT_SECRET ||
-            process.env.GOOGLE_CLIENT_SECRET
-          : process.env[`${platform.toUpperCase()}_CLIENT_SECRET`];
+      platform === "facebook"
+        ? process.env.FACEBOOK_APP_SECRET
+        : platform === "instagram"
+          ? process.env.INSTAGRAM_CLIENT_SECRET ||
+            process.env.META_CLIENT_SECRET
+          : platform === "youtube"
+            ? process.env.YOUTUBE_CLIENT_SECRET ||
+              process.env.GOOGLE_CLIENT_SECRET
+            : process.env[`${platform.toUpperCase()}_CLIENT_SECRET`];
     const isConfigured =
       socialCredentialConfigured(clientId) &&
       socialCredentialConfigured(clientSecret);
@@ -194,7 +213,10 @@ export class SocialController {
     if (!isConfigured) {
       return {
         configured: false,
-        message: `Please add your real ${platform.toUpperCase()}_CLIENT_ID and ${platform.toUpperCase()}_CLIENT_SECRET in .env to connect your official ${platform} account.`,
+        message:
+          platform === "facebook"
+            ? "Set FACEBOOK_APP_ID and FACEBOOK_APP_SECRET in .env."
+            : `Please add your real ${platform.toUpperCase()}_CLIENT_ID and ${platform.toUpperCase()}_CLIENT_SECRET in .env to connect your official ${platform} account.`,
       };
     }
 
@@ -202,14 +224,15 @@ export class SocialController {
     const expiresAt = new Date(Date.now() + 15 * 60000);
 
     await pool.query(
-      `INSERT INTO oauth_states(state_hash, workspace_id, user_id, session_hash, expires_at)
-       VALUES($1, $2, $3, $4, $5)`,
+      `INSERT INTO oauth_states(state_hash, workspace_id, user_id, session_hash, expires_at, provider)
+       VALUES($1, $2, $3, $4, $5, $6)`,
       [
         hash(state),
         r.workspace.id,
         r.user.id,
         r.sessionHash || hash(r.user.id),
         expiresAt,
+        platform,
       ],
     );
 
@@ -224,13 +247,15 @@ export class SocialController {
       url:
         platform === "youtube"
           ? `${url}&access_type=offline&prompt=consent`
-          : url,
+          : platform === "facebook"
+            ? `${url}&auth_type=rerequest`
+            : url,
       redirectUri,
     };
   }
 
   @Public()
-  @Get("social/accounts/:platform/callback")
+  @Get(["social/accounts/:platform/callback", "social/:platform/callback"])
   async oauthCallback(
     @Param("platform") platformParam: string,
     @Query("code") code: string,
@@ -238,8 +263,15 @@ export class SocialController {
     @Query("error") errorStr: string,
     @Res() res: Response,
   ) {
-    const platform = platformParam.toLowerCase() as SocialProviderName;
-    const appUrl = process.env.APP_URL || "http://localhost:5173";
+    const platform = (
+      ["instagram", "meta"].includes(platformParam.toLowerCase())
+        ? "facebook"
+        : platformParam.toLowerCase()
+    ) as SocialProviderName;
+    const appUrl =
+      platform === "facebook"
+        ? new URL(socialRedirectUri("facebook")).origin
+        : process.env.APP_URL || "http://localhost:5173";
 
     if (errorStr || !code || !state) {
       return res.redirect(
@@ -260,6 +292,8 @@ export class SocialController {
     }
 
     const stateRecord = stateRes.rows[0];
+    if (platform === "facebook")
+      return this.finishMetaOAuth(code, stateHash, stateRecord, res);
     const w = stateRecord.workspace_id;
     const userId = stateRecord.user_id;
 
@@ -454,6 +488,180 @@ export class SocialController {
     return res.redirect(`${appUrl}/app/channels?connected=${platform}`);
   }
 
+  private async finishMetaOAuth(
+    code: string,
+    stateHash: string,
+    record: any,
+    res: Response,
+  ) {
+    const appUrl = new URL(socialRedirectUri("facebook")).origin;
+    try {
+      const consumed = await pool.query(
+        "DELETE FROM oauth_states WHERE state_hash=$1 AND provider='facebook' RETURNING state_hash",
+        [stateHash],
+      );
+      if (!consumed.rowCount)
+        throw new Error(
+          "Meta OAuth session expired or already used. Please reconnect.",
+        );
+      const credentials = {
+        client_id: process.env.FACEBOOK_APP_ID || "",
+        client_secret: process.env.FACEBOOK_APP_SECRET || "",
+      };
+      const short = await metaRequest("oauth/access_token", "", {
+        ...credentials,
+        code,
+        redirect_uri: socialRedirectUri("facebook"),
+      });
+      const long = await metaRequest("oauth/access_token", "", {
+        ...credentials,
+        grant_type: "fb_exchange_token",
+        fb_exchange_token: short.access_token,
+      });
+      if (!long.access_token)
+        throw new Error("Meta did not return an access token.");
+      await metaPermissions(long.access_token);
+      await metaPages(long.access_token);
+      const id = randomUUID();
+      await pool.query(
+        "DELETE FROM meta_oauth_pending WHERE expires_at < NOW()",
+      );
+      await pool.query(
+        "INSERT INTO meta_oauth_pending(id,workspace_id,user_id,ciphertext,expires_at) VALUES($1,$2,$3,$4,$5)",
+        [
+          id,
+          record.workspace_id,
+          record.user_id,
+          encryptToken(long.access_token, record.workspace_id),
+          new Date(Date.now() + 15 * 60000),
+        ],
+      );
+      return res.redirect(appUrl + "/app/channels?meta_pending=" + id);
+    } catch (err: any) {
+      return res.redirect(
+        appUrl + "/app/channels?error=" + encodeURIComponent(err.message),
+      );
+    }
+  }
+  private async metaPending(r: AuthedRequest, id: string) {
+    z.string().uuid().parse(id);
+    const result = await pool.query(
+      "SELECT * FROM meta_oauth_pending WHERE id=$1 AND workspace_id=$2 AND user_id=$3 AND expires_at > NOW()",
+      [id, r.workspace.id, r.user.id],
+    );
+    if (!result.rowCount)
+      throw new BadRequestException(
+        "Meta Page selection expired. Please Connect Meta again.",
+      );
+    return result.rows[0];
+  }
+  @WorkspaceRequired()
+  @Get("social/meta/pages/:id")
+  async listMetaPages(@Req() r: AuthedRequest, @Param("id") id: string) {
+    assertPermission(r.workspace.role, "manage");
+    const pending = await this.metaPending(r, id);
+    const pages = await metaPages(
+      decryptToken(pending.ciphertext, r.workspace.id),
+    );
+    return {
+      pages: pages.map((p) => ({
+        id: p.id,
+        name: p.name,
+        instagram: p.instagram_business_account?.username || null,
+      })),
+    };
+  }
+  @WorkspaceRequired()
+  @Post("social/meta/pages/:id/select")
+  async selectMetaPage(
+    @Req() r: AuthedRequest,
+    @Param("id") id: string,
+    @Body() input: unknown,
+  ) {
+    assertPermission(r.workspace.role, "manage");
+    const { pageId } = z
+      .object({ pageId: z.string().regex(/^\d+$/) })
+      .parse(input);
+    const pending = await this.metaPending(r, id);
+    const pages = await metaPages(
+      decryptToken(pending.ciphertext, r.workspace.id),
+    );
+    const page = pages.find((p) => p.id === pageId);
+    if (!page)
+      throw new BadRequestException(
+        "Selected Facebook Page is no longer accessible. Reconnect and grant Page access.",
+      );
+    if (!page.access_token)
+      throw new BadRequestException(
+        "Facebook Page token missing. Grant publishing access and reconnect.",
+      );
+    if (
+      Array.isArray(page.tasks) &&
+      !page.tasks.some((task: string) =>
+        [
+          "CREATE_CONTENT",
+          "MANAGE",
+          "PROFILE_PLUS_CREATE_CONTENT",
+          "PROFILE_PLUS_FULL_CONTROL",
+        ].includes(task),
+      )
+    ) {
+      throw new BadRequestException(
+        "Selected Facebook Page has no content publishing access. Ask the Page owner to grant content creation access, then reconnect Meta.",
+      );
+    }
+    const ig = page.instagram_business_account;
+    if (!ig?.id)
+      throw new BadRequestException(
+        "No linked Instagram Business account found for this Page. Link your Instagram professional account in Facebook Page settings / Meta Business Suite, then retry.",
+      );
+    await transaction(async (db) => {
+      const claimed = await db.query(
+        "DELETE FROM meta_oauth_pending WHERE id=$1 AND expires_at > NOW() RETURNING id",
+        [id],
+      );
+      if (!claimed.rowCount)
+        throw new BadRequestException(
+          "Meta selection expired or already used.",
+        );
+      for (const account of [
+        { platform: "facebook", id: page.id, name: page.name },
+        {
+          platform: "instagram",
+          id: ig.id,
+          name: ig.username ? "@" + ig.username : "Instagram Business",
+        },
+      ]) {
+        const saved = await db.query(
+          `INSERT INTO social_accounts(id,workspace_id,platform,provider_id,name,state,last_sync) VALUES($1,$2,$3,$4,$5,'CONNECTED',NOW()) ON CONFLICT(workspace_id,platform) DO UPDATE SET provider_id=EXCLUDED.provider_id,name=EXCLUDED.name,state='CONNECTED',last_sync=NOW() RETURNING id`,
+          [
+            randomUUID(),
+            r.workspace.id,
+            account.platform,
+            account.id,
+            account.name,
+          ],
+        );
+        await db.query(
+          "INSERT INTO social_account_tokens(account_id,ciphertext,expires_at) VALUES($1,$2,NULL) ON CONFLICT(account_id) DO UPDATE SET ciphertext=EXCLUDED.ciphertext,expires_at=NULL",
+          [saved.rows[0].id, encryptToken(page.access_token, r.workspace.id)],
+        );
+        await audit(
+          db,
+          r.workspace.id,
+          r.user.id,
+          "connected_channel_oauth",
+          "social_account",
+          saved.rows[0].id,
+          account.name,
+          null,
+          { platform: account.platform, pageId: page.id, instagramId: ig.id },
+        );
+      }
+    });
+    return { connected: true };
+  }
+
   @WorkspaceRequired()
   @Post("social/accounts/linkedin/token-connect")
   async connectLinkedInToken(@Req() r: AuthedRequest, @Body() input: unknown) {
@@ -636,7 +844,7 @@ export class SocialController {
     const config =
       acc.platform === "telegram"
         ? { botToken: token, chatId: acc.provider_id }
-        : { token };
+        : { token, destination: acc.provider_id };
     const valResult = await provider.validateConnection(config);
     const newState = valResult.valid ? "CONNECTED" : valResult.status;
 

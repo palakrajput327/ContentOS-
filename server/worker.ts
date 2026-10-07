@@ -1,3 +1,4 @@
+import { SocialProviderRegistry } from './social.provider.js';
 import { Worker, Queue, UnrecoverableError } from "bullmq";
 import { randomUUID } from "node:crypto";
 import { pool, transaction, audit, type DB } from "./db.js";
@@ -151,6 +152,13 @@ const worker = new Worker(
         account.platform as Platform,
         { isPublishing: true }
       );
+      const metaPlatform = String(account.platform).toLowerCase();
+      if (metaPlatform === 'facebook' || metaPlatform === 'instagram') {
+        if (plan.mediaType === 'video') throw new ProviderError('META_VIDEO_NOT_SUPPORTED');
+        const result = await SocialProviderRegistry.getProvider(metaPlatform).publishText({token:decryptToken(account.ciphertext,record.workspace_id)}, {destination:account.provider_id,text:plan.caption,mediaUrl:plan.mediaUrl});
+        if (!result.success || !result.providerPostId) throw new ProviderError('META_PUBLISH_FAILED',false,true);
+        providerId = result.providerPostId;
+      } else {
       const provider = socialProvider(account.platform);
       const conn = {
         token: decryptToken(
@@ -166,6 +174,7 @@ const worker = new Worker(
         providerId = await provider.publishMedia(conn, plan.mediaUrl);
       } else {
         providerId = await provider.publishText(conn, plan.caption);
+      }
       }
     } catch (error) {
       const e =

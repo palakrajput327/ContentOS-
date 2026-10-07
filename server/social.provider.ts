@@ -1,3 +1,4 @@
+import { metaRequest } from './meta.api.js';
 import { uploadYouTubeVideo } from "./youtube.api.js";
 import type { YouTubeInput } from "./youtube.schema.js";
 import { BadRequestException } from "@nestjs/common";
@@ -7,6 +8,7 @@ import * as path from "node:path";
 export type SocialProviderName =
   | "telegram"
   | "linkedin"
+  | "facebook"
   | "instagram"
   | "x"
   | "youtube";
@@ -653,84 +655,47 @@ export class XProvider implements SocialProvider {
   }
 }
 
-export class InstagramProvider implements SocialProvider {
-  readonly provider: SocialProviderName = "instagram";
-  readonly capabilities: SocialProviderCapabilities = {
-    text: true,
-    image: true,
-    video: true,
-    document: false,
-  };
-
-  async validateConnection(
-    config: unknown,
-  ): Promise<ConnectionValidationResult> {
-    const token =
-      typeof config === "object" && config && "token" in config
-        ? String((config as any).token)
-        : "";
-    if (!token)
-      return {
-        valid: false,
-        status: "INVALID_CREDENTIALS",
-        providerId: "",
-        name: "Instagram",
-      };
-
+export class FacebookProvider implements SocialProvider {
+  readonly provider: SocialProviderName = 'facebook';
+  readonly capabilities = { text: true, image: true, video: false, document: false };
+  async validateConnection(config: unknown): Promise<ConnectionValidationResult> {
+    const { token, destination } = (config || {}) as any;
     try {
-      // Try Instagram Graph API
-      let res = await fetch(
-        `https://graph.instagram.com/me?fields=id,username&access_token=${encodeURIComponent(token)}`,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        return {
-          valid: true,
-          status: "CONNECTED",
-          providerId: data.id || "unknown",
-          name: data.username ? `@${data.username}` : "Instagram Account",
-        };
-      }
-      // Fallback to Facebook Graph API for Instagram Business accounts
-      res = await fetch(
-        `https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${encodeURIComponent(token)}`,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        return {
-          valid: true,
-          status: "CONNECTED",
-          providerId: data.id || "unknown",
-          name: data.name || "Instagram Account",
-        };
-      }
-      return {
-        valid: false,
-        status: "INVALID_CREDENTIALS",
-        providerId: "",
-        name: "Instagram",
-      };
-    } catch (err: any) {
-      return {
-        valid: false,
-        status: "ERROR",
-        providerId: "",
-        name: "Instagram",
-        details: { error: err.message },
-      };
-    }
+      if (!token || !destination) throw new Error('Reconnect Meta to select a Facebook Page.');
+      const profile = await metaRequest(destination, token, { fields: 'id,name' });
+      return {valid:true,status:'CONNECTED',providerId:profile.id,name:profile.name};
+    } catch (err: any) { return {valid:false,status:'INVALID_CREDENTIALS',providerId:destination || '',name:'Facebook',details:{error:err.message}}; }
   }
-
-  async publishText(
-    config: unknown,
-    request: PublishTextRequest,
-  ): Promise<PublishResult> {
-    // Note: Instagram Graph API requires media container for posts
-    return {
-      success: true,
-      providerPostId: "ig_" + Date.now(),
-      publishedAt: new Date(),
-    };
+  async publishText(config: unknown, request: PublishTextRequest): Promise<PublishResult> {
+    const { token } = (config || {}) as any;
+    try {
+      const result = await metaRequest(request.destination + (request.mediaUrl ? '/photos' : '/feed'),token,request.mediaUrl ? {url:request.mediaUrl,caption:request.text} : {message:request.text},'POST');
+      if (!result.id && !result.post_id) throw new Error('Facebook did not return a published post ID.');
+      return {success:true,providerPostId:result.post_id || result.id,publishedAt:new Date()};
+    } catch(err: any) { return {success:false,error:err.message,publishedAt:new Date()}; }
+  }
+}
+export class InstagramProvider implements SocialProvider {
+  readonly provider: SocialProviderName = 'instagram';
+  readonly capabilities = { text: false, image: true, video: false, document: false };
+  async validateConnection(config: unknown): Promise<ConnectionValidationResult> {
+    const { token, destination } = (config || {}) as any;
+    try {
+      if (!token || !destination) throw new Error('Reconnect Meta to select the linked Instagram Business account.');
+      const profile = await metaRequest(destination,token,{fields:'id,username'});
+      return {valid:true,status:'CONNECTED',providerId:profile.id,name:'@'+profile.username};
+    } catch(err: any) { return {valid:false,status:'INVALID_CREDENTIALS',providerId:destination || '',name:'Instagram',details:{error:err.message}}; }
+  }
+  async publishText(config: unknown, request: PublishTextRequest): Promise<PublishResult> {
+    const { token } = (config || {}) as any;
+    try {
+      if (!request.mediaUrl) throw new Error('Instagram publishing requires a publicly accessible image URL.');
+      const container = await metaRequest(request.destination+'/media',token,{image_url:request.mediaUrl,caption:request.text},'POST');
+      if (!container.id) throw new Error('Instagram did not return a media container ID.');
+      const result = await metaRequest(request.destination+'/media_publish',token,{creation_id:container.id},'POST');
+      if (!result.id) throw new Error('Instagram did not return a published media ID.');
+      return {success:true,providerPostId:result.id,publishedAt:new Date()};
+    } catch(err: any) { return {success:false,error:err.message,publishedAt:new Date()}; }
   }
 }
 
@@ -848,6 +813,7 @@ export class SocialProviderRegistry {
     ["linkedin", new LinkedInProvider()],
     ["x", new XProvider()],
     ["instagram", new InstagramProvider()],
+    ["facebook", new FacebookProvider()],
     ["youtube", new YouTubeProvider()],
   ]);
 

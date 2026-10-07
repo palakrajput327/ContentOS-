@@ -1,4 +1,4 @@
-export type Platform = "LinkedIn" | "Instagram" | "X" | "Telegram" | "YouTube";
+export type Platform = "Facebook" | "LinkedIn" | "Instagram" | "X" | "Telegram" | "YouTube";
 
 export type MediaType = "text" | "image" | "video" | "document";
 
@@ -37,6 +37,7 @@ export const PLATFORM_CAPABILITIES: Record<Platform, PlatformCapability> = {
     supportsHashtags: true,
     supportsFormatting: false,
   },
+  Facebook: { platform: 'Facebook', maxCaptionLength: 10000, supportsTitle: false, requiresTitle: false, allowedMediaTypes: ['text','image'], requiresMedia: false, supportsHashtags: true, supportsFormatting: false },
   Instagram: {
     platform: "Instagram",
     maxCaptionLength: 2200,
