@@ -111,6 +111,9 @@ export function PublishPreviewModal({
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Review your post"
         className="modal-card"
         style={{
           background: "#0f172a",
@@ -153,7 +156,7 @@ export function PublishPreviewModal({
             </div>
             <div>
               <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700 }}>
-                Publishing Payload Preview
+                Review your post
               </h3>
               <p
                 style={{
@@ -162,12 +165,13 @@ export function PublishPreviewModal({
                   color: "var(--color-text-muted, #94a3b8)",
                 }}
               >
-                Inspect exact platform-specific payloads before publishing or scheduling
+                Check the caption and media for each selected channel before publishing.
               </p>
             </div>
           </div>
           <button
             type="button"
+            aria-label="Close post review"
             onClick={onClose}
             style={{
               background: "none",
@@ -272,7 +276,7 @@ export function PublishPreviewModal({
               }}
             >
               <CheckCircle2 size={16} />
-              <span>Payload is fully valid for {currentPlatform} publishing!</span>
+              <span>Content format checks passed for {currentPlatform}. Publishing may still require channel permissions and accessible media.</span>
             </div>
           )}
 
@@ -280,7 +284,7 @@ export function PublishPreviewModal({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
+              gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
               gap: "12px",
               background: "rgba(255, 255, 255, 0.02)",
               padding: "12px 16px",
@@ -341,7 +345,7 @@ export function PublishPreviewModal({
           {/* Caption Box */}
           <div>
             <label style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text-muted)", marginBottom: "4px", display: "block" }}>
-              Final Platform Caption
+              Caption
             </label>
             <div
               style={{
@@ -361,7 +365,7 @@ export function PublishPreviewModal({
           {/* Media Info */}
           <div>
             <label style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text-muted)", marginBottom: "4px", display: "block" }}>
-              Media Attachment Payload
+              Attached media
             </label>
             <div
               style={{
@@ -383,10 +387,8 @@ export function PublishPreviewModal({
                 <FileText size={20} style={{ color: "var(--color-text-muted)" }} />
               )}
               <div>
-                <strong style={{ display: "block" }}>Media Type: {mediaType.toUpperCase()}</strong>
-                <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-                  Asset ID: {variantObj.mediaAssetId || "None"} • URL: {variantObj.mediaUrl || "None"}
-                </span>
+                <strong style={{ display: "block" }}>{mediaType === 'text' ? 'Text only' : mediaType === 'image' ? 'Image with caption' : 'Video with caption'}</strong>
+                {mediaType === 'image' && variantObj.mediaUrl && <img src={variantObj.mediaUrl} alt={`${currentPlatform} image preview`} style={{display:'block',maxWidth:'100%',maxHeight:200,objectFit:'contain',borderRadius:8,marginTop:8}} />}
               </div>
             </div>
           </div>
@@ -430,12 +432,14 @@ export function PublishPreviewModal({
             justifyContent: "space-between",
             alignItems: "center",
             background: "rgba(0, 0, 0, 0.2)",
+            flexWrap: "wrap",
+            gap: "12px",
           }}
         >
           <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-            Validated across {platforms.length} target social platforms
+            {platforms.length} selected channels · Results reported separately
           </span>
-          <div style={{ display: "flex", gap: "10px" }}>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
             <Button variant="secondary" onClick={onClose}>
               Close Preview
             </Button>
@@ -443,7 +447,7 @@ export function PublishPreviewModal({
               <Button
                 variant="primary"
                 onClick={onConfirmPublish}
-                disabled={isPublishing || !validation.valid}
+                disabled={isPublishing}
               >
                 <Send size={15} />
                 {isPublishing ? "Publishing..." : "Confirm & Publish Now"}

@@ -39,7 +39,7 @@ export const PLATFORM_CAPABILITIES: Record<Platform, PlatformCapability> = {
     supportsHashtags: true,
     supportsFormatting: false,
   },
-  Facebook: { platform: 'Facebook', maxCaptionLength: 63206, supportsTitle: false, requiresTitle: false, allowedMediaTypes: ['text','image'], requiresMedia: false, supportsHashtags: true, supportsFormatting: false },
+  Facebook: { platform: 'Facebook', maxCaptionLength: 63206, supportsTitle: false, requiresTitle: false, allowedMediaTypes: ['text','image','video'], requiresMedia: false, supportsHashtags: true, supportsFormatting: false },
   Instagram: {
     platform: "Instagram",
     maxCaptionLength: 2200,

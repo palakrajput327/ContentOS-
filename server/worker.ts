@@ -10,7 +10,7 @@ import {
   pollYouTubeProcessing,
 } from "./youtube.service.js";
 import { createPublishPlan } from "./publish-planner.js";
-import type { Platform } from "./platform-capabilities.js";
+import { PLATFORM_CAPABILITIES, type Platform } from "./platform-capabilities.js";
 import { pdfWorker } from "./pdf-worker.js";
 import { aiWorker } from "./ai-worker.js";
 
@@ -146,17 +146,19 @@ const worker = new Worker(
     }
     let providerId: string;
     try {
+      const metaPlatform = String(account.platform).toLowerCase();
       const plan = await createPublishPlan(
         pool,
         content,
-        account.platform as Platform,
+        (Object.keys(PLATFORM_CAPABILITIES).find(p=>p.toLowerCase()===metaPlatform) || account.platform) as Platform,
         { isPublishing: true }
       );
-      const metaPlatform = String(account.platform).toLowerCase();
-      if (metaPlatform === 'facebook' || metaPlatform === 'instagram') {
-        if (plan.mediaType === 'video') throw new ProviderError('META_VIDEO_NOT_SUPPORTED');
-        const result = await SocialProviderRegistry.getProvider(metaPlatform).publishText({token:decryptToken(account.ciphertext,record.workspace_id)}, {destination:account.provider_id,text:plan.caption,mediaUrl:plan.mediaUrl});
-        if (!result.success || !result.providerPostId) throw new ProviderError('META_PUBLISH_FAILED',false,true);
+      if (['facebook','instagram','telegram'].includes(metaPlatform) || metaPlatform === 'linkedin' && plan.mediaType !== 'video') {
+        let token: string;
+        try { token=decryptToken(account.ciphertext,record.workspace_id); }
+        catch { token=decryptToken(account.ciphertext,`${record.workspace_id}:${account.id}`); }
+        const result = await SocialProviderRegistry.getProvider(metaPlatform as any).publishText(metaPlatform==='telegram'?{botToken:token,chatId:account.provider_id}:{token,author:account.provider_id}, {destination:account.provider_id,text:plan.caption,mediaUrl:plan.mediaUrl,mediaType:plan.mediaType,metadata:plan.metadata});
+        if (!result.success || !result.providerPostId) throw new ProviderError(result.error || 'META_PUBLISH_FAILED',false,Boolean(result.uncertain));
         providerId = result.providerPostId;
       } else {
       const provider = socialProvider(account.platform);

@@ -68,11 +68,10 @@ export default function AIStudio() {
 
   // Topic Mode state
   const [topic, setTopic] = useState("");
-  const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([
-    "LinkedIn",
-    "X",
-    "Instagram",
-  ]);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>(()=>{
+    const connected = s.accounts.filter(a=>a.state.toLowerCase()==='connected').map(a=>platforms.find(p=>p.toLowerCase()===a.platform.toLowerCase())).filter((p):p is Platform=>!!p && p!=='YouTube');
+    return connected.length ? [...new Set(connected)].slice(0,5) : ['LinkedIn','Instagram'];
+  });
   const [tone, setTone] = useState(s?.brand?.tone || "Professional");
   const [goal, setGoal] = useState("Engagement");
   const [audience, setAudience] = useState("General Professional");
@@ -98,6 +97,8 @@ export default function AIStudio() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generatedTitle, setGeneratedTitle] = useState("");
+  const [savedContentId, setSavedContentId] = useState<string | undefined>();
+  const [generatedEvidence,setGeneratedEvidence] = useState<Array<{documentId:string|null;documentName?:string;knowledgeId:string;pageStart?:number;pageEnd?:number;excerpt?:string}>>([]);
   const [generatedVariants, setGeneratedVariants] = useState<Partial<Record<Platform, string>>>({});
   const [activePreviewPlatform, setActivePreviewPlatform] = useState<Platform>("LinkedIn");
 
@@ -375,7 +376,7 @@ export default function AIStudio() {
         const knowledgeSummary = selectedItems
           .map(
             (k, idx) =>
-              `Point ${idx + 1} (${k.knowledge_type}): ${typeof k.value === "string" ? k.value : JSON.stringify(k.value)}`
+              `Point ${idx + 1} (${k.knowledge_type}): ${typeof k.value === "string" ? k.value : JSON.stringify(k.value)}\nSource page: ${k.page_start || 'unavailable'}${k.page_end && k.page_end!==k.page_start ? `–${k.page_end}` : ''}\nSource excerpt: ${k.source_excerpt || 'unavailable'}`
           )
           .join("\n\n");
         promptTopic = `Generate social media posts based on the following verified PDF knowledge:\n\nDocument: ${
@@ -389,8 +390,10 @@ export default function AIStudio() {
           throw new Error("Please provide a topic or prompt of at least 5 characters.");
         }
       }
+      promptTopic = `${promptTopic}\nTarget audience: ${audience}`;
 
       setIsGenerating(true);
+      setSavedContentId(undefined);
       let result: { title: string; variants: Partial<Record<Platform, string>> } = {
         title: "AI Studio Post",
         variants: {},
@@ -444,6 +447,7 @@ export default function AIStudio() {
       setGeneratedTitle(result.title || "AI Studio Post");
       setGeneratedVariants(result.variants || {});
       setActivePreviewPlatform(selectedPlatforms[0] || "LinkedIn");
+      if (!(await handleSaveToLibrary(result, false))) throw new Error('Content was generated but could not be saved for review. Retry saving below.');
     } catch (err) {
       const msg = (err as Error).message;
       setError(msg);
@@ -469,10 +473,11 @@ export default function AIStudio() {
 
       setIsGenerating(true);
       const itemsPayload = selectedItems.map((k, idx) => ({
-        topic: `Knowledge Item ${idx + 1} (${k.knowledge_type}): ${typeof k.value === "string" ? k.value : JSON.stringify(k.value)}`.slice(0, 2000),
+        topic: `Knowledge Item ${idx + 1} (${k.knowledge_type}): ${typeof k.value === "string" ? k.value : JSON.stringify(k.value)}\nSource page: ${k.page_start || 'unavailable'}\nExcerpt: ${k.source_excerpt || 'unavailable'}\nAudience: ${audience}`.slice(0, 2000),
         tone,
         goal,
         platforms: selectedPlatforms,
+        sourceEvidence:[{documentId:selectedDocId,documentName:activeDoc?.original_filename,knowledgeId:k.id,pageStart:k.page_start,pageEnd:k.page_end,excerpt:k.source_excerpt}],
       }));
 
       const res = (await request("/batch/ai-generation", "POST", {
@@ -489,46 +494,56 @@ export default function AIStudio() {
     }
   }
 
-  async function handleSaveToLibrary() {
+  async function handleSaveToLibrary(generation?: {title:string;variants:Partial<Record<Platform,string>>}, navigate = true, visual = attachedVisual) {
     try {
       setError(null);
-      if (!generatedTitle.trim() || !Object.keys(generatedVariants).length) {
+      const titleToSave = generation?.title || generatedTitle;
+      const variantsToSave = generation?.variants || generatedVariants;
+      if (!titleToSave.trim() || !Object.keys(variantsToSave).length) {
         throw new Error("No generated content available to save.");
       }
 
       setIsSaving(true);
       const firstPlatform = selectedPlatforms[0] || "LinkedIn";
-      const baseBody = generatedVariants[firstPlatform] || Object.values(generatedVariants)[0] || "";
+      const baseBody = variantsToSave[firstPlatform] || Object.values(variantsToSave)[0] || "";
 
       // Attach visual media asset to variants if generated
       const finalVariants: Record<string, any> = {};
-      for (const [p, val] of Object.entries(generatedVariants)) {
-        if (attachedVisual) {
+      const sourceEvidence = generation ? (activeTab === 'pdf' ? knowledgeItems.filter(k=>selectedKnowledgeIds.includes(k.id)).map(k=>({documentId:selectedDocId,documentName:activeDoc?.original_filename,knowledgeId:k.id,pageStart:k.page_start,pageEnd:k.page_end,excerpt:k.source_excerpt})) : []) : generatedEvidence;
+      if (generation) setGeneratedEvidence(sourceEvidence);
+      for (const [p, val] of Object.entries(variantsToSave)) {
+        if (visual) {
           finalVariants[p] = {
             caption: typeof val === "string" ? val : (val as any)?.caption || "",
-            mediaAssetId: attachedVisual.assetId,
-            mediaUrl: attachedVisual.url,
+            mediaAssetId: visual.assetId,
+            mediaUrl: visual.url,
             mediaType: "image",
+            metadata: {sourceEvidence},
           };
         } else {
-          finalVariants[p] = val;
+          finalVariants[p] = {caption:val,metadata:{sourceEvidence}};
         }
       }
 
       const saved = await data.save({
-        title: generatedTitle,
+        id: generation ? undefined : savedContentId,
+        title: titleToSave,
         body: baseBody,
         platforms: selectedPlatforms,
         variants: finalVariants,
       });
+      setSavedContentId(saved.id);
+      await data.transition(saved.id,'review');
 
       await query.invalidateQueries({ queryKey: ["workspace"] });
-      toast.success("Post saved to Content Library as Draft!");
-      nav("/app/library");
+      toast.success("Platform-specific posts saved to Content Library · Needs Review");
+      if (navigate) nav("/app/library");
+      return true;
     } catch (err) {
       const msg = (err as Error).message;
       setError(msg);
       toast.error(msg);
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -542,7 +557,7 @@ export default function AIStudio() {
           batchId={batchGenerationId}
           onComplete={() => {
             query.invalidateQueries({ queryKey: ["workspace"] });
-            toast.success("Batch generation finished! Check Library for generated drafts.");
+            toast.success("Batch generation finished. Check Content Library → Needs Review.");
           }}
         />
       )}
@@ -570,7 +585,7 @@ export default function AIStudio() {
             AI Studio & PDF-to-Content Workflow
           </h1>
           <p style={{ color: "var(--color-text-muted, #94a3b8)", margin: 0 }}>
-            Transform topic prompts or verified PDF documents into tailored social media posts and visuals.
+            Turn prompts or document knowledge into platform-specific posts. Generated content is automatically saved to Needs Review before approval, scheduling and publishing.
           </p>
         </div>
       </div>
@@ -1264,6 +1279,11 @@ export default function AIStudio() {
             </div>
 
             {/* Editor & Preview Area */}
+            {Object.keys(generatedVariants).length > 0 && <details style={{marginBottom:16}}>
+              <summary>Why did AI write this?</summary>
+              <p>These inputs were supplied to AI. Review the source before approving any claims.</p>
+              {generatedEvidence.length ? generatedEvidence.map(e=><div key={e.knowledgeId}><strong>{e.documentName} · {e.pageStart ? `Page ${e.pageStart}${e.pageEnd && e.pageEnd!==e.pageStart ? `–${e.pageEnd}` : ''}` : 'Page unavailable'}</strong><blockquote>{e.excerpt || 'No source excerpt available.'}</blockquote></div>) : <p>Generated from your prompt and Brand Kit. No document page evidence was supplied.</p>}
+            </details>}
             {Object.keys(generatedVariants).length === 0 ? (
               <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px", textAlign: "center", color: "var(--color-text-muted)", border: "1px dashed rgba(255,255,255,0.1)", borderRadius: "10px", gap: "14px" }}>
                 <Sparkles size={38} style={{ color: "#818cf8", opacity: 0.8 }} />
@@ -1469,16 +1489,16 @@ export default function AIStudio() {
                     style={{ width: "100%", padding: "10px", fontSize: "0.9rem" }}
                   >
                     <Layers size={16} />
-                    Publish Preview
+                    Review platform variants
                   </Button>
                   <Button
                     variant="primary"
-                    onClick={handleSaveToLibrary}
+                    onClick={()=>handleSaveToLibrary()}
                     disabled={isSaving}
                     style={{ width: "100%", padding: "10px", fontSize: "0.9rem" }}
                   >
                     <Save size={16} />
-                    {isSaving ? "Saving to Library..." : "Save Selected Posts to Content Library"}
+                    {isSaving ? "Saving for review..." : savedContentId ? "Update & open in Content Library" : "Save to Needs Review"}
                   </Button>
                 </div>
               </div>
@@ -1497,10 +1517,13 @@ export default function AIStudio() {
       />
 
       <ClipdropImageModal
+        composerMode
+        attachmentLabel="Image for generated posts · saved for review"
         isOpen={showClipdropModal}
         onClose={() => setShowClipdropModal(false)}
         onAttach={(result) => {
           setAttachedVisual(result);
+          if (savedContentId) void handleSaveToLibrary(undefined,false,result);
           toast.success("Attached visual to this draft post!");
         }}
         initialContentText={[

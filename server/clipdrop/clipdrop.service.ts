@@ -509,7 +509,7 @@ STRICT RULES:
         contentId,
         opts.title,
         null,
-        { assetId: opts.assetId, mediaUrl: opts.mediaUrl, status }
+        { assetId: opts.assetId, status }
       );
 
       return {

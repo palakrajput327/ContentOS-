@@ -167,10 +167,19 @@ export class ContentController {
         [v.socialAccountId, w],
       )
     ).rows[0];
-    if (String(target?.platform).toLowerCase() === "youtube")
+    if (String(target?.platform).toLowerCase() === "youtube") {
+      const post = (await pool.query('SELECT * FROM content WHERE id=$1 AND workspace_id=$2',[contentId,w])).rows[0];
+      if (post && !post.youtube) {
+        const variants = typeof post.variants === 'string' ? JSON.parse(post.variants) : post.variants;
+        const key = Object.keys(variants || {}).find(k=>k.toLowerCase()==='youtube');
+        const variant = key ? variants[key] : null;
+        if (variant?.mediaType === 'image' || (variant?.mediaType !== 'video' && (variant?.mediaAssetId || variant?.mediaUrl || post.media_asset_id)))
+          return {success:false,status:'skipped',platform:'youtube',error:'YouTube does not support image-only posts. Attach a video or Short to publish to YouTube.'};
+      }
       return publishYouTubeNow(w, r.user.id, contentId, v.socialAccountId);
+    }
 
-    return transaction(async (db) => {
+    const outcome = await transaction(async (db) => {
       // 1. Lock content row for update to prevent concurrent duplicate publishing
       const contentRes = await db.query(
         "SELECT * FROM content WHERE id = $1 AND workspace_id = $2 FOR UPDATE",
@@ -191,12 +200,12 @@ export class ContentController {
       }
       // Check if already published to this specific social account
       const alreadyPub = await db.query(
-        "SELECT 1 FROM scheduled_posts WHERE content_id = $1 AND account_id = $2 AND state = 'PUBLISHED'",
+        "SELECT 1 FROM scheduled_posts WHERE content_id = $1 AND account_id = $2 AND state IN ('PUBLISHED','UNCERTAIN')",
         [contentId, v.socialAccountId],
       );
       if (alreadyPub.rowCount) {
         throw new BadRequestException(
-          "This post has already been published to this account.",
+          "This account's post is already published or needs verification before retrying.",
         );
       }
 
@@ -267,32 +276,29 @@ export class ContentController {
         }
       }
 
-      if (!mediaUrlToPublish && content.media_asset_id) {
-        const assetRes = await db.query(
-          "SELECT public_url FROM media_assets WHERE id = $1 AND workspace_id = $2",
-          [content.media_asset_id, w],
-        );
-        if (assetRes.rowCount && assetRes.rows[0].public_url) {
-          mediaUrlToPublish = assetRes.rows[0].public_url;
-        }
-      }
-
+      const metaPlatform = String(acc.platform).toLowerCase();
+      const platformName = Object.keys(PLATFORM_CAPABILITIES).find(p=>p.toLowerCase()===metaPlatform) as Platform;
+      const metaPlan = ['facebook','instagram','telegram','linkedin'].includes(metaPlatform)
+        ? await createPublishPlan(db,content,platformName,{isPublishing:true}) : null;
       // 5. Invoke Provider
       const result = await provider.publishText(
-        acc.platform === "telegram"
+        metaPlatform === "telegram"
           ? { botToken, chatId: acc.provider_id }
           : { token: botToken, author: acc.provider_id },
         {
-          text: textToPublish,
+          text: metaPlan?.caption ?? textToPublish,
           destination: acc.provider_id,
-          mediaUrl: mediaUrlToPublish,
+          mediaUrl: metaPlan?.mediaUrl ?? mediaUrlToPublish,
+          mediaType: metaPlan?.mediaType,
+          metadata: metaPlan?.metadata,
         },
       );
 
-      if (!result.success) {
+      if (!result.success || !result.providerPostId || result.providerPostId === 'unknown') {
+        result.error ||= 'Provider did not confirm publication with a post ID. Check the account before retrying.';
         await db.query(
-          "UPDATE content SET status = CASE WHEN status = 'PUBLISHED' THEN 'PUBLISHED' ELSE 'FAILED' END, updated_at = NOW(), updated_by = $1 WHERE id = $2 AND workspace_id = $3",
-          [r.user.id, contentId, w],
+          "UPDATE content SET status = $4, updated_at = NOW(), updated_by = $1 WHERE id = $2 AND workspace_id = $3",
+          [r.user.id, contentId, w, content.status === 'PUBLISHED' ? 'PUBLISHED' : 'FAILED'],
         );
 
         await audit(
@@ -310,7 +316,10 @@ export class ContentController {
           },
         );
 
-        throw new BadRequestException(`Publishing failed: ${result.error}`);
+        if (result.uncertain || !result.providerPostId && result.success) {
+          await db.query(`INSERT INTO scheduled_posts(id,workspace_id,content_id,account_id,content_version,execute_at,timezone,state) VALUES($1,$2,$3,$4,$5,NOW(),'UTC','UNCERTAIN') ON CONFLICT(content_id,account_id,content_version) DO UPDATE SET state='UNCERTAIN'`,[randomUUID(),w,contentId,acc.id,content.version]);
+        }
+        return {success:false,error:result.error,uncertain:result.uncertain};
       }
 
       // 5. Update content state to PUBLISHED
@@ -377,6 +386,8 @@ export class ContentController {
         publishedAt: result.publishedAt,
       };
     });
+    if (!outcome.success) throw new BadRequestException(`Publishing failed: ${outcome.error}${outcome.uncertain ? " Check the account before retrying; publication could not be confirmed." : ""}`);
+    return outcome;
   }
 
   @Post("preview")

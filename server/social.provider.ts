@@ -1,3 +1,4 @@
+import { publishMeta, MetaPublishError } from './meta.publishing.js';
 import { metaRequest } from './meta.api.js';
 import { uploadYouTubeVideo } from "./youtube.api.js";
 import type { YouTubeInput } from "./youtube.schema.js";
@@ -37,6 +38,8 @@ export interface PublishTextRequest {
   text: string;
   destination: string;
   mediaUrl?: string;
+  mediaType?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface PublishResult {
@@ -44,6 +47,7 @@ export interface PublishResult {
   providerPostId?: string;
   publishedAt: Date;
   error?: string;
+  uncertain?: boolean;
 }
 
 export interface TelegramConfig {
@@ -97,7 +101,7 @@ async function getMediaBuffer(
         return { buffer, mimeType };
       }
     } catch (e) {
-      console.error("[Media Resolver] Error reading local storage stream:", e);
+      console.error("[Media Resolver] Local attachment could not be read.");
     }
   }
 
@@ -117,7 +121,7 @@ async function getMediaBuffer(
     const mimeType = res.headers.get("content-type") || "image/png";
     return { buffer, mimeType };
   } catch (err) {
-    console.error("[Media Resolver] Error fetching remote image:", err);
+    console.error("[Media Resolver] Remote attachment could not be read.");
     return null;
   }
 }
@@ -255,6 +259,9 @@ export class TelegramProvider implements SocialProvider {
     try {
       if (request.mediaUrl) {
         const mediaInfo = await getMediaBuffer(request.mediaUrl);
+        if (!mediaInfo) return {success:false,publishedAt:new Date(),error:'Telegram attached image could not be read. Re-upload the image and retry.'};
+        if (!mediaInfo.mimeType.startsWith('image/')) return {success:false,publishedAt:new Date(),error:'Telegram photo publishing requires an image attachment.'};
+        if (request.text.length > 1024) return {success:false,publishedAt:new Date(),error:'Telegram image caption exceeds 1024 characters. Shorten the Telegram caption.'};
         if (mediaInfo) {
           const formData = new FormData();
           formData.append("chat_id", chatId);
@@ -263,7 +270,6 @@ export class TelegramProvider implements SocialProvider {
           });
           formData.append("photo", blob, "visual.png");
           formData.append("caption", request.text);
-          formData.append("parse_mode", "HTML");
 
           const res = await fetch(
             `https://api.telegram.org/bot${botToken}/sendPhoto`,
@@ -273,7 +279,7 @@ export class TelegramProvider implements SocialProvider {
             },
           );
           const data = await res.json();
-          if (!res.ok || !data.ok) {
+          if (!res.ok || !data.ok || !data.result?.message_id) {
             const desc = data.description || "";
             const isTokenError =
               res.status === 401 ||
@@ -284,9 +290,10 @@ export class TelegramProvider implements SocialProvider {
             return {
               success: false,
               publishedAt: new Date(),
+              uncertain: res.ok && data.ok === true,
               error: isTokenError
                 ? "Telegram Bot Token has expired or is invalid. Please reconnect your Telegram channel with a valid Bot Token."
-                : desc || "Failed to publish photo to Telegram.",
+                : "Telegram photo rejected (HTTP " + res.status + "). Check bot posting rights, chat ID, image format and size.",
             };
           }
 
@@ -312,7 +319,7 @@ export class TelegramProvider implements SocialProvider {
       );
 
       const data = await res.json();
-      if (!res.ok || !data.ok) {
+      if (!res.ok || !data.ok || !data.result?.message_id) {
         const desc = data.description || "";
         const isTokenError =
           res.status === 401 ||
@@ -323,9 +330,10 @@ export class TelegramProvider implements SocialProvider {
         return {
           success: false,
           publishedAt: new Date(),
+          uncertain: res.ok && data.ok === true,
           error: isTokenError
             ? "Telegram Bot Token has expired or is invalid. Please reconnect your Telegram channel with a valid Bot Token."
-            : desc || "Failed to publish message to Telegram.",
+            : "Telegram message rejected (HTTP " + res.status + "). Check bot posting rights and chat ID.",
         };
       }
 
@@ -338,7 +346,8 @@ export class TelegramProvider implements SocialProvider {
       return {
         success: false,
         publishedAt: new Date(),
-        error: err.message || "Network error publishing to Telegram.",
+        error: "Telegram request could not be confirmed. Check bot posting rights and connectivity before retrying.",
+        uncertain: true,
       };
     }
   }
@@ -385,9 +394,7 @@ export class LinkedInProvider implements SocialProvider {
       );
 
       const initText = await initRes.text();
-      console.log(
-        `[LinkedIn Publish] initializeUpload status: ${initRes.status}, body: ${initText}`,
-      );
+      console.log(`[LinkedIn Publish] initializeUpload status: ${initRes.status}`);
 
       if (!initRes.ok) return null;
       const initData = JSON.parse(initText);
@@ -395,10 +402,7 @@ export class LinkedInProvider implements SocialProvider {
       const imageUrn = initData.value?.image;
 
       if (!uploadUrl || !imageUrn) {
-        console.error(
-          `[LinkedIn Publish] Missing uploadUrl or imageUrn in initializeUpload output:`,
-          initData,
-        );
+        console.error('[LinkedIn Publish] Missing upload URL or image ID.');
         return null;
       }
 
@@ -422,10 +426,7 @@ export class LinkedInProvider implements SocialProvider {
       if (!uploadRes.ok && uploadRes.status !== 201) return null;
       return imageUrn;
     } catch (err: any) {
-      console.error(
-        "[LinkedIn Publish] Exception during uploadLinkedInImage:",
-        err,
-      );
+      console.error('[LinkedIn Publish] Image upload could not complete.');
       return null;
     }
   }
@@ -488,9 +489,7 @@ export class LinkedInProvider implements SocialProvider {
       let mediaPayload: any = undefined;
 
       if (request.mediaUrl) {
-        console.log(
-          `[LinkedIn Publish] Resolving media buffer for URL: ${request.mediaUrl}`,
-        );
+        console.log('[LinkedIn Publish] Resolving attached image.');
         const mediaInfo = await getMediaBuffer(request.mediaUrl);
         if (mediaInfo) {
           console.log(
@@ -511,14 +510,10 @@ export class LinkedInProvider implements SocialProvider {
               },
             };
           } else {
-            console.error(
-              `[LinkedIn Publish] uploadLinkedInImage returned null for author: ${author}`,
-            );
+            return {success:false,publishedAt:new Date(),error:'LinkedIn image upload failed. Check image format, upload permissions and connectivity.'};
           }
         } else {
-          console.error(
-            `[LinkedIn Publish] Could not fetch or resolve media buffer from URL: ${request.mediaUrl}`,
-          );
+          return {success:false,publishedAt:new Date(),error:'LinkedIn attached image could not be read. Re-upload the image and retry.'};
         }
       }
 
@@ -551,17 +546,17 @@ export class LinkedInProvider implements SocialProvider {
       });
 
       if (!res.ok) {
-        const body = await res.text();
         return {
           success: false,
           publishedAt: new Date(),
-          error: `LinkedIn error (${res.status}): ${body}`,
+          error: `LinkedIn rejected the post (HTTP ${res.status}). Check publishing permissions and attachment format.`,
         };
       }
-      const id = res.headers.get("x-restli-id") || "unknown";
+      const id = res.headers.get("x-restli-id");
+      if (!id) return {success:false,uncertain:true,publishedAt:new Date(),error:'LinkedIn did not return a post ID. Check the account before retrying.'};
       return { success: true, providerPostId: id, publishedAt: new Date() };
     } catch (err: any) {
-      return { success: false, publishedAt: new Date(), error: err.message };
+      return { success: false, uncertain: true, publishedAt: new Date(), error: 'LinkedIn request could not be confirmed. Check the account before retrying.' };
     }
   }
 }
@@ -657,7 +652,7 @@ export class XProvider implements SocialProvider {
 
 export class FacebookProvider implements SocialProvider {
   readonly provider: SocialProviderName = 'facebook';
-  readonly capabilities = { text: true, image: true, video: false, document: false };
+  readonly capabilities = { text: true, image: true, video: true, document: false };
   async validateConnection(config: unknown): Promise<ConnectionValidationResult> {
     const { token, destination } = (config || {}) as any;
     try {
@@ -667,17 +662,14 @@ export class FacebookProvider implements SocialProvider {
     } catch (err: any) { return {valid:false,status:'INVALID_CREDENTIALS',providerId:destination || '',name:'Facebook',details:{error:err.message}}; }
   }
   async publishText(config: unknown, request: PublishTextRequest): Promise<PublishResult> {
-    const { token } = (config || {}) as any;
-    try {
-      const result = await metaRequest(request.destination + (request.mediaUrl ? '/photos' : '/feed'),token,request.mediaUrl ? {url:request.mediaUrl,caption:request.text} : {message:request.text},'POST');
-      if (!result.id && !result.post_id) throw new Error('Facebook did not return a published post ID.');
-      return {success:true,providerPostId:result.post_id || result.id,publishedAt:new Date()};
-    } catch(err: any) { return {success:false,error:err.message,publishedAt:new Date()}; }
+    try {const id=await publishMeta(this.provider as 'facebook'|'instagram',(config as any)?.token,request);return {success:true,providerPostId:id,publishedAt:new Date()};}
+    catch(error:any){return {success:false,error:error.message,uncertain:error instanceof MetaPublishError && error.uncertain,publishedAt:new Date()};}
   }
 }
+
 export class InstagramProvider implements SocialProvider {
   readonly provider: SocialProviderName = 'instagram';
-  readonly capabilities = { text: false, image: true, video: false, document: false };
+  readonly capabilities = { text: false, image: true, video: true, document: false };
   async validateConnection(config: unknown): Promise<ConnectionValidationResult> {
     const { token, destination } = (config || {}) as any;
     try {
@@ -687,15 +679,8 @@ export class InstagramProvider implements SocialProvider {
     } catch(err: any) { return {valid:false,status:'INVALID_CREDENTIALS',providerId:destination || '',name:'Instagram',details:{error:err.message}}; }
   }
   async publishText(config: unknown, request: PublishTextRequest): Promise<PublishResult> {
-    const { token } = (config || {}) as any;
-    try {
-      if (!request.mediaUrl) throw new Error('Instagram publishing requires a publicly accessible image URL.');
-      const container = await metaRequest(request.destination+'/media',token,{image_url:request.mediaUrl,caption:request.text},'POST');
-      if (!container.id) throw new Error('Instagram did not return a media container ID.');
-      const result = await metaRequest(request.destination+'/media_publish',token,{creation_id:container.id},'POST');
-      if (!result.id) throw new Error('Instagram did not return a published media ID.');
-      return {success:true,providerPostId:result.id,publishedAt:new Date()};
-    } catch(err: any) { return {success:false,error:err.message,publishedAt:new Date()}; }
+    try {const id=await publishMeta(this.provider as 'facebook'|'instagram',(config as any)?.token,request);return {success:true,providerPostId:id,publishedAt:new Date()};}
+    catch(error:any){return {success:false,error:error.message,uncertain:error instanceof MetaPublishError && error.uncertain,publishedAt:new Date()};}
   }
 }
 

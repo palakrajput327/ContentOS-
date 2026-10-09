@@ -14,15 +14,15 @@ try {
  assert.equal((await metaPages('secret')).length,2);
  assert.match(calls[1].url,/after=cursor/);
  assert.ok(!calls[0].url.includes('secret'));
- responses=[{data:[]}];await assert.rejects(metaPages('secret'),/No managed Facebook Page/);
+ responses=[{}];await assert.rejects(metaPages('secret'),/invalid Page list/);
  responses=[{id:'2',username:'business'}];
  const ig=new InstagramProvider();
  assert.equal((await ig.validateConnection({token:'secret',destination:'2'})).providerId,'2');
  assert.match(calls.at(-1).url,/\/2\?/);
  assert.equal((await ig.publishText({token:'secret'},{destination:'2',text:'hello'})).success,false);
- responses=[{id:'container'},{id:'published'}];
+ responses=[{id:'container'},{status_code:'FINISHED'},{id:'published'}];
  assert.equal((await ig.publishText({token:'secret'},{destination:'2',text:'caption',mediaUrl:'https://example.com/image.jpg'})).providerPostId,'published');
- assert.equal(calls.at(-2).options.body.get('caption'),'caption');
+ assert.equal(calls.at(-3).options.body.get('caption'),'caption');
  responses=[{id:'post'}];assert.equal((await new FacebookProvider().publishText({token:'secret'},{destination:'1',text:'hello'})).providerPostId,'post');
  console.log('Meta scopes, redirect, pagination, diagnostics, account validation and publishing checks passed.');
 } finally {globalThis.fetch=originalFetch;if(uri===undefined)delete process.env.FACEBOOK_REDIRECT_URI;else process.env.FACEBOOK_REDIRECT_URI=uri;}

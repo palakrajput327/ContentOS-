@@ -202,7 +202,7 @@ export function Channels() {
                       {a.state} ·{" "}
                       {a.lastSync ? dateLabel(a.lastSync) : "No live sync"}
                     </small>
-                    <small>Permission: text publishing</small>
+                    <small>{p === 'Instagram' ? 'Publishing: JPEG image + caption, Reels' : p === 'Facebook' ? 'Publishing: text, images, videos, Reels' : 'Permission: text publishing'}</small>
                   </div>
                   {canManage && (
                     <div className="account-actions" style={{ display: "flex", gap: "8px" }}>

@@ -9,7 +9,7 @@ import { createPublishPlan } from "../publish-planner.js";
 import type { Platform } from "../platform-capabilities.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 
-async function executeChildItem(db: DB, item: any, workspaceId: string): Promise<any> {
+export async function executeChildItem(db: DB, item: any, workspaceId: string, saveForReview = false): Promise<any> {
   const op = item.operation_type;
   const payload = item.payload || {};
 
@@ -19,8 +19,11 @@ async function executeChildItem(db: DB, item: any, workspaceId: string): Promise
       const tone = payload.tone || "Professional";
       const goal = payload.goal || "Engagement";
       const platforms = payload.platforms || ["LinkedIn"];
-      const result = await generateCaptions(topic, tone, goal, platforms);
-      return { title: result.title, variants: result.variants };
+      const brand=(await db.query('SELECT data FROM brand_kits WHERE workspace_id=$1',[workspaceId])).rows[0]?.data || {};
+      const result = await generateCaptions(topic, tone, goal, platforms,brand);
+      const variants=Object.fromEntries(Object.entries(result.variants).map(([platform,caption])=>[platform,{caption,metadata:{sourceEvidence:payload.sourceEvidence || []}}]));
+      const saved=await executeChildItem(db,{...item,operation_type:'bulk_save',payload:{title:result.title,body:Object.values(result.variants)[0] || topic,platforms,variants,userId:payload.userId}},workspaceId,true);
+      return {...saved,title:result.title,variants:result.variants};
     }
 
     case "bulk_save": {
@@ -33,8 +36,8 @@ async function executeChildItem(db: DB, item: any, workspaceId: string): Promise
 
       const p = (
         await db.query(
-          "INSERT INTO content(id, workspace_id, title, body, platforms, variants, created_by, updated_by) VALUES($1, $2, $3, $4, $5, $6, $7, $7) RETURNING *",
-          [id, workspaceId, title, body, JSON.stringify(platforms), JSON.stringify(variants), userId]
+          "INSERT INTO content(id, workspace_id, title, body, platforms, variants, created_by, updated_by,status) VALUES($1, $2, $3, $4, $5, $6, $7, $7,$8) RETURNING *",
+          [id, workspaceId, title, body, JSON.stringify(platforms), JSON.stringify(variants), userId,saveForReview ? 'NEEDS_REVIEW' : 'DRAFT']
         )
       ).rows[0];
 

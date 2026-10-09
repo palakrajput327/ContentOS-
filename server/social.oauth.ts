@@ -18,3 +18,10 @@ export function socialRedirectUri(platform: string): string {
 export function socialCredentialConfigured(value: string | undefined): boolean {
   return Boolean(value?.trim() && !/(oauth_client_id|app_id|client_id|placeholder|your_)/i.test(value));
 }
+
+export function metaFrontendUrl(): string {
+  const callback = new URL(socialRedirectUri('facebook'));
+  return ['localhost','127.0.0.1'].includes(callback.hostname)
+    ? (process.env.APP_URL || 'http://localhost:5173').replace(/\/+$/, '')
+    : callback.origin;
+}

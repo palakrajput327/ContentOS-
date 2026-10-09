@@ -1,3 +1,7 @@
+import { loadMetaMedia } from './meta.media.js';
+import { getStorageProvider } from './storage/storage.factory.js';
+import { spawn } from 'node:child_process';
+import ffmpeg from 'ffmpeg-static';
 import {
   Body,
   Controller,
@@ -31,6 +35,7 @@ import {
 } from "./social.provider.js";
 import {
   socialRedirectUri,
+  metaFrontendUrl,
   socialCredentialConfigured,
 } from "./social.oauth.js";
 
@@ -53,6 +58,34 @@ export const publishSchema = z.object({
 
 @Controller()
 export class SocialController {
+  @Public()
+  @Get('social/meta/media/:ticket')
+  async metaMediaDownload(@Param('ticket') ticket:string,@Res() res:Response,@Query('format') format?:string) {
+    const asset=await loadMetaMedia(ticket);
+    const stream=await getStorageProvider().provider.read(asset.bucket,asset.object_key);
+    res.setHeader('Cache-Control','private, no-store');
+    res.setHeader('Referrer-Policy','no-referrer');
+    if (format === 'jpeg' && asset.mime_type.startsWith('image/') && !['image/jpeg','image/jpg'].includes(asset.mime_type)) {
+      const executable = ffmpeg as unknown as string | null;
+      if (!executable) {stream.destroy();throw new BadRequestException('Instagram JPEG conversion is unavailable on this server. Upload a JPG image.');}
+      res.setHeader('Content-Type','image/jpeg');
+      const conversion=spawn(executable,['-hide_banner','-loglevel','error','-i','pipe:0','-frames:v','1','-f','image2pipe','-vcodec','mjpeg','-q:v','2','pipe:1'],{windowsHide:true,stdio:['pipe','pipe','pipe']});
+      const timeout=setTimeout(()=>{conversion.kill();res.destroy();},30000);
+      conversion.stderr.resume();
+      conversion.on('error',()=>res.destroy());
+      conversion.stdin.on('error',()=>res.destroy());
+      stream.on('error',()=>{conversion.kill();res.destroy();});
+      conversion.on('close',code=>{clearTimeout(timeout);if(code!==0)res.destroy();});
+      res.on('close',()=>{clearTimeout(timeout);stream.destroy();if(conversion.exitCode===null)conversion.kill();});
+      stream.pipe(conversion.stdin);
+      conversion.stdout.pipe(res);
+      return;
+    }
+    res.setHeader('Content-Type',asset.mime_type);
+    res.setHeader('Content-Length',String(asset.size_bytes));
+    stream.on('error',()=>res.destroy());
+    stream.pipe(res);
+  }
   @WorkspaceRequired()
   @Get("social/accounts")
   async listAccounts(@Req() r: AuthedRequest) {
@@ -270,7 +303,7 @@ export class SocialController {
     ) as SocialProviderName;
     const appUrl =
       platform === "facebook"
-        ? new URL(socialRedirectUri("facebook")).origin
+        ? metaFrontendUrl()
         : process.env.APP_URL || "http://localhost:5173";
 
     if (errorStr || !code || !state) {
@@ -494,7 +527,7 @@ export class SocialController {
     record: any,
     res: Response,
   ) {
-    const appUrl = new URL(socialRedirectUri("facebook")).origin;
+    const appUrl = metaFrontendUrl();
     try {
       const consumed = await pool.query(
         "DELETE FROM oauth_states WHERE state_hash=$1 AND provider='facebook' RETURNING state_hash",
@@ -513,6 +546,7 @@ export class SocialController {
         code,
         redirect_uri: socialRedirectUri("facebook"),
       });
+      if (!short.access_token) throw new Error("Meta code exchange did not return a Facebook user access token. Reconnect Meta.");
       const long = await metaRequest("oauth/access_token", "", {
         ...credentials,
         grant_type: "fb_exchange_token",

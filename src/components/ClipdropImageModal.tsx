@@ -27,7 +27,8 @@ import {
   Crown,
   Edit3,
 } from "lucide-react";
-import { clipdropApi } from "../lib/api";
+import { clipdropApi, request } from "../lib/api";
+import { useSession } from '../lib/session';
 import type { Account } from "../lib/model";
 
 export interface ClipdropImageModalProps {
@@ -42,6 +43,9 @@ export interface ClipdropImageModalProps {
   brandName?: string;
   brandWebsite?: string;
   brandCta?: string;
+  composerMode?: boolean;
+  attachmentLabel?: string;
+  initialAsset?: {assetId:string;url:string;filename:string};
 }
 
 /**
@@ -196,6 +200,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
   brandName = "Hindustan Software Solution",
   brandWebsite = "hindustansoftwaresolution.com",
   brandCta = "Learn More",
+  composerMode = false,
+  attachmentLabel = 'Image for this post',
+  initialAsset,
 }) => {
   // Engine & Prompt
   const [engine, setEngine] = useState<"clipdrop" | "flux">("clipdrop");
@@ -215,6 +222,8 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
   const [isRemovingBg, setIsRemovingBg] = useState(false);
   const [isSavingPost, setIsSavingPost] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isPreparingVisual,setIsPreparingVisual] = useState(false);
+  const [renderedAsset,setRenderedAsset] = useState<{signature:string;asset:{assetId:string;url:string;filename:string}} | null>(null);
 
   // Result States
   const [generatedAsset, setGeneratedAsset] = useState<{
@@ -228,6 +237,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
   const [savedPostId, setSavedPostId] = useState<string | null>(contentId || null);
   const [isAttached, setIsAttached] = useState(false);
   const [publishedInfo, setPublishedInfo] = useState<{ channel: string; at: string } | null>(null);
+  const [publishResults, setPublishResults] = useState<Array<{platform:string;status:string;postId?:string;error?:string}>>([]);
   const [selectedSocialAccountIds, setSelectedSocialAccountIds] = useState<string[]>([]);
   const [postCaption, setPostCaption] = useState<string>(initialContentText || "");
   const [captionManuallyEdited, setCaptionManuallyEdited] = useState(false);
@@ -322,6 +332,11 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      if (composerMode && initialAsset && initialAsset.url !== generatedAsset?.url && initialAsset.assetId !== renderedAsset?.asset.assetId) {
+        setGeneratedAsset({...initialAsset,remainingCredits:null});
+        setEnableBrandOverlay(false);
+        setIsAttached(true);
+      }
       if (targetPlatform === "YouTube") setAspectRatio("16:9");
       else if (targetPlatform === "LinkedIn") setAspectRatio("1:1");
       else if (targetPlatform === "Instagram") setAspectRatio("4:5");
@@ -379,7 +394,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
           stylePreset,
           aspectRatio,
           enableOverlay: false,
-          contentId: savedPostId || undefined,
+          contentId: composerMode ? undefined : savedPostId || undefined,
           platform: targetPlatform,
           idempotencyKey: uniqueKey,
         });
@@ -392,7 +407,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
             stylePreset,
             aspectRatio,
             enableOverlay: false,
-            contentId: savedPostId || undefined,
+            contentId: composerMode ? undefined : savedPostId || undefined,
             platform: targetPlatform,
             idempotencyKey: uniqueKey,
           });
@@ -454,27 +469,12 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
   }
 
   // High-Res Image & Branded Poster Download
-  async function handleDownloadImage() {
-    if (!generatedAsset?.url) return;
-    try {
+  async function renderVisual(): Promise<Blob> {
+    if (!generatedAsset?.url) throw new Error('Generate an image first.');
       if (!enableBrandOverlay || (!headline && !subtitle && !logoText)) {
-        toast.info("Downloading clean high-res visual...");
         const res = await fetch(generatedAsset.url);
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = blobUrl;
-        const cleanName = (headline || prompt || "visual")
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "_")
-          .slice(0, 30);
-        a.download = `${cleanName || "ai_visual"}.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-        toast.success("High-res visual downloaded successfully!");
-        return;
+        if (!res.ok) throw new Error('Image could not be loaded. Regenerate or re-upload it.');
+        return res.blob();
       }
 
       toast.info("Preparing branded poster with company name...");
@@ -580,27 +580,38 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
         ctx.restore();
       }
 
-      canvas.toBlob((blob) => {
-        if (!blob) throw new Error("Canvas export failed");
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = blobUrl;
-        const cleanName = (headline || "poster").toLowerCase().replace(/[^a-z0-9]+/g, "_");
-        a.download = `poster_${cleanName}_${Date.now()}.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-        toast.success("Branded poster with company name downloaded!");
-      }, "image/png");
-    } catch (err: any) {
-      console.warn("Direct download fallback:", err);
-      const a = document.createElement("a");
-      a.href = generatedAsset.url;
-      a.download = generatedAsset.filename || "ai_visual.png";
-      a.target = "_blank";
-      a.click();
-    }
+      return new Promise<Blob>((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Canvas export failed.')),'image/png'));
+  }
+
+  async function handleDownloadImage() {
+    try {
+      const blob=await renderVisual();
+      const url=URL.createObjectURL(blob),link=document.createElement('a');
+      link.href=url;link.download=enableBrandOverlay?'branded_poster.png':generatedAsset?.filename || 'ai_visual.png';
+      link.click();URL.revokeObjectURL(url);
+      toast.success('Visual downloaded.');
+    } catch(error) {toast.error((error as Error).message);}
+  }
+
+  async function visualAssetForPost() {
+    if (!generatedAsset) throw new Error('Generate an image first.');
+    if (!enableBrandOverlay || (!headline && !subtitle && !logoText)) return generatedAsset;
+    const signature=JSON.stringify([generatedAsset.assetId,generatedAsset.url,headline,subtitle,logoText]);
+    if (renderedAsset?.signature===signature) return renderedAsset.asset;
+    setIsPreparingVisual(true);
+    try {
+      const blob=await renderVisual();
+      const filename='branded_poster.png';
+      const upload=await request<{assetId:string;uploadUrl:string;headers?:Record<string,string>}>('/storage/uploads/presign','POST',{type:'IMAGE',originalFilename:filename,mimeType:'image/png',sizeBytes:blob.size});
+      const workspaceId=useSession.getState().workspaceId;
+      const response=await fetch(upload.uploadUrl,{method:'PUT',credentials:'include',headers:{'Content-Type':'image/png',...(workspaceId?{'X-Workspace-Id':workspaceId}:{}),...upload.headers},body:blob});
+      if(!response.ok)throw new Error('Branded image upload failed. Your original image is preserved.');
+      await request(`/storage/uploads/${upload.assetId}/complete`,'POST',{});
+      const media=await request<{downloadUrl:string}>(`/storage/media/${upload.assetId}/download`);
+      const asset={assetId:upload.assetId,url:media.downloadUrl,filename};
+      setRenderedAsset({signature,asset});
+      return asset;
+    } finally {setIsPreparingVisual(false);}
   }
 
   async function handleRemoveBackground() {
@@ -642,16 +653,13 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
       return;
     }
 
-    if (onAttach) {
-      onAttach({
-        assetId: generatedAsset.assetId,
-        url: generatedAsset.url,
-        filename: generatedAsset.filename,
-      });
-    }
-
-    setIsAttached(true);
-    toast.success("Visual attached to draft post in AI Studio!");
+    try {
+      const asset=await visualAssetForPost();
+      onAttach?.(asset);
+      setIsAttached(true);
+      toast.success('Visual attached to your post.');
+      if(composerMode)onClose();
+    } catch(error) {toast.error((error as Error).message);}
   }
 
   async function handleSavePostToLibrary() {
@@ -662,13 +670,14 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
     try {
       setIsSavingPost(true);
+      const asset=await visualAssetForPost();
       const res = await clipdropApi.attachAndSave({
         contentId: savedPostId || undefined,
         title: headline.trim() || initialTitle || "AI Studio Generated Post",
-        body: initialContentText || headline.trim(),
+        body: postCaption.trim() || initialContentText || headline.trim(),
         platforms: [targetPlatform],
-        assetId: generatedAsset.assetId,
-        mediaUrl: generatedAsset.url,
+        assetId: asset.assetId,
+        mediaUrl: asset.url,
         status: "NEEDS_REVIEW",
       });
 
@@ -678,9 +687,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
       if (onAttach) {
         onAttach({
-          assetId: generatedAsset.assetId,
-          url: generatedAsset.url,
-          filename: generatedAsset.filename,
+          assetId: asset.assetId,
+          url: asset.url,
+          filename: asset.filename,
         });
       }
     } catch (err: any) {
@@ -717,6 +726,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
     try {
       setIsPublishing(true);
+      const asset=await visualAssetForPost();
 
       // Safe non-empty caption / body
       const bodyToPublish =
@@ -742,31 +752,34 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
         title: titleToPublish,
         body: bodyToPublish,
         platforms: targetPlatforms,
-        assetId: generatedAsset.assetId,
-        mediaUrl: generatedAsset.url,
+        assetId: asset.assetId,
+        mediaUrl: asset.url,
         status: "NEEDS_REVIEW",
       });
 
       setSavedPostId(saveRes.id);
 
       // 2. Publish to all selected social accounts
-      const results: { account: Account; success: boolean; error?: string }[] = [];
+      const results: { account: Account; success: boolean; status?: string; postId?: string; error?: string }[] = [];
+      setPublishResults([]);
+      setPublishedInfo(null);
 
       for (const acc of targetAccounts) {
         if (acc.platform.toLowerCase() === "youtube") {
           results.push({
             account: acc,
             success: false,
+            status: 'skipped',
             error: "YouTube only supports video uploads (images not supported)",
           });
           continue;
         }
 
         try {
-          await clipdropApi.publishPost(saveRes.id, acc.id);
-          results.push({ account: acc, success: true });
+          const response = await clipdropApi.publishPost(saveRes.id, acc.id);
+          const confirmed = response.success === true && Boolean(response.providerPostId);
+          results.push({ account: acc, success: confirmed, status: confirmed ? 'success' : response.status === 'skipped' ? 'skipped' : 'failure',postId:response.providerPostId,error:confirmed?undefined:response.error || 'Provider did not confirm publication with a post ID.' });
         } catch (pubErr: any) {
-          console.error(`Publish error for ${acc.platform} (${acc.name}):`, pubErr);
           results.push({
             account: acc,
             success: false,
@@ -776,6 +789,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
       }
 
       const succeeded = results.filter((r) => r.success);
+      setPublishResults(results.map(r=>({platform:r.account.platform,status:r.status || 'failure',postId:r.postId,error:r.error})));
       const failed = results.filter((r) => !r.success);
 
       if (succeeded.length > 0) {
@@ -810,6 +824,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="AI Visual Studio"
       style={{
         position: "fixed",
         top: 0,
@@ -882,11 +899,11 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     borderRadius: "20px",
                   }}
                 >
-                  {targetPlatform}
+                  {composerMode ? 'Create Post' : targetPlatform}
                 </span>
               </div>
               <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#94a3b8" }}>
-                Generate high-impact visuals with AI, customize brand overlays, and publish directly to channels.
+                {composerMode ? `${attachmentLabel}. Generate a visual, then return to Create Post to review and publish.` : 'Generate visuals, customize brand overlays, and publish to your connected channels.'}
               </p>
             </div>
           </div>
@@ -953,6 +970,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
             <button
               onClick={onClose}
+              aria-label="Close AI Visual Studio"
               style={{
                 background: "rgba(255, 255, 255, 0.05)",
                 border: "1px solid rgba(255, 255, 255, 0.1)",
@@ -1074,9 +1092,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px" }}>
                 {[
                   { ratio: "1:1", label: "1:1 Square", sub: "LinkedIn / Feed" },
-                  { ratio: "4:5", label: "4:5 Portrait", sub: "LinkedIn Post" },
-                  { ratio: "16:9", label: "16:9 Landscape", sub: "YouTube / X" },
-                  { ratio: "9:16", label: "9:16 Story", sub: "Reels / Shorts" },
+                  { ratio: "4:5", label: "4:5 Portrait", sub: "Portrait feed" },
+                  { ratio: "16:9", label: "16:9 Landscape", sub: "Wide artwork" },
+                  { ratio: "9:16", label: "9:16 Vertical", sub: "Vertical artwork" },
                 ].map((item) => (
                   <button
                     key={item.ratio}
@@ -1845,8 +1863,13 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
               </div>
             )}
 
-            {/* Studio Draft & Publishing Suite */}
-            {generatedAsset && (
+            {composerMode && generatedAsset && <div className="panel" style={{padding:16}}>
+              <strong>{attachmentLabel}</strong>
+              <p>This image will use your caption and selected channels in Create Post. Review and publish there.</p>
+              <button type="button" className="button primary" disabled={isPreparingVisual} onClick={handleAttachToPost}>{isPreparingVisual ? 'Preparing image…' : 'Use image & return to post'}</button>
+            </div>}
+            {/* Standalone studio retains its existing publishing actions. */}
+            {generatedAsset && !composerMode && (
               <div
                 style={{
                   background: "rgba(15, 23, 42, 0.8)",
@@ -2198,6 +2221,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     </div>
                   )}
 
+                  {publishResults.length > 0 && <ul aria-label="Channel publishing results">
+                    {publishResults.map((result,index)=><li key={index}>{result.platform}: {result.status}{result.postId && <> — Post ID: {result.postId}</>}{result.error && <> — {result.error}</>}</li>)}
+                  </ul>}
                   {publishedInfo && (
                     <div
                       style={{

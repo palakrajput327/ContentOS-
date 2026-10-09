@@ -49,6 +49,8 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
   const s = useOutletContext<Snapshot>();
   const [params] = useSearchParams();
   const post = s.posts.find((p) => p.id === params.get("id"));
+  const mediaCandidates = Object.entries(post?.variants || {}).filter(([p,value])=>p.toLowerCase() !== 'youtube' && typeof value === 'object' && value !== null && ((value as PlatformVariantObject).mediaAssetId || (value as PlatformVariantObject).mediaUrl));
+  const initialMedia = (mediaCandidates.find(([,value])=>(value as PlatformVariantObject).metadata?.inheritSharedMedia)?.[1] || mediaCandidates.find(([,value])=>(value as PlatformVariantObject).metadata?.inheritSharedMedia === undefined)?.[1]) as PlatformVariantObject | undefined;
   const nav = useNavigate();
   const query = useQueryClient();
   const demo = useSession((x) => x.demo);
@@ -66,7 +68,14 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       const init: Record<string, PlatformVariantObject> = {};
       Object.entries(post.variants).forEach(([p, val]) => {
         if (p !== "mediaType" && p !== "mediaUrl") {
-          init[p] = normalizeVariant(val as any, post?.body || "", post?.title || "");
+          const variant = normalizeVariant(val as any, post?.body || "", post?.title || "");
+          if (variant.metadata?.inheritSharedCaption || variant.caption === post?.body) delete variant.caption;
+          if (variant.title === post?.title) delete variant.title;
+          if (initialMedia && variant.metadata?.inheritSharedMedia !== false && (variant.mediaAssetId ? variant.mediaAssetId === initialMedia.mediaAssetId : variant.mediaUrl === initialMedia.mediaUrl)) {
+            delete variant.mediaAssetId;delete variant.mediaUrl;delete variant.mediaType;
+          }
+          const platform = Object.keys(PLATFORM_CAPABILITIES).find(key=>key.toLowerCase()===p.toLowerCase());
+          if (platform) init[platform] = variant;
         }
       });
       return init;
@@ -80,12 +89,12 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
   );
 
   const [postType, setPostType] = useState<"text" | "image" | "video">(
-    ((post?.variants as any)?.mediaType as any) || "text",
+    initialMedia?.mediaType as 'image' | 'video' || ((post?.variants as any)?.mediaType as any) || "text",
   );
   const [mediaUrl, setMediaUrl] = useState<string>(
-    ((post?.variants as any)?.mediaUrl as string) || "",
+    initialMedia?.mediaUrl || ((post?.variants as any)?.mediaUrl as string) || "",
   );
-  const [mediaAssetId, setMediaAssetId] = useState<string>("");
+  const [mediaAssetId, setMediaAssetId] = useState<string>(initialMedia?.mediaAssetId || "");
   const [uploadingMedia, setUploadingMedia] = useState(false);
 
   // AI Creative controls
@@ -96,8 +105,11 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
 
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [publishResults, setPublishResults] = useState<Array<{platform: Platform; accountName: string; success: boolean; status?: string; error?: string; providerPostId?: string; url?: string}>>([]);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showClipdropModal, setShowClipdropModal] = useState(false);
+  const [visualTarget, setVisualTarget] = useState<Platform | 'shared'>('shared');
+  const [adaptedBrief, setAdaptedBrief] = useState('');
 
   // Permissions & editable states
   const editable =
@@ -165,10 +177,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         const next = { ...prev };
         selected.forEach((p) => {
           const cap = PLATFORM_CAPABILITIES[p];
-          const cur = next[p] || { caption: body, title: title };
-          cur.mediaType = detectedType;
-          cur.mediaUrl = download.downloadUrl;
-          cur.mediaAssetId = presign.assetId;
+          const cur = { ...(next[p] || {}) };
 
           // YouTube Smart Media routing
           if (p === "YouTube") {
@@ -197,13 +206,26 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
   // Update per-platform field
   function updateVariantField(p: Platform, field: keyof PlatformVariantObject, value: any) {
     setVariants((prev) => {
-      const cur = { ...(prev[p] || { caption: body, title: title }) };
+      const cur = { ...(prev[p] || {}) };
       (cur as any)[field] = value;
+      if (field === 'caption') cur.metadata = {...cur.metadata,aiAdapted:false};
+      if (field === 'caption' && !String(value).trim()) delete cur.caption;
       return { ...prev, [p]: cur };
     });
   }
 
   // Save Draft or Submit Review
+  function composedVariant(p: Platform): PlatformVariantObject {
+    const variant = normalizeVariant(variants[p], body, title);
+    variant.metadata = {...variant.metadata,inheritSharedCaption:variants[p]?.caption===undefined,inheritSharedMedia:!variants[p]?.mediaAssetId && !variants[p]?.mediaUrl};
+    if (!variant.mediaAssetId && !variant.mediaUrl && (mediaAssetId || mediaUrl)) {
+      variant.mediaAssetId = mediaAssetId || undefined;
+      variant.mediaUrl = mediaUrl || undefined;
+      variant.mediaType = postType;
+    }
+    return variant;
+  }
+
   async function save(review = false) {
     try {
       setError("");
@@ -217,7 +239,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       const cleanVariants: Record<string, any> = {};
       selected.forEach((p) => {
         if (variants[p]) {
-          cleanVariants[p] = variants[p];
+          cleanVariants[p] = composedVariant(p);
         } else {
           cleanVariants[p] = {
             title,
@@ -250,10 +272,11 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
   }
 
   // AI Content Generator
-  async function generate() {
+  async function generate(adaptManual = false) {
     try {
       setError("");
-      if (topic.trim().length < 4) {
+      const source = adaptManual ? body.trim() : topic.trim();
+      if (source.length < 5 || !selected.length) {
         throw new Error("Add a few more details about your topic or idea.");
       }
       setBusy("generating");
@@ -265,26 +288,26 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
 
       if (demo) {
         result = {
-          title: topic,
+          title: title || source.slice(0,160),
           variants: Object.fromEntries(
             selected.map((p) => [
               p,
               p === "X"
-                ? `${topic.slice(0, 140)}. One key takeaways. What do you think?`
+                ? `${source.slice(0, 140)}. What do you think?`
                 : p === "Instagram"
-                  ? `${topic}\n\nA fresh perspective for your team.\n\n${s.brand.hashtags || "#ContentOS #Social"}`
+                  ? `${source}\n\nA fresh perspective for your team.\n\n${s.brand.hashtags || "#ContentOS #Social"}`
                   : p === "Telegram"
-                    ? `📢 **Community Update**\n\n${topic}\n\nShare your thoughts below!`
+                    ? `📢 Community Update\n\n${source}\n\nShare your thoughts below!`
                     : p === "YouTube"
-                      ? `${topic}\n\nWatch this full breakdown and subscribe for more insights.`
-                      : `Let’s talk about ${topic.toLowerCase()}.\n\nMeaningful progress starts with a clear question and practical execution.\n\n${s.brand.cta || "Learn more on our website."}`,
+                      ? `${source}\n\nWatch this full breakdown and subscribe for more insights.`
+                      : `Let’s talk about ${source.toLowerCase()}.\n\nMeaningful progress starts with a clear question and practical execution.\n\n${s.brand.cta || "Learn more on our website."}`,
             ]),
           ),
         };
         toast.info("Demo captions loaded — AI service skipped in demo mode.");
       } else {
         result = await request("/ai/captions", "POST", {
-          topic,
+          topic: adaptManual ? `Adapt this existing post for the selected platforms. Preserve its meaning and facts; do not invent claims. Internal title: ${title}\nContent: ${source}` : source,
           tone,
           goal,
           platforms: selected,
@@ -292,26 +315,39 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         toast.success("Platform-specific captions generated");
       }
 
-      setTitle(result.title);
-      setBody(result.variants[selected[0]] || topic);
+      if (!adaptManual || !title.trim()) setTitle(result.title);
+      if (!adaptManual) setBody(result.variants[selected[0]] || source);
 
       // Populate platform variants
       const newVariants: Record<string, PlatformVariantObject> = {};
       selected.forEach((p) => {
+        if (!result.variants[p]?.trim()) throw new Error(`AI did not return a caption for ${p}. Please retry.`);
+        if (adaptManual && variants[p]?.caption && !variants[p]?.metadata?.aiAdapted) {
+          newVariants[p] = variants[p];
+          return;
+        }
         newVariants[p] = {
+          ...variants[p],
           title: result.title,
-          caption: result.variants[p] || result.variants[selected[0]] || topic,
-          mediaType: postType,
-          mediaUrl: mediaUrl || undefined,
-          mediaAssetId: mediaAssetId || undefined,
+          caption: result.variants[p],
+          metadata: {...variants[p]?.metadata,aiAdapted:true},
         };
       });
       setVariants(newVariants);
+      setAdaptedBrief(JSON.stringify([adaptManual ? body : result.variants[selected[0]] || source,selected,tone,goal]));
+      return true;
     } catch (e) {
       setError((e as Error).message);
+      return false;
     } finally {
       setBusy("");
     }
+  }
+
+  async function reviewPost() {
+    const brief = JSON.stringify([body,selected,tone,goal]);
+    if (body.trim() && adaptedBrief !== brief && !(await generate(true))) return;
+    setShowPreviewModal(true);
   }
 
   // Multi-Account Publishing Handler
@@ -329,7 +365,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       const cleanVariants: Record<string, any> = {};
       selected.forEach((p) => {
         if (variants[p]) {
-          cleanVariants[p] = variants[p];
+          cleanVariants[p] = composedVariant(p);
         } else {
           cleanVariants[p] = {
             title,
@@ -352,9 +388,14 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       });
 
       // 2. Identify target connected accounts for each selected platform
-      const publishResults: Array<{ platform: Platform; accountName: string; success: boolean; error?: string }> = [];
+      const publishResults: Array<{ platform: Platform; accountName: string; success: boolean; status?: string; error?: string; providerPostId?: string; url?: string }> = [];
+      setPublishResults([]);
 
       for (const p of selected) {
+        if (p === 'YouTube' && cleanVariants[p]?.mediaType === 'image' && !saved.youtube) {
+          publishResults.push({platform:p,accountName:p,success:false,status:'skipped',error:'YouTube does not support image-only posts. Attach a video or Short.'});
+          continue;
+        }
         const acc = s.accounts.find(
           (a) =>
             String(a.platform).toLowerCase() === p.toLowerCase() &&
@@ -372,18 +413,19 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         }
 
         try {
-          const res = await request<{ success: boolean; error?: string }>(
+          const res = await request<{ success: boolean; status?: string; error?: string; providerPostId?: string; videoId?: string; url?: string }>(
             `/content/${saved.id}/publish`,
             "POST",
             { socialAccountId: acc.id },
           );
-          if (res.success !== false) {
-            publishResults.push({ platform: p, accountName: acc.name, success: true });
+          if (res.success === true && (res.providerPostId || res.videoId)) {
+            publishResults.push({ platform: p, accountName: acc.name, success: true, status:'success', providerPostId:res.providerPostId || res.videoId, url:res.url });
           } else {
             publishResults.push({
               platform: p,
               accountName: acc.name,
               success: false,
+              status: res.status === 'skipped' ? 'skipped' : 'failure',
               error: res.error || "Publishing failed",
             });
           }
@@ -398,9 +440,10 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       }
 
       await query.invalidateQueries({ queryKey: ["workspace"] });
+      setPublishResults(publishResults);
 
       const successes = publishResults.filter((r) => r.success);
-      const failures = publishResults.filter((r) => !r.success);
+      const failures = publishResults.filter((r) => !r.success && r.status !== 'skipped');
 
       if (successes.length > 0) {
         toast.success(
@@ -413,9 +456,6 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         toast.error(`Publishing issues on ${failures.length} account(s). Check error details.`);
       }
 
-      if (successes.length > 0 && failures.length === 0) {
-        nav("/app/library");
-      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -424,7 +464,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
   }
 
   // Derive current focused variant object
-  const focusedVariant = normalizeVariant(variants[preview], body, title);
+  const focusedVariant = composedVariant(preview);
   const focusedCap = PLATFORM_CAPABILITIES[preview];
   const focusedValidation = validatePlatformVariant(preview, focusedVariant, { isPublishing: true });
 
@@ -440,12 +480,13 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
             {studio
               ? "Multi-Account Creative Studio"
               : post
-                ? "Refine & Multi-Publish Post"
-                : "Create & Distribute Multi-Account Post"}
+                ? "Edit post"
+                : "Create post"}
           </h1>
           <p>
-            Compose once, adapt smartly across LinkedIn, Telegram, YouTube, X, and Instagram.
+            Add your content and media. AI adapts captions for your selected channels before you review and publish.
           </p>
+          {!post && <button className="text-button" onClick={()=>nav('/app/studio')}><Sparkles size={14} /> Start with AI Studio · prompt or document → Needs Review</button>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           {post && (
@@ -479,7 +520,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                   1. Target Publishing Accounts
                 </h3>
                 <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-                  Select one or more connected workspace accounts to publish to
+                  Choose channels here. Previewing or customizing a channel does not change this selection.
                 </p>
               </div>
               <span
@@ -571,7 +612,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
           {/* SECTION 2: Base Content Idea & Common Media */}
           <div className="panel composer-panel">
             <h3 style={{ margin: "0 0 12px", fontSize: "1.05rem", fontWeight: 700 }}>
-              2. Base Content & Media Idea
+              2. Content & media
             </h3>
 
             {/* Post Format Selector */}
@@ -579,7 +620,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
               <button
                 type="button"
                 className={postType === "text" ? "selected" : ""}
-                onClick={() => setPostType("text")}
+                onClick={() => {setPostType("text");setMediaUrl('');setMediaAssetId('');}}
               >
                 <FileText size={16} /> Text Post
               </button>
@@ -639,9 +680,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                     )}
                     <div>
                       <p style={{ margin: "0 0 4px", fontSize: "0.85rem", color: "#f1f5f9" }}>Media attached & routed across selected accounts</p>
-                      <span className="badge" style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981" }}>
-                        Smart Routing Ready
-                      </span>
+                      <button type="button" className="text-button" onClick={()=>{setVisualTarget('shared');setShowClipdropModal(true);}}>Edit shared image in AI Visual Studio</button>
                     </div>
                   </div>
                 ) : (
@@ -650,7 +689,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                       type="button"
                       onClick={() => {
                         setPostType("image");
-                        setShowClipdropModal(true);
+                        setVisualTarget('shared');setShowClipdropModal(true);
                       }}
                       style={{
                         background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))",
@@ -666,7 +705,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                         gap: "6px",
                       }}
                     >
-                      <Wand2 size={14} /> Generate with Clipdrop
+                      <Wand2 size={14} /> AI Visual Studio
                     </button>
                     <label
                       className="button primary"
@@ -694,7 +733,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                       type="url"
                       placeholder="https://example.com/media.mp4"
                       value={mediaUrl}
-                      onChange={(e) => setMediaUrl(e.target.value)}
+                      onChange={(e) => {setMediaUrl(e.target.value);setMediaAssetId('');}}
                       style={{ flex: 1, minWidth: "180px", padding: "6px 10px", fontSize: "0.85rem" }}
                     />
                   </div>
@@ -739,7 +778,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                   </label>
                 </div>
                 <Button
-                  onClick={generate}
+                  onClick={()=>generate()}
                   disabled={!!busy || !selected.length || !editable || !canEdit}
                   variant="primary"
                   style={{ marginTop: "12px", width: "100%", justifyContent: "center" }}
@@ -753,7 +792,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
             {/* Base Title & Base Content Inputs */}
             <div className="field-heading">
               <label htmlFor="post-title">Internal / Primary Post Title</label>
-              <span>Used as default title for YouTube, Telegram, & Library</span>
+              <span>Names this post in your library. YouTube has its own video title below.</span>
             </div>
             <input
               id="post-title"
@@ -766,7 +805,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
             />
 
             <div className="field-heading">
-              <label htmlFor="post-body">Primary Base Content</label>
+              <label htmlFor="post-body">Post content</label>
               {!studio && (
                 <button className="text-button" onClick={() => setAiOpen(!aiOpen)}>
                   <Sparkles size={14} /> AI Assistant
@@ -776,7 +815,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
             <textarea
               id="post-body"
               value={body}
-              onChange={(e) => setBody(e.target.value)}
+              onChange={(e) => {const value=e.target.value;setVariants(prev=>Object.fromEntries(Object.entries(prev).map(([p,v])=>{const next={...v};if(next.caption===body)delete next.caption;return[p,next];})));setBody(value);}}
               placeholder="Write your core story or announcement here..."
               rows={6}
               maxLength={10000}
@@ -790,88 +829,54 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
                 <div>
                   <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700 }}>
-                    3. Account-Specific Customization Cards
+                    3. Platform-specific posts
                   </h3>
                   <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-                    Refine titles, captions, and platform-specific metadata independently
+                    AI adapts your content for each channel before review. You can edit any caption; your edits are preserved.
                   </p>
                 </div>
 
-                {/* Tab switcher for 3+ accounts */}
-                {selected.length >= 3 && (
-                  <div style={{ display: "flex", gap: "6px", overflowX: "auto" }}>
-                    {selected.map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => setPreview(p)}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          padding: "6px 12px",
-                          borderRadius: "6px",
-                          border: preview === p ? "1px solid #6366f1" : "1px solid rgba(255,255,255,0.1)",
-                          background: preview === p ? "rgba(99,102,241,0.2)" : "rgba(255,255,255,0.02)",
-                          color: preview === p ? "#fff" : "var(--color-text-muted)",
-                          fontSize: "0.8rem",
-                          fontWeight: 600,
-                          cursor: "pointer",
-                        }}
-                      >
-                        <PlatformIcon platform={p} />
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
 
               {/* CARD LAYOUT ENGINE */}
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns:
-                    selected.length === 1
-                      ? "1fr"
-                      : selected.length === 2
-                        ? "repeat(2, 1fr)"
-                        : "repeat(auto-fit, minmax(320px, 1fr))",
+                  gridTemplateColumns: "minmax(0, 1fr)",
                   gap: "16px",
                 }}
               >
-                {(selected.length >= 3 ? [preview] : selected).map((p) => {
+                {selected.map((p) => {
                   const cap = PLATFORM_CAPABILITIES[p];
-                  const varObj = normalizeVariant(variants[p], body, title);
+                  const varObj = composedVariant(p);
                   const validation = validatePlatformVariant(p, varObj, { isPublishing: true });
                   const currentCaption = varObj.caption || body;
                   const currentTitle = varObj.title || title;
 
                   return (
-                    <div
+                    <details
                       key={p}
                       style={{
                         padding: "16px",
                         borderRadius: "12px",
                         border: "1px solid rgba(255, 255, 255, 0.12)",
                         background: "rgba(15, 23, 42, 0.6)",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "12px",
                       }}
                     >
+                      <summary style={{cursor:'pointer',fontWeight:600}}>{p} · {variants[p]?.metadata?.aiAdapted ? 'AI adapted' : variants[p]?.caption ? 'Custom caption' : 'Adapts before review'}{!validation.valid ? ' · Check media / format' : ''}</summary>
+                      <div style={{display:'flex',flexDirection:'column',gap:12,marginTop:16}}>
                       {/* Card Header */}
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                           <PlatformIcon platform={p} />
-                          <strong style={{ fontSize: "1rem" }}>{p} Publishing Card</strong>
+                          <strong style={{ fontSize: "1rem" }}>{p} post</strong>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                           <button
                             type="button"
                             onClick={() => {
                               setPreview(p);
-                              setPostType("image");
+                              setVisualTarget(p);
                               setShowClipdropModal(true);
                             }}
                             style={{
@@ -888,7 +893,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                               gap: "5px",
                             }}
                           >
-                            <Wand2 size={13} /> 🎨 Generate Visual
+                            <Wand2 size={13} /> Custom image
                           </button>
                           {validation.valid ? (
                             <span className="badge" style={{ background: "rgba(16,185,129,0.15)", color: "#34d399" }}>
@@ -902,6 +907,16 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                         </div>
                       </div>
 
+                      {(p === 'Facebook' || p === 'Instagram') && varObj.mediaType === 'video' && (
+                        <div>
+                          {p === 'Facebook' ? <label>Facebook video format
+                            <select aria-label="Facebook video format" value={varObj.metadata?.publishAs || 'feed'} onChange={e=>updateVariantField(p,'metadata',{...varObj.metadata,publishAs:e.target.value})}>
+                              <option value="feed">Video post</option><option value="reel">Reel</option>
+                            </select>
+                          </label> : <label><input type="checkbox" checked={varObj.metadata?.shareToFeed !== false} onChange={e=>updateVariantField(p,'metadata',{...varObj.metadata,shareToFeed:e.target.checked})} /> Also show Instagram Reel in feed</label>}
+                          <small>Meta downloads the video from public storage. Reels must meet Meta's video requirements.</small>
+                        </div>
+                      )}
                       {/* YouTube specific fields */}
                       {p === "YouTube" && (
                         <div style={{ display: "flex", flexDirection: "column", gap: "10px", background: "rgba(0,0,0,0.2)", padding: "12px", borderRadius: "8px" }}>
@@ -964,7 +979,17 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                             {currentCaption.length} / {cap?.maxCaptionLength || "∞"} chars
                           </span>
                         </div>
+                        <p style={{fontSize:'0.8rem',color:'var(--color-text-muted)',margin:0}}>{variants[p]?.metadata?.aiAdapted ? 'AI adapted for this channel' : variants[p]?.caption === undefined ? 'Adapted when you review' : 'Your caption'} · {variants[p]?.mediaAssetId || variants[p]?.mediaUrl ? 'Custom media' : 'Using attached media'}</p>
+                        {Array.isArray(varObj.metadata?.sourceEvidence) && varObj.metadata.sourceEvidence.length > 0 && <details>
+                          <summary>Why did AI write this?</summary>
+                          <p>Source inputs supplied during generation. Verify claims before approval.</p>
+                          {varObj.metadata.sourceEvidence.map((e:any,i:number)=><div key={i}><strong>{String(e.documentName || 'Source document')} · {e.pageStart ? `Page ${e.pageStart}${e.pageEnd && e.pageEnd!==e.pageStart ? `–${e.pageEnd}` : ''}` : 'Page unavailable'}</strong><blockquote>{String(e.excerpt || 'No excerpt available.')}</blockquote></div>)}
+                        </details>}
+                        <button type="button" className="text-button" disabled={!editable || !canEdit} onClick={()=>setVariants(prev=>{const next={...prev[p]};delete next.caption;delete next.title;delete next.mediaAssetId;delete next.mediaUrl;delete next.mediaType;return{...prev,[p]:next};})}>Use shared caption & media</button>
+                        {varObj.mediaUrl && varObj.mediaType==='image' && <img src={varObj.mediaUrl} alt={`${p} attached image`} style={{width:96,height:96,objectFit:'cover',borderRadius:8}} />}
+                        {!s.accounts.some(a=>String(a.platform).toLowerCase()===p.toLowerCase()&&a.state?.toLowerCase()==='connected') && <p role="status">{p} is not connected. <a href="/app/channels">Connect in Channels</a></p>}
                         <textarea
+                          aria-label={`${p} caption`}
                           rows={4}
                           value={currentCaption}
                           onChange={(e) => updateVariantField(p, "caption", e.target.value)}
@@ -983,6 +1008,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                         </div>
                       )}
                     </div>
+                    </details>
                   );
                 })}
               </div>
@@ -996,27 +1022,31 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                 {error}
               </div>
             )}
+            {publishResults.length > 0 && <ul aria-label="Publishing results">
+              {publishResults.map((result,index)=><li key={index}>
+                {result.platform}: {result.status || (result.success ? 'success' : 'failure')}
+                {result.providerPostId && <> — Post ID: {result.providerPostId}</>}
+                {result.url && <> — <a href={result.url} target="_blank" rel="noreferrer">View post</a></>}
+                {result.error && <> — {result.error}</>}
+              </li>)}
+            </ul>}
 
             <div className="composer-actions">
-              <Button
-                variant="secondary"
-                onClick={() => setShowPreviewModal(true)}
-                disabled={!selected.length}
-              >
-                <Layers size={16} /> Publish Payload Preview
+              <Button onClick={()=>generate(true)} disabled={!!busy || !body.trim() || !selected.length || !editable || !canEdit}>
+                <Sparkles size={16} /> {busy === 'generating' ? 'Adapting posts…' : 'Adapt for selected channels'}
               </Button>
               <Button onClick={() => save()} disabled={!!busy || !editable || !canEdit}>
                 <Save size={16} /> Save Draft
               </Button>
               <Button
                 variant="primary"
-                onClick={publishMultiAccount}
+                onClick={reviewPost}
                 disabled={!!busy || !editable || !canPublish || !selected.length}
               >
                 <Send size={16} />
                 {busy === "publishing"
                   ? `Publishing to ${selected.length} account(s)...`
-                  : `Publish Now to ${selected.length} Account(s)`}
+                  : busy === 'generating' ? 'Adapting posts…' : `Review & publish to ${selected.length} channels`}
               </Button>
             </div>
           </div>
@@ -1070,12 +1100,12 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
               {focusedVariant.caption || body || "Write your content to see live post preview..."}
             </p>
 
-            {mediaUrl && (
+            {focusedVariant.mediaUrl && (
               <div style={{ margin: "12px 0", borderRadius: "8px", overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)" }}>
-                {postType === "image" ? (
-                  <img src={mediaUrl} alt="Attached preview" style={{ width: "100%", maxHeight: "280px", objectFit: "cover", display: "block" }} />
+                {focusedVariant.mediaType === "image" ? (
+                  <img src={focusedVariant.mediaUrl} alt="Attached preview" style={{ width: "100%", maxHeight: "280px", objectFit: "cover", display: "block" }} />
                 ) : (
-                  <video src={mediaUrl} controls style={{ width: "100%", maxHeight: "280px", display: "block", background: "#000" }} />
+                  <video src={focusedVariant.mediaUrl} controls style={{ width: "100%", maxHeight: "280px", display: "block", background: "#000" }} />
                 )}
               </div>
             )}
@@ -1096,7 +1126,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         title={title}
         body={body}
         platforms={selected}
-        variants={variants}
+        variants={Object.fromEntries(selected.map(p=>[p,composedVariant(p)]))}
         onConfirmPublish={publishMultiAccount}
         isPublishing={busy === "publishing"}
       />
@@ -1114,27 +1144,25 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         onClose={() => setShowClipdropModal(false)}
         initialContentText={body || topic}
         initialTitle={title}
-        targetPlatform={preview}
+        targetPlatform={visualTarget === 'shared' ? preview : visualTarget}
+        composerMode
+        attachmentLabel={visualTarget === 'shared' ? 'Shared image for selected channels' : `Custom image for ${visualTarget}`}
+        initialAsset={visualTarget === 'shared'
+          ? (mediaUrl && postType === 'image' ? {assetId:mediaAssetId,url:mediaUrl,filename:'post-image.png'} : undefined)
+          : (composedVariant(visualTarget).mediaUrl && composedVariant(visualTarget).mediaType === 'image' ? {assetId:composedVariant(visualTarget).mediaAssetId || '',url:composedVariant(visualTarget).mediaUrl!,filename:'post-image.png'} : undefined)}
         contentId={post?.id}
         accounts={s?.accounts || []}
         brandName={s?.brand?.name}
         brandWebsite={s?.brand?.website}
         brandCta={s?.brand?.cta}
         onAttach={(result) => {
+          if (visualTarget !== 'shared') {
+            setVariants(prev=>({...prev,[visualTarget]:{...prev[visualTarget],mediaType:'image',mediaAssetId:result.assetId,mediaUrl:result.url}}));
+            return;
+          }
           setMediaUrl(result.url);
           setMediaAssetId(result.assetId);
           setPostType("image");
-          setVariants((prev) => {
-            const next = { ...prev };
-            selected.forEach((p) => {
-              const cur = next[p] || { caption: body, title: title };
-              cur.mediaType = "image";
-              cur.mediaUrl = result.url;
-              cur.mediaAssetId = result.assetId;
-              next[p] = cur;
-            });
-            return next;
-          });
         }}
       />
     </>

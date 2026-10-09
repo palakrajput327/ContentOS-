@@ -1,3 +1,5 @@
+import { resolveMetaMedia } from './meta.media.js';
+import { getStorageProvider } from './storage/storage.factory.js';
 import { pool, type DB } from "./db.js";
 import {
   PLATFORM_CAPABILITIES,
@@ -29,6 +31,8 @@ export async function createPublishPlan(
     body: string;
     variants?: Record<string, any>;
     youtube?: any;
+    media_asset_id?: string;
+    media_url?: string;
   },
   platform: Platform,
   options?: { isPublishing?: boolean }
@@ -36,9 +40,16 @@ export async function createPublishPlan(
   const isPublishing = options?.isPublishing ?? true;
 
   // 1. Extract raw variant for target platform
-  const rawVariant = content.variants?.[platform];
+  const variants = typeof content.variants === 'string' ? JSON.parse(content.variants) : content.variants;
+  const key = Object.keys(variants || {}).find(k => k.toLowerCase() === platform.toLowerCase());
+  const rawVariant = key ? variants[key] : undefined;
   const variantObj = normalizeVariant(rawVariant, content.body, content.title);
 
+  if (platform !== 'YouTube') {
+    variantObj.mediaAssetId ||= content.media_asset_id;
+    variantObj.mediaUrl ||= content.media_url || variants?.mediaUrl;
+    if (variantObj.mediaType === 'text' && (variantObj.mediaAssetId || variantObj.mediaUrl)) variantObj.mediaType = variants?.mediaType || 'image';
+  }
   // Special case for YouTube legacy fields if present
   if (platform === "YouTube" && content.youtube) {
     if (!variantObj.title && content.youtube.title) {
@@ -66,19 +77,24 @@ export async function createPublishPlan(
   let resolvedMediaType = variantObj.mediaType || "text";
 
   // 3. Resolve canonical media reference from media_assets table if mediaAssetId is provided
-  if (variantObj.mediaAssetId) {
+  if (variantObj.mediaAssetId && (platform === 'Facebook' || platform === 'Instagram')) {
+    const media = await resolveMetaMedia(db,content.workspace_id,variantObj.mediaAssetId,isPublishing,platform==='Instagram');
+    resolvedMediaUrl=media.url;resolvedMimeType=media.mimeType;resolvedMediaType=media.type;
+    const checked=validatePlatformVariant(platform,{...variantObj,mediaType:media.type},{isPublishing});
+    if(!checked.valid)throw new BadRequestException(checked.errors.join('; '));
+  } else if (variantObj.mediaAssetId) {
     const assetRes = await db.query(
-      "SELECT id, url, mime_type, type FROM media_assets WHERE id = $1 AND workspace_id = $2",
+      "SELECT id, bucket, object_key, mime_type FROM media_assets WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL AND status='COMPLETED'",
       [variantObj.mediaAssetId, content.workspace_id]
     );
     if (assetRes.rows.length > 0) {
       const asset = assetRes.rows[0];
-      resolvedMediaUrl = asset.url || resolvedMediaUrl;
+      resolvedMediaUrl = await getStorageProvider().provider.getSignedDownloadUrl(asset.bucket,asset.object_key,3600);
       resolvedMimeType = asset.mime_type;
       if (asset.mime_type?.startsWith("image/")) resolvedMediaType = "image";
       else if (asset.mime_type?.startsWith("video/")) resolvedMediaType = "video";
       else if (asset.mime_type === "application/pdf") resolvedMediaType = "document";
-    }
+    } else throw new BadRequestException('Attached media is missing or incomplete in this workspace.');
   }
 
   return {

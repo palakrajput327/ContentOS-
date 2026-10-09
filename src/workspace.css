@@ -826,6 +826,9 @@ label small.error {
   grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr);
   gap: 25px;
 }
+.composer-grid > * { min-width: 0; }
+.composer-panel { min-width: 0; }
+.composer-panel input, .composer-panel textarea, .composer-panel select { max-width: 100%; }
 .composer-modes {
   display: flex;
   gap: 8px;

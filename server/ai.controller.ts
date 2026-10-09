@@ -38,15 +38,7 @@ export async function generateCaptions(
 ) {
   const provider = getLLMProvider();
   if (!(await provider.validateConfiguration())) {
-    // Return mock fallback in demo/test mode if LLM key is absent
-    const mockVariants: Record<string, string> = {};
-    for (const p of platforms) {
-      mockVariants[p] = `[${p}] ${topic} (${tone} tone - ${goal})`;
-    }
-    return {
-      title: topic.slice(0, 50),
-      variants: mockVariants,
-    };
+    throw new ServiceUnavailableException('AI is not configured. Configure the existing LLM provider before adapting posts.');
   }
 
   const promptMessages = [
@@ -72,10 +64,11 @@ export async function generateCaptions(
   }
 
   const variantsMap = result.data.variants as Record<string, string>;
+  if (platforms.some(p=>!variantsMap[p]?.trim())) throw new ServiceUnavailableException('AI did not return every requested platform variant. Retry generation.');
   return {
     title: result.data.title,
     variants: Object.fromEntries(
-      platforms.map((p) => [p, variantsMap[p] || `[${p}] ${topic}`])
+      platforms.map((p) => [p, variantsMap[p]])
     ),
   };
 }

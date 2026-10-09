@@ -22,6 +22,7 @@ try {
       pool.connect = async () => ({
         release() {},
         async query(sql) {
+          if (sql.startsWith("SELECT 1 FROM scheduled_posts")) return {rowCount:0,rows:[]};
           if (sql.startsWith("SELECT * FROM content"))
             return {
               rowCount: 1,

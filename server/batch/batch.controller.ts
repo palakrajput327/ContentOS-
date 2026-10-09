@@ -23,7 +23,7 @@ export class BatchController {
       type: "ai_generation",
       items: body.items.map((item, idx) => ({
         operationType: "ai_generation",
-        payload: item,
+        payload: {...item,userId:req.user!.id},
         idempotencyKey: `ai-gen-${ws.id}-${Date.now()}-${idx}`,
       })),
     });
