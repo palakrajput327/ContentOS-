@@ -102,7 +102,7 @@ export function BatchProgressIndicator({
 
   if (loading && !data) {
     return (
-      <div style={{ padding: "16px", borderRadius: "10px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", gap: "10px" }}>
+      <div style={{ padding: "16px", borderRadius: "10px", background: "var(--border)", border: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "10px" }}>
         <Loader2 size={16} className="animate-spin" />
         <span style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Initializing batch operations...</span>
       </div>
@@ -127,7 +127,7 @@ export function BatchProgressIndicator({
       style={{
         padding: "16px 20px",
         borderRadius: "12px",
-        background: "rgba(15, 23, 42, 0.6)",
+        background: "var(--surface2)",
         border: `1px solid ${badgeColor}40`,
         boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
         marginBottom: "20px",
@@ -182,7 +182,7 @@ export function BatchProgressIndicator({
       </div>
 
       {/* Progress Bar */}
-      <div style={{ background: "rgba(255,255,255,0.08)", height: "8px", borderRadius: "4px", overflow: "hidden", marginBottom: "12px" }}>
+      <div style={{ background: "var(--border)", height: "8px", borderRadius: "4px", overflow: "hidden", marginBottom: "12px" }}>
         <div
           style={{
             height: "100%",
@@ -196,11 +196,11 @@ export function BatchProgressIndicator({
       {/* Metrics Row */}
       <div style={{ display: "flex", gap: "16px", fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
         <span>Total: <strong>{metrics.total}</strong></span>
-        <span>Completed: <strong style={{ color: "#34d399" }}>{metrics.completed}</strong></span>
-        <span>Failed: <strong style={{ color: metrics.failed > 0 ? "#f87171" : "inherit" }}>{metrics.failed}</strong></span>
+        <span>Completed: <strong style={{ color: "var(--success)" }}>{metrics.completed}</strong></span>
+        <span>Failed: <strong style={{ color: metrics.failed > 0 ? "var(--danger)" : "inherit" }}>{metrics.failed}</strong></span>
         <span>Pending: <strong>{metrics.pending}</strong></span>
         <span>Processing: <strong>{metrics.processing}</strong></span>
-        <span style={{ marginLeft: "auto", fontWeight: 600, color: "#f1f5f9" }}>{metrics.progressPct}%</span>
+        <span style={{ marginLeft: "auto", fontWeight: 600, color: "var(--ink)" }}>{metrics.progressPct}%</span>
       </div>
     </div>
   );

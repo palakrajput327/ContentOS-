@@ -1,4 +1,8 @@
 import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from 'react';
+import { ThemeToggle } from '../lib/appearance';
+import { useScrollReveal } from '../lib/useScrollReveal';
+import { Menu, X } from 'lucide-react';
 import {
   ArrowRight,
   ArrowUpRight,
@@ -20,20 +24,32 @@ import { Logo, Button, PlatformIcon } from "../components/ui";
 import { platforms, PRODUCT } from "../lib/model";
 export default function Landing() {
   const nav = useNavigate();
+  const landingRef = useRef<HTMLDivElement>(null);
+  const [menuOpen,setMenuOpen] = useState(false);
+  useEffect(()=>{
+    if(!menuOpen)return;
+    const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setMenuOpen(false);};
+    document.addEventListener('keydown',close);
+    return ()=>document.removeEventListener('keydown',close);
+  },[menuOpen]);
+  useScrollReveal(landingRef);
   const demo = () => nav("/signup");
   return (
-    <div className="landing">
+    <div className="landing" ref={landingRef}>
+      <a className="skip-link" href="#marketing-main">Skip to content</a>
       <header className="landing-nav">
         <Link to="/" aria-label={`${PRODUCT} home`}>
           <Logo />
         </Link>
-        <nav>
+        <nav id="marketing-navigation" className={menuOpen?'is-open':''} onClick={()=>setMenuOpen(false)} aria-label="Main navigation">
           <a href="#workflow">Product</a>
           <a href="#intelligence">Intelligence</a>
           <a href="#teams">For teams</a>
           <a href="#pricing">Pricing</a>
         </nav>
         <div className="row">
+          <ThemeToggle />
+          <button type="button" className="icon-button landing-menu-toggle" aria-label={menuOpen?'Close menu':'Open menu'} aria-expanded={menuOpen} aria-controls="marketing-navigation" onClick={()=>setMenuOpen(!menuOpen)}>{menuOpen?<X size={20}/>:<Menu size={20}/>}</button>
           <Link className="login-link" to="/login">
             Log in
           </Link>
@@ -44,7 +60,7 @@ export default function Landing() {
           </Button>
         </div>
       </header>
-      <main>
+      <main id="marketing-main">
         <section className="hero">
           <div className="eyebrow">
             <span className="tiny-logo">
@@ -72,7 +88,7 @@ export default function Landing() {
               onClick={() =>
                 document
                   .getElementById("workflow")
-                  ?.scrollIntoView({ behavior: "smooth" })
+                  ?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
               }
             >
               <span className="play-triangle" /> See how it works
@@ -429,19 +445,19 @@ export default function Landing() {
             {[
               [
                 "Does AI publish without my approval?",
-                "The planned workflow requires human approval by default. Publishing is not enabled in this authentication phase.",
+                "Review Mode is the default. Generated drafts stay in your approval queue so your team can review the content and schedule before publishing.",
               ],
               [
                 "Can I connect my own accounts?",
-                "Social connections will be activated after the authentication and workspace foundations are verified. No social credentials are needed to create your account.",
+                "Connect supported accounts from your workspace’s Channels page. Check account readiness and choose the destinations for each post before scheduling.",
               ],
               [
-                "What is available in this development phase?",
-                "Real registration, email verification, login, session management, and password recovery are available. Workspace and publishing features are the next phase.",
+                "How does my knowledge become content?",
+                "Upload a business PDF, review its extracted knowledge, and turn approved facts into platform-specific drafts. Keep the source evidence alongside your content.",
               ],
               [
-                "Are document campaigns and video available?",
-                "These are later phases. This development build focuses on real multi-user authentication first.",
+                "Can I create images and videos?",
+                "Use the existing visual tools and media attachments in your post workflow. Automated AI video generation is planned for a later phase.",
               ],
             ].map(([q, a]) => (
               <details key={q}>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { X, Plus, Trash2, Clock, Calendar as CalendarIcon, Check } from "lucide-react";
-import { Button } from "./ui";
+import { Button, ModalFrame } from "./ui";
 import { request } from "../lib/api";
 import { toast } from "sonner";
 
@@ -80,19 +80,7 @@ export function PostingSlotsModal({ isOpen, onClose, onSaved }: PostingSlotsModa
   if (!isOpen) return null;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 999,
-        background: "rgba(0, 0, 0, 0.75)",
-        backdropFilter: "blur(6px)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "20px",
-      }}
-    >
+    <ModalFrame open={isOpen} onClose={()=>{if(!saving)onClose();}} title="Posting slots" className="slots-dialog">
       <div
         className="panel"
         style={{
@@ -103,15 +91,15 @@ export function PostingSlotsModal({ isOpen, onClose, onSaved }: PostingSlotsModa
           flexDirection: "column",
           borderRadius: "16px",
           overflow: "hidden",
-          border: "1px solid rgba(255, 255, 255, 0.12)",
-          background: "var(--color-bg-panel, #18181b)",
+          border: "1px solid var(--border)",
+          background: "var(--color-bg-panel, var(--surface2))",
         }}
       >
         {/* Header */}
         <div
           style={{
             padding: "20px 24px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+            borderBottom: "1px solid var(--border)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -128,8 +116,9 @@ export function PostingSlotsModal({ isOpen, onClose, onSaved }: PostingSlotsModa
           </div>
           <button
             onClick={onClose}
+            aria-label="Close posting slots"
             className="icon-button"
-            style={{ padding: "6px", borderRadius: "50%", background: "rgba(255,255,255,0.05)" }}
+            style={{ padding: "6px", borderRadius: "50%", background: "var(--border)" }}
           >
             <X size={18} />
           </button>
@@ -151,9 +140,9 @@ export function PostingSlotsModal({ isOpen, onClose, onSaved }: PostingSlotsModa
                 <div
                   key={dayName}
                   style={{
-                    background: "rgba(255, 255, 255, 0.02)",
+                    background: "var(--surface2)",
                     borderRadius: "12px",
-                    border: "1px solid rgba(255, 255, 255, 0.06)",
+                    border: "1px solid var(--border)",
                     padding: "16px",
                   }}
                 >
@@ -179,19 +168,21 @@ export function PostingSlotsModal({ isOpen, onClose, onSaved }: PostingSlotsModa
                       {daySlots.map((slot) => (
                         <div
                           key={slot.originalIndex}
+                          className="posting-slot-row"
                           style={{
                             display: "flex",
                             alignItems: "center",
                             gap: "12px",
-                            background: slot.enabled ? "rgba(255, 255, 255, 0.04)" : "rgba(255, 255, 255, 0.01)",
+                            background: slot.enabled ? "var(--surface2)" : "var(--surface2)",
                             opacity: slot.enabled ? 1 : 0.5,
                             padding: "8px 12px",
                             borderRadius: "8px",
-                            border: "1px solid rgba(255, 255, 255, 0.06)",
+                            border: "1px solid var(--border)",
                           }}
                         >
                           <input
                             type="checkbox"
+                            aria-label={`Enable ${dayName} posting slot`}
                             checked={slot.enabled !== false}
                             onChange={(e) =>
                               handleUpdateSlot(slot.originalIndex, { enabled: e.target.checked })
@@ -201,21 +192,23 @@ export function PostingSlotsModal({ isOpen, onClose, onSaved }: PostingSlotsModa
 
                           <input
                             type="time"
+                            aria-label={`${dayName} posting time`}
                             value={slot.time_of_day}
                             onChange={(e) =>
                               handleUpdateSlot(slot.originalIndex, { time_of_day: e.target.value })
                             }
                             style={{
-                              background: "rgba(0, 0, 0, 0.3)",
-                              border: "1px solid rgba(255, 255, 255, 0.15)",
+                              background: "var(--surface2)",
+                              border: "1px solid var(--border)",
                               borderRadius: "6px",
-                              color: "#fff",
+                              color: "var(--ink)",
                               padding: "4px 8px",
                               fontSize: "0.85rem",
                             }}
                           />
 
                           <select
+                            aria-label={`${dayName} platform`}
                             value={slot.platform || ""}
                             onChange={(e) =>
                               handleUpdateSlot(slot.originalIndex, {
@@ -223,10 +216,10 @@ export function PostingSlotsModal({ isOpen, onClose, onSaved }: PostingSlotsModa
                               })
                             }
                             style={{
-                              background: "rgba(0, 0, 0, 0.3)",
-                              border: "1px solid rgba(255, 255, 255, 0.15)",
+                              background: "var(--surface2)",
+                              border: "1px solid var(--border)",
                               borderRadius: "6px",
-                              color: "#fff",
+                              color: "var(--ink)",
                               padding: "4px 8px",
                               fontSize: "0.85rem",
                               flex: 1,
@@ -245,7 +238,7 @@ export function PostingSlotsModal({ isOpen, onClose, onSaved }: PostingSlotsModa
                             style={{
                               background: "transparent",
                               border: "none",
-                              color: "#f87171",
+                              color: "var(--danger)",
                               cursor: "pointer",
                               padding: "4px",
                             }}
@@ -266,7 +259,7 @@ export function PostingSlotsModal({ isOpen, onClose, onSaved }: PostingSlotsModa
         <div
           style={{
             padding: "16px 24px",
-            borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+            borderTop: "1px solid var(--border)",
             display: "flex",
             justifyContent: "flex-end",
             gap: "12px",
@@ -280,6 +273,6 @@ export function PostingSlotsModal({ isOpen, onClose, onSaved }: PostingSlotsModa
           </Button>
         </div>
       </div>
-    </div>
+    </ModalFrame>
   );
 }

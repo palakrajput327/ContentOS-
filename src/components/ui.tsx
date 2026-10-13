@@ -127,6 +127,19 @@ export function Modal({
     </DialogPrimitive.Root>
   );
 }
+/** Shared accessible frame for existing dialogs with their own headers and footers. */
+export function ModalFrame({open,onClose,title,children,className}:{open:boolean;onClose:()=>void;title:string;children:ReactNode;className?:string}) {
+  return <DialogPrimitive.Root open={open} onOpenChange={value=>{if(!value)onClose();}}>
+    <DialogPrimitive.Portal>
+      <DialogPrimitive.Overlay className="dialog-overlay" />
+      <DialogPrimitive.Content className={cn('dialog-content modal-frame',className)}>
+        <DialogPrimitive.Title className="sr-only">{title}</DialogPrimitive.Title>
+        <DialogPrimitive.Description className="sr-only">Review the details and use the controls to continue or close.</DialogPrimitive.Description>
+        {children}
+      </DialogPrimitive.Content>
+    </DialogPrimitive.Portal>
+  </DialogPrimitive.Root>;
+}
 export function SectionLink({ children }: { children: ReactNode }) {
   return (
     <span className="section-link">

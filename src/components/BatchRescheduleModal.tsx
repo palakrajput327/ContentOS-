@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { X, Calendar, AlertTriangle, RefreshCw, CheckCircle, ArrowRight } from "lucide-react";
-import { Button } from "./ui";
+import { Button, ModalFrame } from "./ui";
 import { request } from "../lib/api";
 import { toast } from "sonner";
 
@@ -83,19 +83,7 @@ export function BatchRescheduleModal({
   const hasConflicts = previews.some((p) => p.conflict);
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 999,
-        background: "rgba(0, 0, 0, 0.75)",
-        backdropFilter: "blur(6px)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "20px",
-      }}
-    >
+    <ModalFrame open={isOpen} onClose={()=>{if(!executing)onClose();}} title="Reschedule content" className="slots-dialog">
       <div
         className="panel"
         style={{
@@ -106,15 +94,15 @@ export function BatchRescheduleModal({
           flexDirection: "column",
           borderRadius: "16px",
           overflow: "hidden",
-          border: "1px solid rgba(255, 255, 255, 0.12)",
-          background: "var(--color-bg-panel, #18181b)",
+          border: "1px solid var(--border)",
+          background: "var(--color-bg-panel, var(--surface2))",
         }}
       >
         {/* Header */}
         <div
           style={{
             padding: "20px 24px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+            borderBottom: "1px solid var(--border)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -129,13 +117,13 @@ export function BatchRescheduleModal({
               Preview schedule adjustments in workspace timezone: <strong>{timezone}</strong>
             </span>
           </div>
-          <button onClick={onClose} className="icon-button" style={{ padding: "6px" }}>
+          <button onClick={onClose} aria-label="Close reschedule dialog" className="icon-button" style={{ padding: "6px" }}>
             <X size={18} />
           </button>
         </div>
 
         {/* Mode Selector & Inputs */}
-        <div style={{ padding: "20px 24px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)" }}>
+        <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)", background: "var(--border)" }}>
           <div style={{ display: "flex", gap: "10px", marginBottom: "16px" }}>
             <button
               onClick={() => setMode("shift")}
@@ -143,7 +131,7 @@ export function BatchRescheduleModal({
                 flex: 1,
                 padding: "8px 14px",
                 borderRadius: "8px",
-                border: mode === "shift" ? "1px solid #6366f1" : "1px solid rgba(255,255,255,0.1)",
+                border: mode === "shift" ? "1px solid #6366f1" : "1px solid var(--border)",
                 background: mode === "shift" ? "rgba(99, 102, 241, 0.2)" : "transparent",
                 color: mode === "shift" ? "#fff" : "var(--color-text-muted)",
                 fontWeight: 600,
@@ -159,7 +147,7 @@ export function BatchRescheduleModal({
                 flex: 1,
                 padding: "8px 14px",
                 borderRadius: "8px",
-                border: mode === "auto_distribute" ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)",
+                border: mode === "auto_distribute" ? "1px solid #10b981" : "1px solid var(--border)",
                 background: mode === "auto_distribute" ? "rgba(16, 185, 129, 0.2)" : "transparent",
                 color: mode === "auto_distribute" ? "#fff" : "var(--color-text-muted)",
                 fontWeight: 600,
@@ -179,7 +167,7 @@ export function BatchRescheduleModal({
                   type="number"
                   value={shiftDays}
                   onChange={(e) => setShiftDays(Number(e.target.value))}
-                  style={{ width: "70px", marginLeft: "8px", padding: "4px 8px", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "6px", color: "#fff" }}
+                  style={{ width: "70px", marginLeft: "8px", padding: "4px 8px", background: "var(--border-strong)", border: "1px solid var(--border)", borderRadius: "6px", color: "var(--ink)" }}
                 />
               </label>
               <label style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
@@ -188,7 +176,7 @@ export function BatchRescheduleModal({
                   type="number"
                   value={shiftHours}
                   onChange={(e) => setShiftHours(Number(e.target.value))}
-                  style={{ width: "70px", marginLeft: "8px", padding: "4px 8px", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "6px", color: "#fff" }}
+                  style={{ width: "70px", marginLeft: "8px", padding: "4px 8px", background: "var(--border-strong)", border: "1px solid var(--border)", borderRadius: "6px", color: "var(--ink)" }}
                 />
               </label>
             </div>
@@ -220,19 +208,19 @@ export function BatchRescheduleModal({
                   style={{
                     padding: "12px 16px",
                     borderRadius: "10px",
-                    background: item.conflict ? "rgba(239, 68, 68, 0.08)" : "rgba(255, 255, 255, 0.02)",
-                    border: item.conflict ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid rgba(255, 255, 255, 0.06)",
+                    background: item.conflict ? "rgba(239, 68, 68, 0.08)" : "var(--surface2)",
+                    border: item.conflict ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid var(--border)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
                   }}
                 >
                   <div style={{ flex: 1 }}>
-                    <strong style={{ fontSize: "0.9rem", display: "block", color: "#fff" }}>{item.title}</strong>
+                    <strong style={{ fontSize: "0.9rem", display: "block", color: "var(--ink)" }}>{item.title}</strong>
                     <div style={{ fontSize: "0.8rem", color: "var(--color-text-muted)", display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
                       <span>New Time: <strong>{formattedNew}</strong></span>
                       {item.conflict && (
-                        <span style={{ color: "#f87171", display: "flex", alignItems: "center", gap: "4px" }}>
+                        <span style={{ color: "var(--danger)", display: "flex", alignItems: "center", gap: "4px" }}>
                           <AlertTriangle size={13} /> {item.conflictMessage || "Slot Conflict!"}
                         </span>
                       )}
@@ -248,18 +236,18 @@ export function BatchRescheduleModal({
         <div
           style={{
             padding: "16px 24px",
-            borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+            borderTop: "1px solid var(--border)",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
           }}
         >
           {hasConflicts ? (
-            <span style={{ fontSize: "0.8rem", color: "#fbbf24", display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ fontSize: "0.8rem", color: "var(--warning)", display: "flex", alignItems: "center", gap: "6px" }}>
               <AlertTriangle size={14} /> Some items have slot conflicts. Proceeding will overwrite conflict slots.
             </span>
           ) : (
-            <span style={{ fontSize: "0.8rem", color: "#34d399", display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ fontSize: "0.8rem", color: "var(--success)", display: "flex", alignItems: "center", gap: "6px" }}>
               <CheckCircle size={14} /> All prospective schedules are conflict-free!
             </span>
           )}
@@ -274,6 +262,6 @@ export function BatchRescheduleModal({
           </div>
         </div>
       </div>
-    </div>
+    </ModalFrame>
   );
 }

@@ -108,7 +108,7 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException("Please log in to continue.");
     req.sessionHash = hash(token);
     const r = await pool.query(
-      "SELECT u.id,u.name,u.email FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()",
+      "SELECT u.id,u.name,u.email FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.account_status='ACTIVE'",
       [req.sessionHash],
     );
     if (!r.rowCount)

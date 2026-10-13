@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useOutletContext, useSearchParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Search,
@@ -29,6 +29,7 @@ import { data, request } from "../lib/api";
 import { dateLabel, type Snapshot, type Post } from "../lib/model";
 import { BatchProgressIndicator } from "../components/BatchProgressIndicator";
 import { ContentDiscussionPanel } from "../components/ContentDiscussionPanel";
+import { useSession } from '../lib/session';
 
 export default function Library({
   approvals = false,
@@ -37,6 +38,17 @@ export default function Library({
 }) {
   const s = useOutletContext<Snapshot>();
   const query = useQueryClient();
+  const demo = useSession(x=>x.demo);
+  const proposals = useQuery({queryKey:['knowledge-automation',s.workspace.id],queryFn:()=>request<{plans:{content_id:string|null;state:string;proposed_at:string}[]}>('/knowledge-automation'),enabled:!demo});
+  async function approveAndSchedule(p: Post) {
+    setBusy(true);
+    try {
+      await request(`/calendar/proposals/${p.id}/schedule`,'POST',{approve:true,version:p.version});
+      await Promise.all([query.invalidateQueries({queryKey:['workspace']}),query.invalidateQueries({queryKey:['knowledge-automation',s.workspace.id]})]);
+      toast.success('Approved and scheduled at the proposed time');
+    } catch (e: any) { toast.error(e.message || 'Scheduling failed'); }
+    finally { setBusy(false); }
+  }
   const [params, setParams] = useSearchParams();
   const [search, setSearch] = useState("");
   useEffect(() => {
@@ -203,18 +215,18 @@ export default function Library({
 
       {/* Multi-select Header Controls */}
       {posts.length > 0 && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px", padding: "10px 14px", background: "rgba(255,255,255,0.02)", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.06)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px", padding: "10px 14px", background: "var(--border)", borderRadius: "8px", border: "1px solid var(--border)" }}>
           <button
             type="button"
             className="text-button"
             onClick={toggleSelectAll}
-            style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.85rem", cursor: "pointer", background: "none", border: "none", color: "#f1f5f9" }}
+            style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.85rem", cursor: "pointer", background: "none", border: "none", color: "var(--ink)" }}
           >
-            {selectedIds.length === posts.length ? <CheckSquare size={18} style={{ color: "#34d399" }} /> : <Square size={18} />}
+            {selectedIds.length === posts.length ? <CheckSquare size={18} style={{ color: "var(--success)" }} /> : <Square size={18} />}
             Select All ({posts.length} posts)
           </button>
           {selectedIds.length > 0 && (
-            <span style={{ fontSize: "0.85rem", color: "#a5b4fc", fontWeight: 600 }}>
+            <span style={{ fontSize: "0.85rem", color: "var(--accent)", fontWeight: 600 }}>
               {selectedIds.length} item{selectedIds.length > 1 ? "s" : ""} selected for bulk action
             </span>
           )}
@@ -230,7 +242,7 @@ export default function Library({
             left: "50%",
             transform: "translateX(-50%)",
             zIndex: 99,
-            background: "#0f172a",
+            background: "var(--surface2)",
             border: "1px solid rgba(99, 102, 241, 0.4)",
             borderRadius: "16px",
             padding: "12px 24px",
@@ -316,7 +328,7 @@ export default function Library({
                   <button
                     type="button"
                     onClick={() => toggleSelect(p.id)}
-                    style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: isSelected ? "#34d399" : "var(--color-text-muted)" }}
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: isSelected ? "var(--success)" : "var(--color-text-muted)" }}
                   >
                     {isSelected ? <CheckSquare size={18} /> : <Square size={18} />}
                   </button>
@@ -366,6 +378,11 @@ export default function Library({
                       <Check size={15} />
                       Approve
                     </Button>
+                    {canSchedule && proposals.data?.plans.some(plan=>plan.content_id===p.id && plan.state==='REVIEW') && (
+                      <Button disabled={busy} onClick={()=>approveAndSchedule(p)}>
+                        Approve & schedule · {dateLabel(proposals.data.plans.find(plan=>plan.content_id===p.id && plan.state==='REVIEW')!.proposed_at,s.workspace.timezone)}
+                      </Button>
+                    )}
                   </>
                 ) : p.status === "SCHEDULED" && canSchedule ? (
                   <Button onClick={() => action(p, "cancel")} disabled={busy}>

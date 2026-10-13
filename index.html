@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b0c0e" />
+    <script>
+      try { const theme = localStorage.getItem('contentos-appearance'); document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark'; } catch { document.documentElement.dataset.theme = 'dark'; }
+    </script>
     <meta name="description" content="ContentOS — your business knowledge, turned into a consistent social presence. Create, review and schedule content in one workspace." />
     <link rel="icon" href="/favicon.svg" />
     <title>ContentOS — One source. An entire social presence.</title>

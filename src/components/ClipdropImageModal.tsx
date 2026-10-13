@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { clipdropApi, request } from "../lib/api";
 import { useSession } from '../lib/session';
+import { ModalFrame } from "./ui";
 import type { Account } from "../lib/model";
 
 export interface ClipdropImageModalProps {
@@ -261,10 +262,10 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
   const [isFullscreenZoom, setIsFullscreenZoom] = useState(false);
 
   const generationSteps = [
-    { title: "Analyzing Creative Prompt", subtitle: "Parsing scene semantics, visual styling & composition...", color: "#818cf8", badge: "01 / 04" },
-    { title: "Constructing Scene Geometry", subtitle: "Balancing composition depth, 3D volume & lighting...", color: "#38bdf8", badge: "02 / 04" },
-    { title: "Synthesizing Neural Diffusion", subtitle: "Generating high-fidelity 8K textures, colors & atmosphere...", color: "#c084fc", badge: "03 / 04" },
-    { title: "Final Polish & Upscaling", subtitle: "Applying neural chromatic polish and balance...", color: "#34d399", badge: "04 / 04" },
+    { title: "Analyzing Creative Prompt", subtitle: "Parsing scene semantics, visual styling & composition...", color: "var(--accent)", badge: "01 / 04" },
+    { title: "Constructing Scene Geometry", subtitle: "Balancing composition depth, 3D volume & lighting...", color: "var(--accent)", badge: "02 / 04" },
+    { title: "Synthesizing Neural Diffusion", subtitle: "Generating high-fidelity 8K textures, colors & atmosphere...", color: "var(--accent)", badge: "03 / 04" },
+    { title: "Final Polish & Upscaling", subtitle: "Applying neural chromatic polish and balance...", color: "var(--success)", badge: "04 / 04" },
   ];
 
   // Progressive percent counter while generating
@@ -823,31 +824,13 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="AI Visual Studio"
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: "rgba(11, 15, 25, 0.85)",
-        backdropFilter: "blur(12px)",
-        zIndex: 9999,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "20px",
-      }}
-    >
+    <ModalFrame open={isOpen} onClose={onClose} title="AI Visual Studio" className="visual-dialog">
       <div
         style={{
           width: "100%",
           maxWidth: "1060px",
           maxHeight: "92vh",
-          backgroundColor: "#0d1322",
+          backgroundColor: "var(--surface)",
           border: "1px solid rgba(99, 102, 241, 0.35)",
           borderRadius: "20px",
           boxShadow: "0 30px 60px -15px rgba(0, 0, 0, 0.7), 0 0 30px rgba(99, 102, 241, 0.15)",
@@ -860,7 +843,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
         <div
           style={{
             padding: "18px 24px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+            borderBottom: "1px solid var(--border)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -877,7 +860,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                color: "#fff",
+                color: "var(--ink)",
                 boxShadow: "0 4px 14px rgba(99, 102, 241, 0.4)",
               }}
             >
@@ -885,14 +868,14 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
             </div>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 700, color: "#f8fafc", letterSpacing: "-0.01em" }}>
+                <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 700, color: "var(--ink)", letterSpacing: "-0.01em" }}>
                   AI Visual Studio & Brand Canvas
                 </h3>
                 <span
                   style={{
                     background: "rgba(99, 102, 241, 0.2)",
                     border: "1px solid rgba(99, 102, 241, 0.4)",
-                    color: "#a5b4fc",
+                    color: "var(--accent)",
                     fontSize: "0.72rem",
                     fontWeight: 700,
                     padding: "2px 8px",
@@ -902,7 +885,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                   {composerMode ? 'Create Post' : targetPlatform}
                 </span>
               </div>
-              <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "#94a3b8" }}>
+              <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "var(--muted)" }}>
                 {composerMode ? `${attachmentLabel}. Generate a visual, then return to Create Post to review and publish.` : 'Generate visuals, customize brand overlays, and publish to your connected channels.'}
               </p>
             </div>
@@ -912,8 +895,8 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <div
               style={{
-                background: "rgba(15, 23, 42, 0.8)",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
+                background: "var(--surface2)",
+                border: "1px solid var(--border)",
                 borderRadius: "10px",
                 padding: "3px",
                 display: "flex",
@@ -928,7 +911,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                   borderRadius: "7px",
                   border: "none",
                   background: engine === "clipdrop" ? "linear-gradient(135deg, #6366f1, #4f46e5)" : "transparent",
-                  color: engine === "clipdrop" ? "#fff" : "#94a3b8",
+                  color: engine === "clipdrop" ? "#fff" : "var(--muted)",
                   fontSize: "0.78rem",
                   fontWeight: 600,
                   cursor: "pointer",
@@ -938,7 +921,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                   transition: "all 0.2s",
                 }}
               >
-                <Zap size={13} style={{ color: engine === "clipdrop" ? "#38bdf8" : "#94a3b8" }} />
+                <Zap size={13} style={{ color: engine === "clipdrop" ? "var(--accent)" : "var(--muted)" }} />
                 Clipdrop (SDXL)
                 {generatedAsset?.remainingCredits !== undefined && generatedAsset.remainingCredits !== null && (
                   <span style={{ fontSize: "0.7rem", opacity: 0.8 }}>({generatedAsset.remainingCredits})</span>
@@ -953,7 +936,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                   borderRadius: "7px",
                   border: "none",
                   background: engine === "flux" ? "linear-gradient(135deg, #10b981, #059669)" : "transparent",
-                  color: engine === "flux" ? "#fff" : "#94a3b8",
+                  color: engine === "flux" ? "#fff" : "var(--muted)",
                   fontSize: "0.78rem",
                   fontWeight: 600,
                   cursor: "pointer",
@@ -963,7 +946,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                   transition: "all 0.2s",
                 }}
               >
-                <Sparkles size={13} style={{ color: engine === "flux" ? "#a7f3d0" : "#94a3b8" }} />
+                <Sparkles size={13} style={{ color: engine === "flux" ? "#a7f3d0" : "var(--muted)" }} />
                 FLUX.1 Pro (Free)
               </button>
             </div>
@@ -972,9 +955,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
               onClick={onClose}
               aria-label="Close AI Visual Studio"
               style={{
-                background: "rgba(255, 255, 255, 0.05)",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
-                color: "#94a3b8",
+                background: "var(--surface2)",
+                border: "1px solid var(--border)",
+                color: "var(--muted)",
                 cursor: "pointer",
                 padding: "8px",
                 borderRadius: "10px",
@@ -989,15 +972,15 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
         </div>
 
         {/* Content Body Grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "1.05fr 0.95fr", flex: 1, overflowY: "auto" }}>
+        <div className="visual-studio-grid" style={{ display: "grid", gridTemplateColumns: "1.05fr 0.95fr", flex: 1, overflowY: "auto" }}>
           {/* Controls Column */}
-          <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "18px", borderRight: "1px solid rgba(255, 255, 255, 0.08)" }}>
+          <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "18px", borderRight: "1px solid var(--border)" }}>
             
             {/* Visual Prompt Input */}
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                <label style={{ fontSize: "0.85rem", fontWeight: 700, color: "#e2e8f0", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <Wand2 size={15} style={{ color: "#818cf8" }} /> Visual Prompt
+                <label style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--ink)", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <Wand2 size={15} style={{ color: "var(--accent)" }} /> Visual Prompt
                 </label>
                 <button
                   type="button"
@@ -1005,7 +988,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                   disabled={isSuggesting}
                   style={{
                     background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2))",
-                    color: "#c084fc",
+                    color: "var(--accent)",
                     border: "1px solid rgba(168, 85, 247, 0.4)",
                     padding: "5px 12px",
                     borderRadius: "8px",
@@ -1029,11 +1012,11 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                 placeholder="e.g. Futuristic minimalist 3D workspace with glowing holographic graphs, floating glass cubes, sleek studio lighting..."
                 style={{
                   width: "100%",
-                  background: "rgba(15, 23, 42, 0.7)",
+                  background: "var(--surface2)",
                   border: "1px solid rgba(99, 102, 241, 0.25)",
                   borderRadius: "10px",
                   padding: "12px",
-                  color: "#f8fafc",
+                  color: "var(--ink)",
                   fontSize: "0.88rem",
                   lineHeight: "1.45",
                   outline: "none",
@@ -1045,8 +1028,8 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
             {/* Style Presets */}
             <div>
-              <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "#94a3b8", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
-                <Palette size={14} style={{ color: "#38bdf8" }} /> Visual Art Style Preset
+              <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--muted)", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                <Palette size={14} style={{ color: "var(--accent)" }} /> Visual Art Style Preset
               </label>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "6px" }}>
                 {[
@@ -1063,9 +1046,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     style={{
                       padding: "8px 4px",
                       borderRadius: "8px",
-                      border: stylePreset === s.id ? "1.5px solid #818cf8" : "1px solid rgba(255, 255, 255, 0.08)",
-                      background: stylePreset === s.id ? "rgba(99, 102, 241, 0.25)" : "rgba(255, 255, 255, 0.03)",
-                      color: stylePreset === s.id ? "#c7d2fe" : "#94a3b8",
+                      border: stylePreset === s.id ? "1.5px solid #818cf8" : "1px solid var(--border)",
+                      background: stylePreset === s.id ? "rgba(99, 102, 241, 0.25)" : "var(--surface2)",
+                      color: stylePreset === s.id ? "var(--accent)" : "var(--muted)",
                       fontSize: "0.76rem",
                       fontWeight: 600,
                       cursor: "pointer",
@@ -1086,7 +1069,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
             {/* Aspect Ratio Presets */}
             <div>
-              <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "#94a3b8", marginBottom: "8px", display: "block" }}>
+              <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--muted)", marginBottom: "8px", display: "block" }}>
                 Target Aspect Ratio
               </label>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px" }}>
@@ -1103,9 +1086,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     style={{
                       padding: "10px 8px",
                       borderRadius: "10px",
-                      border: aspectRatio === item.ratio ? "2px solid #6366f1" : "1px solid rgba(255, 255, 255, 0.08)",
-                      background: aspectRatio === item.ratio ? "rgba(99, 102, 241, 0.25)" : "rgba(255, 255, 255, 0.03)",
-                      color: aspectRatio === item.ratio ? "#a5b4fc" : "#94a3b8",
+                      border: aspectRatio === item.ratio ? "2px solid #6366f1" : "1px solid var(--border)",
+                      background: aspectRatio === item.ratio ? "rgba(99, 102, 241, 0.25)" : "var(--surface2)",
+                      color: aspectRatio === item.ratio ? "var(--accent)" : "var(--muted)",
                       fontWeight: 600,
                       cursor: "pointer",
                       textAlign: "center",
@@ -1121,8 +1104,8 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
             {/* Prompt Quick Inspiration Pills (ChatGPT / Midjourney style) */}
             <div>
-              <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "#94a3b8", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
-                <Sparkles size={14} style={{ color: "#fbbf24" }} /> Quick Inspiration
+              <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--muted)", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                <Sparkles size={14} style={{ color: "var(--warning)" }} /> Quick Inspiration
               </label>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                 {[
@@ -1138,11 +1121,11 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     type="button"
                     onClick={() => setPrompt(item.example)}
                     style={{
-                      background: "rgba(255, 255, 255, 0.04)",
-                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      background: "var(--surface2)",
+                      border: "1px solid var(--border)",
                       borderRadius: "8px",
                       padding: "6px 10px",
-                      color: "#cbd5e1",
+                      color: "var(--ink)",
                       fontSize: "0.75rem",
                       fontWeight: 600,
                       cursor: "pointer",
@@ -1179,7 +1162,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                 background: engine === "flux"
                   ? "linear-gradient(135deg, #10b981, #059669)"
                   : "linear-gradient(135deg, #6366f1, #4f46e5)",
-                color: "#fff",
+                color: "var(--ink)",
                 fontWeight: 700,
                 fontSize: "0.98rem",
                 cursor: isGenerating ? "wait" : "pointer",
@@ -1203,7 +1186,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
           <div
             style={{
               padding: "24px",
-              background: "linear-gradient(180deg, rgba(15, 23, 42, 0.4) 0%, rgba(2, 6, 23, 0.6) 100%)",
+              background: "linear-gradient(180deg, var(--surface2) 0%, var(--surface2) 100%)",
               display: "flex",
               flexDirection: "column",
               gap: "16px",
@@ -1213,14 +1196,14 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
             {/* Top Studio Control & Typography Bar */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                <span style={{ fontSize: "0.88rem", fontWeight: 800, color: "#f8fafc", letterSpacing: "-0.2px" }}>
+                <span style={{ fontSize: "0.88rem", fontWeight: 800, color: "var(--ink)", letterSpacing: "-0.2px" }}>
                   Studio Canvas
                 </span>
 
                 {/* Dynamic Status / Mode Badge */}
                 {enableBrandOverlay && (headline || logoText) ? (
                   <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                    <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "#fbbf24", background: "rgba(251, 191, 36, 0.15)", border: "1px solid rgba(251, 191, 36, 0.3)", padding: "3px 8px", borderRadius: "6px" }}>
+                    <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "var(--warning)", background: "rgba(251, 191, 36, 0.15)", border: "1px solid rgba(251, 191, 36, 0.3)", padding: "3px 8px", borderRadius: "6px" }}>
                       ✨ {headline || logoText} Poster
                     </span>
                     <button
@@ -1228,9 +1211,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                       onClick={() => setEnableBrandOverlay(!enableBrandOverlay)}
                       style={{
                         fontSize: "0.72rem",
-                        background: "rgba(255, 255, 255, 0.06)",
-                        border: "1px solid rgba(255, 255, 255, 0.12)",
-                        color: "#94a3b8",
+                        background: "var(--surface2)",
+                        border: "1px solid var(--border)",
+                        color: "var(--muted)",
                         padding: "3px 8px",
                         borderRadius: "6px",
                         cursor: "pointer",
@@ -1240,7 +1223,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     </button>
                   </div>
                 ) : (
-                  <span style={{ fontSize: "0.74rem", fontWeight: 600, color: "#94a3b8", background: "rgba(255, 255, 255, 0.05)", border: "1px solid rgba(255, 255, 255, 0.08)", padding: "3px 8px", borderRadius: "6px" }}>
+                  <span style={{ fontSize: "0.74rem", fontWeight: 600, color: "var(--muted)", background: "var(--border)", border: "1px solid var(--border)", padding: "3px 8px", borderRadius: "6px" }}>
                     🖼️ AI Visual
                   </span>
                 )}
@@ -1254,11 +1237,11 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     onClick={handleCopyImage}
                     title="Copy image to clipboard"
                     style={{
-                      background: "rgba(255, 255, 255, 0.06)",
-                      border: "1px solid rgba(255, 255, 255, 0.12)",
+                      background: "var(--surface2)",
+                      border: "1px solid var(--border)",
                       borderRadius: "7px",
                       padding: "5px 9px",
-                      color: copiedImage ? "#34d399" : "#cbd5e1",
+                      color: copiedImage ? "var(--success)" : "#cbd5e1",
                       fontSize: "0.75rem",
                       fontWeight: 600,
                       cursor: "pointer",
@@ -1277,11 +1260,11 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     onClick={() => setIsFullscreenZoom(true)}
                     title="Fullscreen zoom"
                     style={{
-                      background: "rgba(255, 255, 255, 0.06)",
-                      border: "1px solid rgba(255, 255, 255, 0.12)",
+                      background: "var(--surface2)",
+                      border: "1px solid var(--border)",
                       borderRadius: "7px",
                       padding: "5px 8px",
-                      color: "#cbd5e1",
+                      color: "var(--ink)",
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
@@ -1294,9 +1277,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     style={{
                       fontSize: "0.7rem",
                       fontWeight: 700,
-                      color: "#94a3b8",
-                      background: "rgba(255, 255, 255, 0.05)",
-                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      color: "var(--muted)",
+                      background: "var(--surface2)",
+                      border: "1px solid var(--border)",
                       padding: "4px 8px",
                       borderRadius: "6px",
                     }}
@@ -1329,8 +1312,8 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
               style={{
                 width: "100%",
                 borderRadius: "16px",
-                border: "1px solid rgba(255, 255, 255, 0.12)",
-                background: "#030712",
+                border: "1px solid var(--border)",
+                background: "var(--surface)",
                 minHeight: "370px",
                 display: "flex",
                 alignItems: "center",
@@ -1355,7 +1338,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     justifyContent: "center",
                     padding: "36px 20px",
                     position: "relative",
-                    background: "radial-gradient(ellipse at 50% 30%, rgba(99, 102, 241, 0.2) 0%, rgba(15, 23, 42, 0.9) 65%, #020617 100%)",
+                    background: "radial-gradient(ellipse at 50% 30%, rgba(99, 102, 241, 0.2) 0%, var(--surface2) 65%, var(--surface) 100%)",
                     overflow: "hidden",
                   }}
                 >
@@ -1367,7 +1350,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                       left: "-120%",
                       width: "60%",
                       height: "100%",
-                      background: "linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), rgba(129, 140, 248, 0.25), transparent)",
+                      background: "linear-gradient(90deg, transparent, var(--surface2), rgba(129, 140, 248, 0.25), transparent)",
                       transform: "skewX(-25deg)",
                       animation: "chatgptShimmer 2.2s infinite ease-in-out",
                       pointerEvents: "none",
@@ -1391,7 +1374,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                         display: "flex",
                         alignItems: "center",
                         gap: "8px",
-                        background: "rgba(15, 23, 42, 0.88)",
+                        background: "var(--surface2)",
                         border: "1px solid rgba(99, 102, 241, 0.4)",
                         borderRadius: "20px",
                         padding: "5px 12px",
@@ -1408,7 +1391,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                           display: "inline-block",
                         }}
                       />
-                      <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "#e2e8f0" }}>
+                      <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "var(--ink)" }}>
                         Neural Studio Active
                       </span>
                     </div>
@@ -1417,9 +1400,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                       style={{
                         fontSize: "0.72rem",
                         fontWeight: 700,
-                        color: "#94a3b8",
-                        background: "rgba(15, 23, 42, 0.8)",
-                        border: "1px solid rgba(255, 255, 255, 0.1)",
+                        color: "var(--muted)",
+                        background: "var(--surface2)",
+                        border: "1px solid var(--border)",
                         padding: "4px 10px",
                         borderRadius: "12px",
                         backdropFilter: "blur(8px)",
@@ -1469,7 +1452,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                         width: "80px",
                         height: "80px",
                         borderRadius: "50%",
-                        background: "linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98))",
+                        background: "linear-gradient(135deg, var(--surface2), var(--surface2))",
                         border: "1.5px solid rgba(168, 85, 247, 0.6)",
                         boxShadow: "0 0 30px rgba(99, 102, 241, 0.5), inset 0 0 16px rgba(168, 85, 247, 0.4)",
                         display: "flex",
@@ -1485,7 +1468,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                           filter: `drop-shadow(0 0 10px ${generationSteps[generationStep].color})`,
                         }}
                       />
-                      <span style={{ fontSize: "0.68rem", fontWeight: 800, color: "#fff", marginTop: "2px" }}>
+                      <span style={{ fontSize: "0.68rem", fontWeight: 800, color: "var(--ink)", marginTop: "2px" }}>
                         {generationPercent}%
                       </span>
                     </div>
@@ -1497,14 +1480,14 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                       style={{
                         fontSize: "0.96rem",
                         fontWeight: 700,
-                        color: "#f8fafc",
+                        color: "var(--ink)",
                         marginBottom: "4px",
                         letterSpacing: "-0.2px",
                       }}
                     >
                       {generationSteps[generationStep].title}
                     </div>
-                    <div style={{ fontSize: "0.78rem", color: "#94a3b8", lineHeight: "1.4" }}>
+                    <div style={{ fontSize: "0.78rem", color: "var(--muted)", lineHeight: "1.4" }}>
                       {generationSteps[generationStep].subtitle}
                     </div>
                   </div>
@@ -1514,7 +1497,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     style={{
                       width: "250px",
                       height: "6px",
-                      background: "rgba(255, 255, 255, 0.08)",
+                      background: "var(--surface2)",
                       borderRadius: "10px",
                       overflow: "hidden",
                       position: "relative",
@@ -1545,7 +1528,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                       </span>
                     )}
                     {headline && (
-                      <span style={{ background: "rgba(99, 102, 241, 0.15)", border: "1px solid rgba(99, 102, 241, 0.3)", color: "#c7d2fe", fontSize: "0.7rem", fontWeight: 700, padding: "2px 8px", borderRadius: "10px" }}>
+                      <span style={{ background: "rgba(99, 102, 241, 0.15)", border: "1px solid rgba(99, 102, 241, 0.3)", color: "var(--accent)", fontSize: "0.7rem", fontWeight: 700, padding: "2px 8px", borderRadius: "10px" }}>
                         ✨ {headline}
                       </span>
                     )}
@@ -1590,9 +1573,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                           <div style={{ display: "flex", justifyContent: "center" }}>
                             <div
                               style={{
-                                background: "rgba(10, 15, 30, 0.85)",
+                                background: "var(--surface2)",
                                 backdropFilter: "blur(12px)",
-                                border: "1px solid rgba(255, 255, 255, 0.28)",
+                                border: "1px solid var(--border-strong)",
                                 borderRadius: "30px",
                                 padding: "6px 20px",
                                 boxShadow: "0 8px 24px rgba(0, 0, 0, 0.6)",
@@ -1601,19 +1584,19 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                                 gap: "8px",
                               }}
                             >
-                              <Sparkles size={14} style={{ color: "#fbbf24" }} />
+                              <Sparkles size={14} style={{ color: "var(--warning)" }} />
                               <span
                                 style={{
                                   fontSize: "0.82rem",
                                   fontWeight: 800,
-                                  color: "#ffffff",
+                                  color: "var(--ink)",
                                   letterSpacing: "1px",
                                   textTransform: "uppercase",
                                 }}
                               >
                                 {logoText}
                               </span>
-                              <Sparkles size={14} style={{ color: "#fbbf24" }} />
+                              <Sparkles size={14} style={{ color: "var(--warning)" }} />
                             </div>
                           </div>
                         ) : <div />}
@@ -1649,12 +1632,12 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                               </div>
                             )}
                             {subtitle && (
-                              <div style={{ fontSize: "0.75rem", color: "#f1f5f9", lineHeight: "1.3" }}>
+                              <div style={{ fontSize: "0.75rem", color: "var(--ink)", lineHeight: "1.3" }}>
                                 {subtitle}
                               </div>
                             )}
                             {logoText && (
-                              <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", marginTop: "2px" }}>
+                              <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--muted)", marginTop: "2px" }}>
                                 Warm Greetings from {logoText}
                               </div>
                             )}
@@ -1670,7 +1653,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                       style={{
                         position: "absolute",
                         inset: 0,
-                        background: "#050811",
+                        background: "var(--surface)",
                         display: "flex",
                         flexDirection: "column",
                         alignItems: "center",
@@ -1679,11 +1662,11 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                         textAlign: "center",
                       }}
                     >
-                      <ImageIcon size={44} style={{ color: "#ef4444", marginBottom: "8px" }} />
-                      <p style={{ color: "#f8fafc", fontWeight: 700, margin: 0, fontSize: "0.92rem" }}>
+                      <ImageIcon size={44} style={{ color: "var(--danger)", marginBottom: "8px" }} />
+                      <p style={{ color: "var(--ink)", fontWeight: 700, margin: 0, fontSize: "0.92rem" }}>
                         Visual Preview Needs Refresh
                       </p>
-                      <p style={{ color: "#94a3b8", fontSize: "0.78rem", margin: "4px 0 14px", maxWidth: "280px" }}>
+                      <p style={{ color: "var(--muted)", fontSize: "0.78rem", margin: "4px 0 14px", maxWidth: "280px" }}>
                         The visual file is saved. Click below to reload the image buffer.
                       </p>
                       <div style={{ display: "flex", gap: "8px" }}>
@@ -1697,7 +1680,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                             padding: "7px 14px",
                             borderRadius: "8px",
                             background: "#6366f1",
-                            color: "#fff",
+                            color: "var(--ink)",
                             border: "none",
                             fontSize: "0.8rem",
                             fontWeight: 600,
@@ -1713,8 +1696,8 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                           style={{
                             padding: "7px 14px",
                             borderRadius: "8px",
-                            background: "rgba(255,255,255,0.1)",
-                            color: "#fff",
+                            background: "var(--surface2)",
+                            color: "var(--ink)",
                             textDecoration: "none",
                             fontSize: "0.8rem",
                             fontWeight: 600,
@@ -1739,9 +1722,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                   >
                     <span
                       style={{
-                        background: "rgba(15, 23, 42, 0.9)",
-                        border: "1px solid rgba(255,255,255,0.15)",
-                        color: "#f8fafc",
+                        background: "var(--surface2)",
+                        border: "1px solid var(--border)",
+                        color: "var(--ink)",
                         fontSize: "0.72rem",
                         padding: "3px 8px",
                         borderRadius: "8px",
@@ -1760,9 +1743,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                         position: "absolute",
                         bottom: "12px",
                         right: "12px",
-                        background: "rgba(15, 23, 42, 0.92)",
+                        background: "var(--surface2)",
                         border: "1px solid rgba(52, 211, 153, 0.4)",
-                        color: "#34d399",
+                        color: "var(--success)",
                         fontSize: "0.72rem",
                         padding: "3px 10px",
                         borderRadius: "12px",
@@ -1776,12 +1759,12 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                   )}
                 </>
               ) : (
-                <div style={{ textAlign: "center", color: "#64748b", padding: "40px 20px" }}>
+                <div style={{ textAlign: "center", color: "var(--muted)", padding: "40px 20px" }}>
                   <ImageIcon size={52} style={{ opacity: 0.35, marginBottom: "12px", margin: "0 auto" }} />
-                  <p style={{ margin: 0, fontSize: "0.92rem", fontWeight: 600, color: "#94a3b8" }}>
+                  <p style={{ margin: 0, fontSize: "0.92rem", fontWeight: 600, color: "var(--muted)" }}>
                     No visual generated yet
                   </p>
-                  <p style={{ margin: "4px 0 0", fontSize: "0.8rem", color: "#64748b" }}>
+                  <p style={{ margin: "4px 0 0", fontSize: "0.8rem", color: "var(--muted)" }}>
                     Choose your style, click "Generate Visual", and preview your post visual here.
                   </p>
                 </div>
@@ -1799,7 +1782,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     borderRadius: "10px",
                     border: "none",
                     background: "linear-gradient(135deg, #10b981, #059669)",
-                    color: "#fff",
+                    color: "var(--ink)",
                     fontSize: "0.84rem",
                     fontWeight: 700,
                     cursor: "pointer",
@@ -1845,9 +1828,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                   style={{
                     padding: "10px 12px",
                     borderRadius: "10px",
-                    border: "1px solid rgba(255, 255, 255, 0.12)",
-                    background: "rgba(255, 255, 255, 0.05)",
-                    color: "#cbd5e1",
+                    border: "1px solid var(--border)",
+                    background: "var(--surface2)",
+                    color: "var(--ink)",
                     fontSize: "0.8rem",
                     fontWeight: 600,
                     cursor: isGenerating ? "wait" : "pointer",
@@ -1872,7 +1855,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
             {generatedAsset && !composerMode && (
               <div
                 style={{
-                  background: "rgba(15, 23, 42, 0.8)",
+                  background: "var(--surface2)",
                   borderRadius: "14px",
                   border: "1px solid rgba(99, 102, 241, 0.25)",
                   padding: "16px",
@@ -1882,12 +1865,12 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: "0.84rem", fontWeight: 700, color: "#f8fafc", display: "flex", alignItems: "center", gap: "6px" }}>
-                    <Share2 size={15} style={{ color: "#818cf8" }} />
+                  <span style={{ fontSize: "0.84rem", fontWeight: 700, color: "var(--ink)", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Share2 size={15} style={{ color: "var(--accent)" }} />
                     Publishing & Post Actions
                   </span>
                   {isAttached && (
-                    <span style={{ fontSize: "0.72rem", color: "#34d399", display: "flex", alignItems: "center", gap: "4px", fontWeight: 600 }}>
+                    <span style={{ fontSize: "0.72rem", color: "var(--success)", display: "flex", alignItems: "center", gap: "4px", fontWeight: 600 }}>
                       <CheckCircle2 size={13} /> Attached to Draft
                     </span>
                   )}
@@ -1926,7 +1909,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                       borderRadius: "9px",
                       border: "1px solid rgba(52, 211, 153, 0.4)",
                       background: "rgba(16, 185, 129, 0.15)",
-                      color: "#6ee7b7",
+                      color: "var(--success)",
                       fontSize: "0.84rem",
                       fontWeight: 700,
                       cursor: isSavingPost ? "wait" : "pointer",
@@ -1944,7 +1927,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                 {/* 1-Click Multi-Account Social Channel Publishing */}
                 <div
                   style={{
-                    background: "rgba(10, 15, 30, 0.6)",
+                    background: "var(--surface2)",
                     borderRadius: "12px",
                     padding: "14px",
                     border: "1px solid rgba(56, 189, 248, 0.2)",
@@ -1956,12 +1939,12 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                 >
                   {/* Header */}
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <label style={{ fontSize: "0.82rem", color: "#f1f5f9", fontWeight: 700, display: "flex", alignItems: "center", gap: "6px" }}>
-                      <Globe size={15} style={{ color: "#38bdf8" }} />
+                    <label style={{ fontSize: "0.82rem", color: "var(--ink)", fontWeight: 700, display: "flex", alignItems: "center", gap: "6px" }}>
+                      <Globe size={15} style={{ color: "var(--accent)" }} />
                       Publish Directly to Social Accounts
                     </label>
                     {connectedAccounts.length > 0 && (
-                      <span style={{ fontSize: "0.72rem", color: "#38bdf8", background: "rgba(56, 189, 248, 0.12)", padding: "2px 8px", borderRadius: "20px", fontWeight: 600, border: "1px solid rgba(56, 189, 248, 0.25)" }}>
+                      <span style={{ fontSize: "0.72rem", color: "var(--accent)", background: "rgba(56, 189, 248, 0.12)", padding: "2px 8px", borderRadius: "20px", fontWeight: 600, border: "1px solid rgba(56, 189, 248, 0.25)" }}>
                         {targetAccounts.length} of {connectedAccounts.length} selected
                       </span>
                     )}
@@ -1970,11 +1953,11 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                   {/* Post Caption / Text Input */}
                   <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <label style={{ fontSize: "0.74rem", color: "#94a3b8", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
-                        <Edit3 size={11} style={{ color: "#a78bfa" }} />
+                      <label style={{ fontSize: "0.74rem", color: "var(--muted)", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
+                        <Edit3 size={11} style={{ color: "var(--accent)" }} />
                         Post Caption / Message
                       </label>
-                      <span style={{ fontSize: "0.68rem", color: "#64748b" }}>
+                      <span style={{ fontSize: "0.68rem", color: "var(--muted)" }}>
                         Published along with image
                       </span>
                     </div>
@@ -1988,11 +1971,11 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                       rows={2}
                       style={{
                         width: "100%",
-                        background: "rgba(15, 23, 42, 0.75)",
-                        border: "1px solid rgba(255, 255, 255, 0.12)",
+                        background: "var(--surface2)",
+                        border: "1px solid var(--border)",
                         borderRadius: "8px",
                         padding: "8px 10px",
-                        color: "#f8fafc",
+                        color: "var(--ink)",
                         fontSize: "0.8rem",
                         lineHeight: "1.4",
                         resize: "none",
@@ -2007,7 +1990,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                     <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                       {/* Selection Toolbar */}
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontSize: "0.72rem", color: "#94a3b8", fontWeight: 600 }}>
+                        <span style={{ fontSize: "0.72rem", color: "var(--muted)", fontWeight: 600 }}>
                           Select Accounts to Publish Simultaneously:
                         </span>
                         <div style={{ display: "flex", gap: "6px" }}>
@@ -2019,7 +2002,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                               padding: "2px 8px",
                               borderRadius: "4px",
                               background: "rgba(56, 189, 248, 0.15)",
-                              color: "#38bdf8",
+                              color: "var(--accent)",
                               border: "1px solid rgba(56, 189, 248, 0.3)",
                               cursor: "pointer",
                               fontWeight: 600,
@@ -2034,9 +2017,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                               fontSize: "0.68rem",
                               padding: "2px 8px",
                               borderRadius: "4px",
-                              background: "rgba(255, 255, 255, 0.05)",
-                              color: "#94a3b8",
-                              border: "1px solid rgba(255, 255, 255, 0.1)",
+                              background: "var(--surface2)",
+                              color: "var(--muted)",
+                              border: "1px solid var(--border)",
                               cursor: "pointer",
                               fontWeight: 500,
                             }}
@@ -2144,7 +2127,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                                     </span>
                                   </div>
                                   {isYouTube && (
-                                    <span style={{ fontSize: "0.67rem", color: "#f87171", marginTop: "1px" }}>
+                                    <span style={{ fontSize: "0.67rem", color: "var(--danger)", marginTop: "1px" }}>
                                       (Note: YouTube only supports video uploads)
                                     </span>
                                   )}
@@ -2153,11 +2136,11 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
                               <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                                 {isSelected ? (
-                                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "18px", height: "18px", borderRadius: "50%", background: "#38bdf8", color: "#000" }}>
+                                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "18px", height: "18px", borderRadius: "50%", background: "#38bdf8", color: "var(--ink)" }}>
                                     <Check size={11} strokeWidth={3} />
                                   </span>
                                 ) : (
-                                  <span style={{ width: "18px", height: "18px", borderRadius: "50%", border: "1px solid rgba(255, 255, 255, 0.2)" }} />
+                                  <span style={{ width: "18px", height: "18px", borderRadius: "50%", border: "1px solid var(--border-strong)" }} />
                                 )}
                               </div>
                             </div>
@@ -2213,9 +2196,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                       </button>
                     </div>
                   ) : (
-                    <div style={{ fontSize: "0.78rem", color: "#64748b", display: "flex", alignItems: "center", gap: "6px", padding: "6px 0" }}>
+                    <div style={{ fontSize: "0.78rem", color: "var(--muted)", display: "flex", alignItems: "center", gap: "6px", padding: "6px 0" }}>
                       <span>No social channel connected yet.</span>
-                      <a href="/app/manage" style={{ color: "#818cf8", textDecoration: "underline" }}>
+                      <a href="/app/manage" style={{ color: "var(--accent)", textDecoration: "underline" }}>
                         Connect in Settings →
                       </a>
                     </div>
@@ -2232,7 +2215,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                         borderRadius: "8px",
                         padding: "9px 12px",
                         fontSize: "0.78rem",
-                        color: "#34d399",
+                        color: "var(--success)",
                         display: "flex",
                         alignItems: "center",
                         gap: "8px",
@@ -2251,6 +2234,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
           {/* Fullscreen Lightbox Zoom Modal */}
           {isFullscreenZoom && generatedAsset && (
+            <ModalFrame open={isFullscreenZoom} onClose={()=>setIsFullscreenZoom(false)} title="Fullscreen image preview" className="fullscreen-dialog">
             <div
               onClick={() => setIsFullscreenZoom(false)}
               style={{
@@ -2267,17 +2251,18 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
             >
               <button
                 type="button"
+                aria-label="Close fullscreen preview"
                 onClick={() => setIsFullscreenZoom(false)}
                 style={{
                   position: "absolute",
                   top: "24px",
                   right: "24px",
-                  background: "rgba(255,255,255,0.15)",
+                  background: "var(--surface2)",
                   border: "none",
                   borderRadius: "50%",
                   width: "40px",
                   height: "40px",
-                  color: "#fff",
+                  color: "var(--ink)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -2298,9 +2283,10 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                 }}
               />
             </div>
+            </ModalFrame>
           )}
         </div>
       </div>
-    </div>
+    </ModalFrame>
   );
 };

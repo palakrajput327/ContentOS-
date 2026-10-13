@@ -58,6 +58,8 @@ async function newSession(
   familyId = randomUUID(),
   absolute = new Date(Date.now() + 30 * 86400000),
 ) {
+  const account=(await db.query('SELECT account_status FROM users WHERE id=$1 FOR UPDATE',[userId])).rows[0];
+  if(!account||account.account_status!=='ACTIVE')throw new ForbiddenException('This account is inactive. Contact support.');
   const access = randomBytes(32).toString("base64url"),
     refresh = randomBytes(48).toString("base64url");
   const accessExpires = new Date(
@@ -267,6 +269,7 @@ export class PhaseAuthController {
       if (!user) throw new UnauthorizedException('No account found with this email address. Please sign up first.');
       const valid = await verifyPassword(c.password, user.password_hash);
       if (!valid) throw new UnauthorizedException('Email or password is incorrect.');
+      if(user.account_status!=='ACTIVE')throw new ForbiddenException('This account is inactive. Contact support.');
       
       // Security Check: Only verified emails can log in!
       // If someone signed up with a fake email and never entered the OTP, block them from logging in.

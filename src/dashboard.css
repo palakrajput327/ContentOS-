@@ -1,12 +1,12 @@
 .app-shell {
   --accent: #9d83ff;
   --accent-hover: #b3a0ff;
-  background: #0b0e14;
-  color: #edf0f8;
+  background: var(--surface);
+  color: var(--ink);
 }
 .app-shell .sidebar {
-  background: #0c0f16;
-  border-color: #212633;
+  background: var(--surface);
+  border-color: var(--border);
 }
 .app-shell .main-column {
   background:
@@ -15,7 +15,7 @@
       rgba(84, 63, 145, 0.055),
       transparent 50%
     ),
-    #0c0f15;
+    var(--surface);
 }
 .app-shell .button.primary,
 .app-shell .btn-primary {
@@ -23,24 +23,24 @@
   color: white;
 }
 .app-shell .nav-item.active {
-  background: #201c35;
+  background: var(--surface2);
   color: #e4dcff;
   box-shadow: inset 2px 0 #9d83ff;
 }
 .app-shell .workspace-avatar,
 .app-shell .studio-symbol {
-  background: #25203c;
+  background: var(--surface3);
   color: #ae94ff;
 }
 .app-shell .panel,
 .app-shell .stat-card {
-  background: linear-gradient(130deg, #161a23, #10131a);
-  border: 1px solid #252a36;
+  background: linear-gradient(130deg, var(--surface2), var(--surface));
+  border: 1px solid var(--border);
   border-radius: 12px;
 }
 .app-shell .app-topbar {
-  background: #10131b;
-  border-color: #202531;
+  background: var(--surface);
+  border-color: var(--border);
   position: relative;
   gap: 16px;
 }
@@ -71,8 +71,8 @@
   position: absolute;
   right: 25px;
   top: 60px;
-  background: #1d2130;
-  border: 1px solid #39324b;
+  background: var(--surface2);
+  border: 1px solid var(--border);
   padding: 20px;
   width: 300px;
   z-index: 20;
@@ -86,7 +86,7 @@
 .reference-heading .overline {
   text-transform: none;
   letter-spacing: 0;
-  color: #8f99ae;
+  color: var(--muted);
 }
 .overview-stats {
   display: grid;
@@ -103,7 +103,7 @@
   gap: 10px;
   align-items: center;
   font-size: 12px;
-  color: #b6bfd0;
+  color: var(--ink);
 }
 .overview-stats .stat-card strong {
   display: block;
@@ -113,11 +113,11 @@
 }
 .overview-stats .stat-card small {
   font-size: 10px;
-  color: #929cb0;
+  color: var(--muted);
 }
 .stat-glyph {
   padding: 9px;
-  background: #25203c;
+  background: var(--surface3);
   border-radius: 10px;
   color: #aa8aff;
 }
@@ -162,7 +162,7 @@
   position: absolute;
   top: 17px;
   right: -8px;
-  color: #667286;
+  color: var(--muted);
   font-size: 18px;
 }
 .pipeline-step i {
@@ -173,7 +173,7 @@
   border-radius: 50%;
   border: 1px solid var(--step-color);
   color: var(--step-color);
-  background: #171c28;
+  background: var(--surface2);
   box-shadow: inset 0 0 20px
     color-mix(in srgb, var(--step-color) 9%, transparent);
 }
@@ -188,22 +188,22 @@
 }
 .identity-detail {
   padding: 11px 0;
-  border-bottom: 1px solid #242937;
+  border-bottom: 1px solid var(--border);
   display: flex;
   justify-content: space-between;
   gap: 10px;
   font-size: 12px;
-  color: #aeb7ca;
+  color: var(--ink);
 }
 .identity-detail strong {
-  color: #e0e4f0;
+  color: var(--ink);
   font-weight: 500;
   overflow-wrap: anywhere;
 }
 .verified-card > p {
   font-size: 12px;
   margin-top: 18px;
-  color: #939eb5;
+  color: var(--muted);
 }
 .channel-strip {
   display: grid;
@@ -215,14 +215,14 @@
   flex-direction: column;
   gap: 12px;
   padding: 15px 10px;
-  border: 1px solid #262c3b;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #171c26;
+  background: var(--surface2);
   font-size: 12px;
 }
 .channel-tile small {
   font-size: 10px;
-  color: #8f99ab;
+  color: var(--muted);
 }
 .channel-tile .platform-icon {
   width: 28px;
@@ -237,7 +237,7 @@
 .studio-callout p {
   font-size: 13px;
   line-height: 1.6;
-  color: #a4adc1;
+  color: var(--muted);
 }
 .overview-bottom {
   display: grid;
@@ -268,7 +268,7 @@
 .distribution-ring {
   width: 110px;
   height: 110px;
-  border: 15px solid #252b3a;
+  border: 15px solid var(--border);
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -278,7 +278,7 @@
 .distribution-zero p {
   font-size: 12px;
   line-height: 1.7;
-  color: #939fb5;
+  color: var(--muted);
 }
 .distribution-list {
   display: grid;
@@ -288,19 +288,19 @@
   display: flex;
   justify-content: space-between;
   font-size: 12px;
-  color: #abb5c7;
+  color: var(--muted);
 }
 .dashboard-row {
   display: flex;
   justify-content: space-between;
   gap: 15px;
   padding: 14px 0;
-  border-bottom: 1px solid #252a36;
+  border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
 .dashboard-row small {
   display: block;
-  color: #8692a7;
+  color: var(--muted);
   margin-top: 6px;
 }
 .verification-code {
@@ -312,8 +312,8 @@
   line-height: 1.3;
 }
 .app-shell .workspace-help {
-  background: #14131f;
-  border-color: #2a253d;
+  background: var(--surface);
+  border-color: var(--border);
 }
 .app-shell .logo-symbol {
   background: #7953ed;
@@ -380,14 +380,14 @@
 
 .app-shell .brand-icon {
   background: #7953ed;
-  color: #fff;
+  color: var(--ink);
 }
 .app-shell .btn-primary {
   border-color: #9174f7;
 }
 .app-shell .ai-chip {
   color: #ac8eff;
-  border-color: #4b3d68;
+  border-color: var(--border);
 }
 .app-shell .overline:before {
   display: none;

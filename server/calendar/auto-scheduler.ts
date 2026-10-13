@@ -1,4 +1,6 @@
 import type { Pool, PoolClient } from "pg";
+import { ConflictException } from '@nestjs/common';
+import { getDailyCapacity } from './daily-posting.js';
 import { PostingSlotsService, type PostingSlot } from "./posting-slots.service.js";
 
 export interface SlotCandidate {
@@ -51,10 +53,7 @@ export class AutoSchedulerService {
     }
 
     // Fallback: If all configured slots for the next 30 days are filled, return tomorrow at 09:00 UTC
-    const fallback = new Date(options.startDate || Date.now());
-    fallback.setDate(fallback.getDate() + 1);
-    fallback.setHours(9, 0, 0, 0);
-    return fallback.toISOString();
+    throw new ConflictException('No free posting slots available. Configure more slots or choose a later date.');
   }
 
   /**
@@ -84,13 +83,13 @@ export class AutoSchedulerService {
     // Fetch existing scheduled posts for workspace from now up to 60 days out
     const windowEnd = new Date(startDate.getTime() + 60 * 24 * 60 * 60 * 1000);
     const scheduledRes = await db.query(
-      `SELECT sp.id, sp.scheduled_at, c.title, c.platforms
+      `SELECT DISTINCT c.id, sp.execute_at AS scheduled_at, c.title, c.platforms
        FROM scheduled_posts sp
        JOIN content c ON c.id = sp.content_id
        WHERE c.workspace_id = $1
-         AND sp.scheduled_at >= $2
-         AND sp.scheduled_at <= $3
-         AND sp.status = 'SCHEDULED'`,
+         AND sp.execute_at >= $2
+         AND sp.execute_at <= $3
+         AND sp.state <> 'CANCELLED'`,
       [workspaceId, startDate.toISOString(), windowEnd.toISOString()]
     );
 
@@ -171,7 +170,7 @@ export class AutoSchedulerService {
           dayOfWeek,
           timeOfDay: slot.time_of_day,
           platform: slot.platform,
-          conflict: !!conflicting,
+          conflict: !!conflicting || !(await getDailyCapacity(db,workspaceId,`${yearStr}-${monthStr}-${dayStr}`,options.excludePostId)).remaining,
           conflictingPostTitle: conflicting?.title,
           conflictingPostId: conflicting?.id,
         });

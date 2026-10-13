@@ -62,7 +62,7 @@ class PhaseGuard implements CanActivate {
     if (typeof raw !== "string")
       throw new UnauthorizedException("Please log in to continue.");
     const found = await pool.query(
-      "SELECT u.id,u.name,u.email FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.access_hash=$1 AND s.revoked_at IS NULL AND s.access_expires_at>now() AND s.absolute_expires_at>now() AND u.email_verified_at IS NOT NULL",
+      "SELECT u.id,u.name,u.email FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.access_hash=$1 AND s.revoked_at IS NULL AND s.access_expires_at>now() AND s.absolute_expires_at>now() AND u.email_verified_at IS NOT NULL AND u.account_status='ACTIVE'",
       [hash(raw)],
     );
     if (!found.rowCount)
@@ -89,6 +89,9 @@ class PhaseGuard implements CanActivate {
     return true;
   }
 }
+import { MetaPublishError } from "./meta.publishing.js";
+import { MetaGraphError } from "./meta.api.js";
+
 @Catch()
 class ErrorFilter implements ExceptionFilter {
   catch(e: unknown, h: ArgumentsHost) {
@@ -96,6 +99,7 @@ class ErrorFilter implements ExceptionFilter {
       r = c.getRequest<AuthedRequest>();
     let status = 500,
       message = "The request could not be completed. Please try again.";
+
     if (e instanceof ZodError) {
       status = 400;
       message = e.issues
@@ -104,9 +108,18 @@ class ErrorFilter implements ExceptionFilter {
     } else if (e instanceof HttpException) {
       status = e.getStatus();
       message = e.message;
+    } else if (e instanceof MetaPublishError) {
+      status = 400;
+      message = e.message;
+    } else if (e instanceof MetaGraphError) {
+      status = e.status && e.status >= 400 && e.status < 600 ? e.status : 400;
+      message = e.message;
+    } else {
+      status = 500;
+      message = "The request could not be completed. Please try again.";
     }
+
     // Only log unexpected server faults (>= 500) as api_error.
-    // Routine 401 unauthenticated checks (e.g., visitor loading login page) are standard HTTP behavior.
     if (status >= 500) {
       console.error(
         JSON.stringify({
@@ -114,7 +127,8 @@ class ErrorFilter implements ExceptionFilter {
           status,
           path: r.path,
           requestId: r.requestId,
-          message,
+          message: e instanceof Error ? e.message : message,
+          stack: e instanceof Error ? e.stack : undefined,
         }),
       );
     }
@@ -151,11 +165,14 @@ class HealthController {
 import { SocialController } from "./social.controller.js";
 import { StorageController } from "./storage/storage.controller.js";
 import { DocumentsController } from "./documents/documents.controller.js";
+import {VisualMediaController} from './documents/visual-media.controller.js';
 import { KnowledgeController } from "./knowledge/knowledge.controller.js";
+import { KnowledgeAutomationController } from "./knowledge/automation.controller.js";
 import { AIController } from "./ai.controller.js";
 import { AnalyticsController } from "./analytics.controller.js";
 import { BatchController } from "./batch/batch.controller.js";
 import { CalendarController } from "./calendar/calendar.controller.js";
+import { FestivalController } from "./calendar/festival.controller.js";
 import { NotificationsController } from "./notifications/notifications.controller.js";
 import { CommentsController } from "./comments/comments.controller.js";
 import { ClipdropController } from "./clipdrop/clipdrop.controller.js";
@@ -172,11 +189,14 @@ import { ClipdropService } from "./clipdrop/clipdrop.service.js";
     SocialController,
     StorageController,
     DocumentsController,
+    VisualMediaController,
     KnowledgeController,
+    KnowledgeAutomationController,
     AIController,
     AnalyticsController,
     BatchController,
     CalendarController,
+    FestivalController,
     NotificationsController,
     CommentsController,
     ClipdropController,

@@ -18,6 +18,7 @@ import { dateLabel, platforms, type Snapshot, type Post } from "../lib/model";
 import { useSession } from "../lib/session";
 import { request } from "../lib/api";
 import "../dashboard.css";
+import DailyPostingNotice from '../components/DailyPostingNotice';
 
 interface DashboardSummary {
   metrics: {
@@ -191,6 +192,7 @@ export default function Overview() {
 
   return (
     <>
+      <DailyPostingNotice />
       <div className="page-heading reference-heading">
         <div>
           <span className="overline" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
@@ -206,7 +208,7 @@ export default function Overview() {
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "5px",
-                color: "#10b981",
+                color: "var(--success)",
                 fontSize: "0.78rem",
                 fontWeight: 600,
                 background: "rgba(16, 185, 129, 0.12)",
@@ -367,7 +369,7 @@ export default function Overview() {
                 >
                   <PlatformIcon platform={p} />
                   <strong>{p}</strong>
-                  <small style={{ color: isConnected ? "#10b981" : undefined }}>
+                  <small style={{ color: isConnected ? "var(--success)" : undefined }}>
                     {isConnected ? "Connected" : "Not connected"}
                   </small>
                   <small>{a?.name || "1-Click OAuth connect"}</small>

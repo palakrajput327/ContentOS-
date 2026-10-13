@@ -12,11 +12,23 @@ import { assertPermission, WorkspaceRequired, type AuthedRequest } from "../secu
 import { pool, transaction, audit, type DB } from "../db.js";
 import { PostingSlotsService } from "./posting-slots.service.js";
 import { AutoSchedulerService } from "./auto-scheduler.js";
-import { publishingQueue } from "../queues.js";
+import { assertDailySlot } from './daily-posting.js';
+import { validateSchedule } from '../content.controller.js';
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { createPublishPlan } from '../publish-planner.js';
+import type { Platform } from '../platform-capabilities.js';
 
 @WorkspaceRequired()
 @Controller("calendar")
 export class CalendarController {
+  @Post('proposals/:id/schedule')
+  async scheduleProposal(@Req() req: AuthedRequest, @Param('id') contentId: string, @Body() body: { approve?: boolean; version: number }) {
+    assertPermission(req.workspace!.role, 'schedule');
+    if (body.approve === true) assertPermission(req.workspace!.role, 'approve');
+    if (!Number.isInteger(body.version)) throw new BadRequestException('The reviewed content version is required.');
+    return this.applyScheduleToPost(req, contentId, undefined, { approve: body.approve === true, version: body.version });
+  }
   /**
    * GET /api/v1/calendar/slots
    * Returns workspace posting slots.
@@ -46,10 +58,10 @@ export class CalendarController {
     }
 
     for (const slot of body.slots) {
-      if (slot.day_of_week < 0 || slot.day_of_week > 6) {
+      if (!Number.isInteger(slot.day_of_week) || slot.day_of_week < 0 || slot.day_of_week > 6) {
         throw new BadRequestException("day_of_week must be between 0 (Sunday) and 6 (Saturday).");
       }
-      if (!/^[0-2][0-9]:[0-5][0-9]$/.test(slot.time_of_day)) {
+      if (!/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(slot.time_of_day)) {
         throw new BadRequestException("time_of_day must be in HH:MM 24-hour format.");
       }
     }
@@ -135,9 +147,8 @@ export class CalendarController {
     }
 
     const contentRes = await pool.query(
-      `SELECT c.id, c.title, c.platforms, sp.scheduled_at
+      `SELECT DISTINCT c.id, c.title, c.platforms, c.scheduled_at
        FROM content c
-       LEFT JOIN scheduled_posts sp ON sp.content_id = c.id
        WHERE c.id = ANY($1) AND c.workspace_id = $2`,
       [body.contentIds, ws.id]
     );
@@ -187,8 +198,8 @@ export class CalendarController {
            JOIN content c ON c.id = sp.content_id
            WHERE c.workspace_id = $1
              AND sp.content_id != $2
-             AND sp.status = 'SCHEDULED'
-             AND ABS(EXTRACT(EPOCH FROM (sp.scheduled_at - $3::timestamptz))) < 600`,
+             AND sp.state IN ('PENDING','ENQUEUED')
+             AND ABS(EXTRACT(EPOCH FROM (sp.execute_at - $3::timestamptz))) < 600`,
           [ws.id, item.id, proposedIso]
         );
 
@@ -235,10 +246,12 @@ export class CalendarController {
   /**
    * Helper to schedule or reschedule a post in database and BullMQ queue.
    */
-  private async applyScheduleToPost(req: AuthedRequest, contentId: string, scheduledAtIso: string) {
+  private async applyScheduleToPost(req: AuthedRequest, contentId: string, scheduledAtIso?: string, proposal?: { approve: boolean; version: number }) {
     const ws = req.workspace!;
+    if (!z.string().uuid().safeParse(contentId).success) throw new BadRequestException('Valid content ID required.');
 
     return await transaction(async (client: DB) => {
+      const workspace = (await client.query('SELECT require_approval,timezone FROM workspaces WHERE id=$1 FOR UPDATE',[ws.id])).rows[0];
       const cRes = await client.query(
         `SELECT * FROM content WHERE id = $1 AND workspace_id = $2 FOR UPDATE`,
         [contentId, ws.id]
@@ -250,66 +263,36 @@ export class CalendarController {
 
       const post = cRes.rows[0];
 
-      // Update content state to SCHEDULED
-      await client.query(
-        `UPDATE content SET status = 'SCHEDULED', scheduled_at = $1, updated_at = NOW(), updated_by = $2 WHERE id = $3`,
-        [scheduledAtIso, req.user!.id, contentId]
-      );
-
-      // Fetch active social accounts for workspace
-      const accRes = await client.query(
-        `SELECT id FROM social_accounts WHERE workspace_id = $1 AND platform = ANY($2)`,
-        [ws.id, post.platforms || []]
-      );
-
-      // Clean up previous scheduled_posts records
-      await client.query(`DELETE FROM scheduled_posts WHERE content_id = $1`, [contentId]);
-
-      // Create new scheduled_posts entry
-      const accId = accRes.rows[0]?.id || null;
-      const spRes = await client.query(
-        `INSERT INTO scheduled_posts (id, workspace_id, content_id, account_id, scheduled_at, status)
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, 'SCHEDULED')
-         RETURNING *`,
-        [ws.id, contentId, accId, scheduledAtIso]
-      );
-
-      // Calculate delay ms for BullMQ publishing queue
-      const delayMs = Math.max(0, new Date(scheduledAtIso).getTime() - Date.now());
-
-      await publishingQueue.add(
-        "publish_job",
-        {
-          contentId,
-          workspaceId: ws.id,
-          scheduledPostId: spRes.rows[0].id,
-          scheduledAt: scheduledAtIso,
-        },
-        {
-          delay: delayMs,
-          jobId: `pub-${contentId}-${scheduledAtIso}`,
-          removeOnComplete: true,
+      if (proposal) {
+        if (post.version !== proposal.version) throw new BadRequestException('This post changed. Refresh and review its latest version.');
+        const plan = (await client.query("SELECT proposed_at FROM knowledge_content_plans WHERE workspace_id=$1 AND content_id=$2 AND state='REVIEW' FOR UPDATE", [ws.id,contentId])).rows[0];
+        if (!plan || !['NEEDS_REVIEW','APPROVED'].includes(post.status)) throw new BadRequestException('This proposal is no longer available for scheduling.');
+        scheduledAtIso = new Date(plan.proposed_at).toISOString();
+        if (proposal.approve && post.status === 'NEEDS_REVIEW') {
+          await client.query("INSERT INTO approvals(id,workspace_id,content_id,version,actor_id,decision) VALUES($1,$2,$3,$4,$5,'approve')",[randomUUID(),ws.id,contentId,post.version,req.user!.id]);
+          await client.query('UPDATE content SET approved_by=$3 WHERE id=$1 AND workspace_id=$2',[contentId,ws.id,req.user!.id]);
+          await audit(client,ws.id,req.user!.id,'content_approved','content',contentId,post.title,post.status);
+          post.status='APPROVED';
         }
-      );
+      }
+      const knowledge = (await client.query('SELECT 1 FROM knowledge_content_plans WHERE workspace_id=$1 AND content_id=$2 LIMIT 1',[ws.id,contentId])).rows.length > 0;
+      const at = new Date(scheduledAtIso || '');
+      const approvalStatus = post.status === 'SCHEDULED' ? (post.approved_by ? 'APPROVED' : !workspace.require_approval ? 'DRAFT' : post.status) : post.status;
+      validateSchedule(approvalStatus, workspace.require_approval || knowledge, at);
+      await assertDailySlot(client,ws.id,post,at);
+      const accounts = (await client.query(`SELECT a.id,a.platform FROM social_accounts a JOIN social_account_tokens t ON t.account_id=a.id WHERE a.workspace_id=$1 AND lower(a.platform)=ANY($2) AND lower(a.state)='connected' AND t.ciphertext IS NOT NULL AND (t.expires_at IS NULL OR t.expires_at>now())`,[ws.id,post.platforms.map((p:string)=>p.toLowerCase())])).rows;
+      if (!accounts.length || accounts.length !== post.platforms.length) throw new BadRequestException('Connect healthy publishing accounts for every target platform before scheduling.');
+      for (const platform of post.platforms) await createPublishPlan(client,post,platform as Platform);
+      const active = await client.query(`SELECT 1 FROM scheduled_posts WHERE workspace_id=$1 AND content_id=$2 AND state NOT IN ('PENDING','ENQUEUED','CANCELLED')`,[ws.id,contentId]);
+      if(active.rows.length) throw new BadRequestException('A publishing attempt has started. This schedule cannot be changed.');
+      await client.query(`UPDATE scheduled_posts SET state='CANCELLED' WHERE workspace_id=$1 AND content_id=$2`,[ws.id,contentId]);
+      const version=post.version+1;
+      for (const account of accounts) await client.query(`INSERT INTO scheduled_posts(id,workspace_id,content_id,account_id,content_version,execute_at,timezone) VALUES($1,$2,$3,$4,$5,$6,$7)`,[randomUUID(),ws.id,contentId,account.id,version,at,workspace.timezone]);
+      await client.query(`UPDATE content SET status='SCHEDULED',scheduled_at=$3,timezone=$4,version=$5,scheduled_by=$6,updated_by=$6,updated_at=now() WHERE id=$1 AND workspace_id=$2`,[contentId,ws.id,at,workspace.timezone,version,req.user!.id]);
+      await audit(client,ws.id,req.user!.id,'content_scheduled','content',contentId,post.title,post.status,{scheduledAt:scheduledAtIso});
+      return {id:contentId,title:post.title,status:'SCHEDULED',scheduledAt:scheduledAtIso};
 
-      await audit(
-        client,
-        ws.id,
-        req.user!.id,
-        "content_scheduled",
-        "content",
-        contentId,
-        post.title || "Untitled Post",
-        post.status,
-        { scheduledAt: scheduledAtIso }
-      );
 
-      return {
-        id: contentId,
-        title: post.title,
-        status: "SCHEDULED",
-        scheduledAt: scheduledAtIso,
-      };
     });
   }
 }

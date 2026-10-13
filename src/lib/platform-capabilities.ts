@@ -130,8 +130,10 @@ export function validatePlatformVariant(
   const title = variant.title || "";
   const mediaType = variant.mediaType || (variant.mediaAssetId || variant.mediaUrl ? "image" : "text");
 
-  // Caption length validation
-  if (caption.length > cap.maxCaptionLength) {
+  // Caption validation: Require non-empty caption
+  if (!caption || !caption.trim()) {
+    errors.push("Caption cannot be empty.");
+  } else if (caption.length > cap.maxCaptionLength) {
     errors.push(
       `${platform} caption exceeds limit of ${cap.maxCaptionLength} characters (${caption.length} chars).`
     );
@@ -150,10 +152,19 @@ export function validatePlatformVariant(
   // Media validation
   if (cap.requiresMedia) {
     const hasMedia = !!(variant.mediaAssetId || variant.mediaUrl);
-    if (!hasMedia && options?.isPublishing) {
-      errors.push(
-        `${platform} requires an attached ${cap.requiredMediaType || "image or video"} media asset.`
-      );
+    if (platform === "Instagram") {
+      // Instagram requires either an attached media asset or a non-empty caption for auto-poster generation
+      if (!hasMedia && (!caption || !caption.trim()) && options?.isPublishing) {
+        errors.push(
+          "Instagram requires an attached image/video or a caption for auto-poster generation."
+        );
+      }
+    } else {
+      if (!hasMedia && options?.isPublishing) {
+        errors.push(
+          `${platform} requires an attached ${cap.requiredMediaType || "image or video"} media asset.`
+        );
+      }
     }
   }
 

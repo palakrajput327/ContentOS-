@@ -29,6 +29,7 @@ import { MediaAssetType, ObjectStorageProvider } from "./storage.types.js";
 import { S3StorageProvider } from "./s3-storage.provider.js";
 import { LocalStorageProvider } from "./local-storage.provider.js";
 import { getStorageProvider } from "./storage.factory.js";
+import {assertStorageCapacity,storageUsage} from './storage-budget.js';
 
 export const presignUploadSchema = z.object({
   type: z.enum([
@@ -108,9 +109,10 @@ export class StorageController {
     const objectKey = `workspaces/${w}/${categoryFolder}/${assetId}/file${ext}`;
 
     return transaction(async (db) => {
+      await assertStorageCapacity(db,w,v.sizeBytes);
       await db.query(
         `INSERT INTO media_assets(id, workspace_id, type, storage_provider, bucket, object_key, mime_type, size_bytes, original_filename, status, created_by)
-         VALUES($1, $2, $3, 's3', $4, $5, $6, $7, $8, 'PENDING', $9)`,
+         VALUES($1, $2, $3, $10, $4, $5, $6, $7, $8, 'PENDING', $9)`,
         [
           assetId,
           w,
@@ -121,6 +123,7 @@ export class StorageController {
           v.sizeBytes,
           v.originalFilename,
           r.user.id,
+          provider instanceof LocalStorageProvider?'local':'s3',
         ],
       );
 
@@ -129,6 +132,7 @@ export class StorageController {
         objectKey,
         mimeType: v.mimeType,
         expiresInSeconds: 900, // 15 mins
+        sizeBytes:v.sizeBytes,
       });
 
       await audit(
@@ -180,6 +184,8 @@ export class StorageController {
     }
 
     const asset = assetRes.rows[0];
+    if(asset.status==='COMPLETED')return {assetId,status:'COMPLETED',filename:asset.original_filename,sizeBytes:Number(asset.size_bytes),mimeType:asset.mime_type};
+    if(asset.status!=='PENDING')throw new BadRequestException('This upload cannot be completed. Start a new upload.');
     const { provider } = getStorageProvider();
 
     // Verify object exists in storage
@@ -193,6 +199,11 @@ export class StorageController {
     const meta = await provider.getMetadata(asset.bucket, asset.object_key);
 
     return transaction(async (db) => {
+      await db.query('SELECT id FROM workspaces WHERE id=$1 FOR UPDATE',[w]);
+      const current=await db.query('SELECT id,size_bytes,status FROM media_assets WHERE id=$1 AND workspace_id=$2 AND deleted_at IS NULL FOR UPDATE',[assetId,w]);
+      if(!current.rowCount)throw new NotFoundException('Media asset not found in this workspace.');
+      if(meta.sizeBytes>Number(current.rows[0].size_bytes))throw new BadRequestException('Uploaded file exceeds its reserved size.');
+      if(meta.sizeBytes<=0)throw new BadRequestException('Uploaded file is empty.');
       await db.query(
         "UPDATE media_assets SET status = 'COMPLETED', size_bytes = $1, checksum = COALESCE($2, checksum) WHERE id = $3 AND workspace_id = $4",
         [meta.sizeBytes || asset.size_bytes, v.checksum || null, assetId, w],
@@ -219,6 +230,10 @@ export class StorageController {
       };
     });
   }
+
+  @WorkspaceRequired()
+  @Get('usage')
+  async usage(@Req() r:AuthedRequest) {return storageUsage(pool,r.workspace.id);}
 
   @WorkspaceRequired()
   @Get("media/:assetId")
@@ -306,6 +321,12 @@ export class StorageController {
     const { provider } = getStorageProvider();
 
     return transaction(async (db) => {
+      const references=await db.query(`SELECT 1 FROM documents WHERE workspace_id=$1 AND media_asset_id=$2
+        UNION ALL SELECT 1 FROM document_source_media WHERE workspace_id=$1 AND media_asset_id=$2
+        UNION ALL SELECT 1 FROM content WHERE workspace_id=$1 AND variants::text LIKE '%'||$2::text||'%'
+        UNION ALL SELECT 1 FROM content_versions WHERE workspace_id=$1 AND snapshot::text LIKE '%'||$2::text||'%'
+        UNION ALL SELECT 1 FROM document_knowledge WHERE workspace_id=$1 AND metadata::text LIKE '%'||$2::text||'%' LIMIT 1`,[w,assetId]);
+      if(references.rowCount)throw new BadRequestException('This file is linked to a source document. Preserve the original PDF and source references; unlink the document before deleting its media.');
       await db.query(
         "UPDATE media_assets SET deleted_at = NOW() WHERE id = $1 AND workspace_id = $2",
         [assetId, w],
@@ -313,6 +334,7 @@ export class StorageController {
 
       try {
         await provider.delete(asset.bucket, asset.object_key);
+        await db.query('UPDATE media_assets SET storage_purged_at=now() WHERE id=$1 AND workspace_id=$2',[assetId,w]);
       } catch (err) {
         console.warn("Storage delete warn:", err);
       }

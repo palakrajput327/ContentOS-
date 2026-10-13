@@ -195,35 +195,52 @@ export function Channels() {
                         : "A home for your longer stories."}
               </p>
               {accounts.map((a) => (
-                <div className="account-row" key={a.id}>
+                <div className="account-row" key={a.id} style={a.state?.includes('EXPIRED') ? { borderLeft: "3px solid #f59e0b", paddingLeft: "10px" } : {}}>
                   <div>
-                    <strong>{a.name}</strong>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <strong>{a.name}</strong>
+                      {a.state?.includes('EXPIRED') && (
+                        <span className="badge" style={{ background: "rgba(245, 158, 11, 0.15)", color: "var(--warning)", border: "1px solid rgba(245, 158, 11, 0.3)", fontSize: "0.7rem", padding: "1px 6px" }}>
+                          Token Expired
+                        </span>
+                      )}
+                    </div>
                     <small>
                       {a.state} ·{" "}
                       {a.lastSync ? dateLabel(a.lastSync) : "No live sync"}
                     </small>
-                    <small>{p === 'Instagram' ? 'Publishing: JPEG image + caption, Reels' : p === 'Facebook' ? 'Publishing: text, images, videos, Reels' : 'Permission: text publishing'}</small>
+                    <small>{p === 'Instagram' ? 'Publishing: JPEG image + caption, Carousel (1-20), Reels' : p === 'Facebook' ? 'Publishing: text, images, Carousel (1-20), videos, Reels' : 'Permission: text & media publishing'}</small>
                   </div>
                   {canManage && (
                     <div className="account-actions" style={{ display: "flex", gap: "8px" }}>
-                      <button
-                        className="text-button"
-                        disabled={busy}
-                        onClick={async () => {
-                          try {
-                            setBusy(true);
-                            await request(`/social/accounts/${a.id}/validate`, "POST");
-                            await query.invalidateQueries({ queryKey: ["workspace"] });
-                            toast.success("Connection re-validated");
-                          } catch (err) {
-                            toast.error((err as Error).message);
-                          } finally {
-                            setBusy(false);
-                          }
-                        }}
-                      >
-                        Validate
-                      </button>
+                      {a.state?.includes('EXPIRED') ? (
+                        <button
+                          className="text-button"
+                          style={{ color: "var(--warning)", fontWeight: 600 }}
+                          onClick={() => handleStartConnect(p)}
+                        >
+                          Reconnect
+                        </button>
+                      ) : (
+                        <button
+                          className="text-button"
+                          disabled={busy}
+                          onClick={async () => {
+                            try {
+                              setBusy(true);
+                              await request(`/social/accounts/${a.id}/validate`, "POST");
+                              await query.invalidateQueries({ queryKey: ["workspace"] });
+                              toast.success("Connection re-validated");
+                            } catch (err) {
+                              toast.error((err as Error).message);
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                        >
+                          Validate
+                        </button>
+                      )}
                       <button
                         className="text-button"
                         onClick={() => setRemove(a.id)}
@@ -263,15 +280,18 @@ export function Channels() {
             setError("");
           }
         }}
-        title="Connect Telegram"
-        description="Enter your channel @username and HTTP API Bot Token."
+        title="Connect Telegram Channel"
+        description="Enter your channel @username or Chat ID and HTTP API Bot Token."
       >
+        <div style={{ padding: "10px 12px", background: "rgba(99, 102, 241, 0.1)", borderRadius: "8px", marginBottom: "14px", border: "1px solid rgba(99, 102, 241, 0.2)", fontSize: "0.82rem", color: "var(--accent)" }}>
+          💡 <strong>Setup Step:</strong> Make sure your Telegram bot (from @BotFather) is added as an <strong>Administrator</strong> to your Channel with <em>"Post Messages"</em> permission enabled.
+        </div>
         <label>
           Channel @username or Chat ID
           <input
             value={channel}
             onChange={(e) => setChannel(e.target.value)}
-            placeholder="@your_channel or @hindustan_social_network"
+            placeholder="@your_channel or -100123456789"
             autoComplete="off"
           />
         </label>
@@ -910,18 +930,18 @@ export function Analytics() {
             value={range}
             onChange={(e) => setRange(e.target.value)}
             style={{
-              background: "rgba(255, 255, 255, 0.05)",
-              border: "1px solid rgba(255, 255, 255, 0.12)",
-              color: "#fff",
+              background: "var(--surface2)",
+              border: "1px solid var(--border)",
+              color: "var(--ink)",
               padding: "6px 12px",
               borderRadius: "8px",
               fontSize: "0.8rem",
             }}
           >
-            <option value="7d" style={{ background: "#18181b" }}>Last 7 days</option>
-            <option value="30d" style={{ background: "#18181b" }}>Last 30 days</option>
-            <option value="90d" style={{ background: "#18181b" }}>Last 90 days</option>
-            <option value="all" style={{ background: "#18181b" }}>All time</option>
+            <option value="7d" style={{ background: "var(--surface2)" }}>Last 7 days</option>
+            <option value="30d" style={{ background: "var(--surface2)" }}>Last 30 days</option>
+            <option value="90d" style={{ background: "var(--surface2)" }}>Last 90 days</option>
+            <option value="all" style={{ background: "var(--surface2)" }}>All time</option>
           </select>
 
           {/* Platform Selector */}
@@ -929,17 +949,17 @@ export function Analytics() {
             value={platformFilter}
             onChange={(e) => setPlatformFilter(e.target.value)}
             style={{
-              background: "rgba(255, 255, 255, 0.05)",
-              border: "1px solid rgba(255, 255, 255, 0.12)",
-              color: "#fff",
+              background: "var(--surface2)",
+              border: "1px solid var(--border)",
+              color: "var(--ink)",
               padding: "6px 12px",
               borderRadius: "8px",
               fontSize: "0.8rem",
             }}
           >
-            <option value="ALL" style={{ background: "#18181b" }}>All Platforms</option>
+            <option value="ALL" style={{ background: "var(--surface2)" }}>All Platforms</option>
             {platformsList.map((p) => (
-              <option key={p} value={p} style={{ background: "#18181b" }}>{p}</option>
+              <option key={p} value={p} style={{ background: "var(--surface2)" }}>{p}</option>
             ))}
           </select>
 
@@ -987,18 +1007,18 @@ export function Analytics() {
         <div className="stat-card">
           <div>
             Success Rate
-            <TrendingUp size={17} style={{ color: "#34d399" }} />
+            <TrendingUp size={17} style={{ color: "var(--success)" }} />
           </div>
-          <strong style={{ color: "#34d399" }}>{metrics.publishSuccessRate}%</strong>
+          <strong style={{ color: "var(--success)" }}>{metrics.publishSuccessRate}%</strong>
           <small>{metrics.failed} failed items</small>
         </div>
 
         <div className="stat-card">
           <div>
             AI vs Manual
-            <Sparkles size={17} style={{ color: "#a78bfa" }} />
+            <Sparkles size={17} style={{ color: "var(--accent)" }} />
           </div>
-          <strong style={{ color: "#a78bfa" }}>
+          <strong style={{ color: "var(--accent)" }}>
             {contentSource.aiGenerated} : {contentSource.manual}
           </strong>
           <small>AI-assisted / Manual</small>
@@ -1007,9 +1027,9 @@ export function Analytics() {
         <div className="stat-card">
           <div>
             Batch Operations
-            <Zap size={17} style={{ color: "#fbbf24" }} />
+            <Zap size={17} style={{ color: "var(--warning)" }} />
           </div>
-          <strong style={{ color: "#fbbf24" }}>{batchStats.totalBatches}</strong>
+          <strong style={{ color: "var(--warning)" }}>{batchStats.totalBatches}</strong>
           <small>{batchStats.completedBatches} completed jobs</small>
         </div>
       </div>
@@ -1020,7 +1040,7 @@ export function Analytics() {
         style={{
           marginBottom: "24px",
           border: "1px solid rgba(99, 102, 241, 0.3)",
-          background: "linear-gradient(180deg, rgba(20, 24, 38, 0.8) 0%, rgba(13, 16, 24, 0.95) 100%)",
+          background: "linear-gradient(180deg, var(--surface2) 0%, var(--surface2) 100%)",
           padding: "24px",
           borderRadius: "12px",
         }}
@@ -1032,7 +1052,7 @@ export function Analytics() {
             justifyContent: "space-between",
             flexWrap: "wrap",
             gap: "12px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+            borderBottom: "1px solid var(--border)",
             paddingBottom: "16px",
             marginBottom: "20px",
           }}
@@ -1047,16 +1067,16 @@ export function Analytics() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                color: "#a5b4fc",
+                color: "var(--accent)",
               }}
             >
               <Sparkles size={18} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "#f8fafc" }}>
+              <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--ink)" }}>
                 AI Content &amp; Rhythm Intelligence
               </h3>
-              <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "#94a3b8" }}>
+              <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "var(--muted)" }}>
                 {aiModel
                   ? `Synthesized with ${aiModel} from your real workspace posts and schedule`
                   : "Analyze your real content velocity and get AI-recommended publishing strategies"}
@@ -1086,11 +1106,11 @@ export function Analytics() {
 
         {generatingAi && (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
-            <Loader2 size={32} className="spin" style={{ margin: "0 auto 14px", color: "#818cf8" }} />
-            <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem", color: "#f1f5f9" }}>
+            <Loader2 size={32} className="spin" style={{ margin: "0 auto 14px", color: "var(--accent)" }} />
+            <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem", color: "var(--ink)" }}>
               AI is analyzing your real content trajectory…
             </h4>
-            <p style={{ margin: 0, fontSize: "0.825rem", color: "#94a3b8" }}>
+            <p style={{ margin: 0, fontSize: "0.825rem", color: "var(--muted)" }}>
               Evaluating publishing cadence, platform balance, and scheduling opportunities.
             </p>
           </div>
@@ -1104,8 +1124,8 @@ export function Analytics() {
                 display: "grid",
                 gridTemplateColumns: "180px 1fr",
                 gap: "20px",
-                background: "rgba(255, 255, 255, 0.03)",
-                border: "1px solid rgba(255, 255, 255, 0.06)",
+                background: "var(--surface2)",
+                border: "1px solid var(--border)",
                 borderRadius: "10px",
                 padding: "18px",
                 marginBottom: "20px",
@@ -1117,17 +1137,17 @@ export function Analytics() {
                   flexDirection: "column",
                   alignItems: "center",
                   justifyContent: "center",
-                  borderRight: "1px solid rgba(255, 255, 255, 0.08)",
+                  borderRight: "1px solid var(--border)",
                   paddingRight: "16px",
                   textAlign: "center",
                 }}
               >
-                <span style={{ fontSize: "0.75rem", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                <span style={{ fontSize: "0.75rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   Content Health
                 </span>
-                <span style={{ fontSize: "2.4rem", fontWeight: 700, color: "#38bdf8", lineHeight: 1.1, margin: "6px 0" }}>
+                <span style={{ fontSize: "2.4rem", fontWeight: 700, color: "var(--accent)", lineHeight: 1.1, margin: "6px 0" }}>
                   {aiInsights.healthScore}
-                  <span style={{ fontSize: "1rem", color: "#64748b" }}>/100</span>
+                  <span style={{ fontSize: "1rem", color: "var(--muted)" }}>/100</span>
                 </span>
                 <span
                   style={{
@@ -1135,7 +1155,7 @@ export function Analytics() {
                     padding: "2px 8px",
                     borderRadius: "6px",
                     background: "rgba(56, 189, 248, 0.12)",
-                    color: "#38bdf8",
+                    color: "var(--accent)",
                     fontWeight: 600,
                   }}
                 >
@@ -1144,10 +1164,10 @@ export function Analytics() {
               </div>
 
               <div>
-                <span style={{ fontSize: "0.75rem", color: "#a5b4fc", fontWeight: 600, textTransform: "uppercase" }}>
+                <span style={{ fontSize: "0.75rem", color: "var(--accent)", fontWeight: 600, textTransform: "uppercase" }}>
                   Executive Brief
                 </span>
-                <p style={{ margin: "6px 0 0", fontSize: "0.9rem", color: "#e2e8f0", lineHeight: 1.6 }}>
+                <p style={{ margin: "6px 0 0", fontSize: "0.9rem", color: "var(--ink)", lineHeight: 1.6 }}>
                   {aiInsights.executiveSummary}
                 </p>
               </div>
@@ -1170,11 +1190,11 @@ export function Analytics() {
                   padding: "16px",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", color: "#4ade80", fontWeight: 600, fontSize: "0.85rem" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", color: "var(--success)", fontWeight: 600, fontSize: "0.85rem" }}>
                   <CheckCircle2 size={16} />
                   <span>Key Strengths</span>
                 </div>
-                <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "0.825rem", color: "#cbd5e1", lineHeight: 1.6 }}>
+                <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "0.825rem", color: "var(--ink)", lineHeight: 1.6 }}>
                   {aiInsights.strengths.map((str, idx) => (
                     <li key={idx} style={{ marginBottom: "6px" }}>
                       {str}
@@ -1191,11 +1211,11 @@ export function Analytics() {
                   padding: "16px",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", color: "#fbbf24", fontWeight: 600, fontSize: "0.85rem" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", color: "var(--warning)", fontWeight: 600, fontSize: "0.85rem" }}>
                   <AlertCircle size={16} />
                   <span>Growth Opportunities</span>
                 </div>
-                <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "0.825rem", color: "#cbd5e1", lineHeight: 1.6 }}>
+                <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "0.825rem", color: "var(--ink)", lineHeight: 1.6 }}>
                   {aiInsights.opportunities.map((opp, idx) => (
                     <li key={idx} style={{ marginBottom: "6px" }}>
                       {opp}
@@ -1209,7 +1229,7 @@ export function Analytics() {
             <div style={{ marginBottom: "20px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
                 <Clock size={16} color="#38bdf8" />
-                <h4 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 600, color: "#f1f5f9" }}>
+                <h4 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 600, color: "var(--ink)" }}>
                   AI-Recommended Publishing Windows
                 </h4>
               </div>
@@ -1225,20 +1245,20 @@ export function Analytics() {
                   <div
                     key={idx}
                     style={{
-                      background: "rgba(255, 255, 255, 0.02)",
-                      border: "1px solid rgba(255, 255, 255, 0.06)",
+                      background: "var(--surface2)",
+                      border: "1px solid var(--border)",
                       borderRadius: "8px",
                       padding: "12px",
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
-                      <strong style={{ fontSize: "0.85rem", color: "#f8fafc" }}>{b.platform}</strong>
-                      <span style={{ fontSize: "0.72rem", color: "#38bdf8", fontWeight: 600 }}>{b.bestDays}</span>
+                      <strong style={{ fontSize: "0.85rem", color: "var(--ink)" }}>{b.platform}</strong>
+                      <span style={{ fontSize: "0.72rem", color: "var(--accent)", fontWeight: 600 }}>{b.bestDays}</span>
                     </div>
-                    <div style={{ fontSize: "0.8rem", color: "#a5b4fc", fontWeight: 500, marginBottom: "4px" }}>
+                    <div style={{ fontSize: "0.8rem", color: "var(--accent)", fontWeight: 500, marginBottom: "4px" }}>
                       ⏰ {b.bestTimeSlots}
                     </div>
-                    <p style={{ margin: 0, fontSize: "0.75rem", color: "#94a3b8", lineHeight: 1.4 }}>
+                    <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--muted)", lineHeight: 1.4 }}>
                       {b.rationale}
                     </p>
                   </div>
@@ -1255,11 +1275,11 @@ export function Analytics() {
                 padding: "16px",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", color: "#a5b4fc", fontWeight: 600, fontSize: "0.85rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", color: "var(--accent)", fontWeight: 600, fontSize: "0.85rem" }}>
                 <Zap size={16} />
                 <span>Strategic Action Plan</span>
               </div>
-              <ol style={{ margin: 0, paddingLeft: "20px", fontSize: "0.825rem", color: "#cbd5e1", lineHeight: 1.6 }}>
+              <ol style={{ margin: 0, paddingLeft: "20px", fontSize: "0.825rem", color: "var(--ink)", lineHeight: 1.6 }}>
                 {aiInsights.actionableRecommendations.map((rec, idx) => (
                   <li key={idx} style={{ marginBottom: "6px" }}>
                     {rec}
@@ -1272,8 +1292,8 @@ export function Analytics() {
 
         {!generatingAi && !aiInsights && (
           <div style={{ textAlign: "center", padding: "30px 20px" }}>
-            <Sparkles size={28} style={{ color: "#818cf8", margin: "0 auto 10px" }} />
-            <p style={{ margin: "0 0 16px", fontSize: "0.875rem", color: "#94a3b8", maxWidth: "480px", marginLeft: "auto", marginRight: "auto" }}>
+            <Sparkles size={28} style={{ color: "var(--accent)", margin: "0 auto 10px" }} />
+            <p style={{ margin: "0 0 16px", fontSize: "0.875rem", color: "var(--muted)", maxWidth: "480px", marginLeft: "auto", marginRight: "auto" }}>
               Click &quot;Generate AI Insights&quot; above to have our LLM engine scan your real workspace content, channel cadence, and draft backlog to provide strategic recommendations.
             </p>
           </div>
@@ -1304,23 +1324,23 @@ export function Analytics() {
                     alignItems: "center",
                     justifyContent: "space-between",
                     padding: "10px 12px",
-                    background: "rgba(255, 255, 255, 0.02)",
-                    border: "1px solid rgba(255, 255, 255, 0.05)",
+                    background: "var(--surface2)",
+                    border: "1px solid var(--border)",
                     borderRadius: "8px",
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <PlatformIcon platform={platformName} />
                     <div>
-                      <strong style={{ fontSize: "0.85rem", color: "#f1f5f9" }}>{platformName}</strong>
-                      <span style={{ display: "block", fontSize: "0.72rem", color: "#64748b" }}>
+                      <strong style={{ fontSize: "0.85rem", color: "var(--ink)" }}>{platformName}</strong>
+                      <span style={{ display: "block", fontSize: "0.72rem", color: "var(--muted)" }}>
                         {connectedAccount ? connectedAccount.name : "Not connected"}
                       </span>
                     </div>
                   </div>
 
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <span style={{ fontSize: "0.8rem", color: "#94a3b8" }}>{count} posts</span>
+                    <span style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{count} posts</span>
                     <span
                       style={{
                         fontSize: "0.7rem",
@@ -1329,7 +1349,7 @@ export function Analytics() {
                         background: connectedAccount
                           ? "rgba(34, 197, 94, 0.12)"
                           : "rgba(148, 163, 184, 0.08)",
-                        color: connectedAccount ? "#4ade80" : "#94a3b8",
+                        color: connectedAccount ? "var(--success)" : "var(--muted)",
                       }}
                     >
                       {connectedAccount ? "Connected" : "Inactive"}
@@ -1358,15 +1378,15 @@ export function Analytics() {
                     alignItems: "center",
                     justifyContent: "space-between",
                     padding: "8px 12px",
-                    background: "rgba(255, 255, 255, 0.02)",
+                    background: "var(--surface2)",
                     borderRadius: "6px",
                   }}
                 >
                   <div style={{ minWidth: 0, flex: 1, paddingRight: "10px" }}>
-                    <div style={{ fontSize: "0.825rem", color: "#f1f5f9", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <div style={{ fontSize: "0.825rem", color: "var(--ink)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {post.title}
                     </div>
-                    <small style={{ fontSize: "0.7rem", color: "#64748b" }}>
+                    <small style={{ fontSize: "0.7rem", color: "var(--muted)" }}>
                       {post.createdAt ? dateLabel(post.createdAt) : "Recently"}
                     </small>
                   </div>
@@ -1375,7 +1395,7 @@ export function Analytics() {
               ))}
             </div>
           ) : (
-            <p style={{ fontSize: "0.825rem", color: "#64748b", margin: 0, padding: "20px 0", textAlign: "center" }}>
+            <p style={{ fontSize: "0.825rem", color: "var(--muted)", margin: 0, padding: "20px 0", textAlign: "center" }}>
               No content published or drafted yet.
             </p>
           )}

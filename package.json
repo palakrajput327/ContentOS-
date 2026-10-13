@@ -7,6 +7,7 @@
     "dev": "vite --host localhost --configLoader runner",
     "build": "node scripts/build.mjs",
     "build:api": "tsc -p server/tsconfig.json",
+    "start": "node app.mjs",
     "start:api": "node --env-file=.env dist-api/phase-main.js",
     "migrate": "node --env-file=.env dist-api/migrate.js",
     "test": "npm run build:api && node scripts/test-auth.mjs",
@@ -19,6 +20,7 @@
     "postinstall": "npm run build:api"
   },
   "dependencies": {
+    "@napi-rs/canvas": "0.1.80",
     "@aws-sdk/client-s3": "^3.1141.0",
     "@aws-sdk/s3-request-presigner": "^3.1141.0",
     "@hookform/resolvers": "^3.10.0",

@@ -54,8 +54,8 @@ export class LocalStorageProvider implements ObjectStorageProvider {
     const targetPath = this.getFilePath(bucket, objectKey);
     try {
       await fs.unlink(targetPath);
-    } catch {
-      // Ignore if already deleted
+    } catch (error) {
+      if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;
     }
   }
 

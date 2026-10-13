@@ -179,7 +179,7 @@ export function ContentDiscussionPanel({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
+            borderBottom: "1px solid var(--border)",
             paddingBottom: "14px",
             marginBottom: "16px",
           }}
@@ -187,11 +187,11 @@ export function ContentDiscussionPanel({
           <div style={{ minWidth: 0, flex: 1, paddingRight: "12px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
               <StatusBadge status={post.status} />
-              <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
+              <span style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
                 Created by {post.creator}
               </span>
             </div>
-            <h2 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 600, color: "#f8fafc" }}>
+            <h2 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 600, color: "var(--ink)" }}>
               {post.title || "Untitled Content"}
             </h2>
           </div>
@@ -201,7 +201,7 @@ export function ContentDiscussionPanel({
             style={{
               background: "transparent",
               border: "none",
-              color: "#94a3b8",
+              color: "var(--muted)",
               cursor: "pointer",
               padding: "6px",
               borderRadius: "6px",
@@ -219,8 +219,8 @@ export function ContentDiscussionPanel({
             justifyContent: "space-between",
             flexWrap: "wrap",
             gap: "12px",
-            background: "rgba(255, 255, 255, 0.02)",
-            border: "1px solid rgba(255, 255, 255, 0.06)",
+            background: "var(--surface2)",
+            border: "1px solid var(--border)",
             borderRadius: "8px",
             padding: "10px 14px",
             marginBottom: "16px",
@@ -228,7 +228,7 @@ export function ContentDiscussionPanel({
         >
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <UserCheck size={16} color="#818cf8" />
-            <span style={{ fontSize: "0.825rem", color: "#cbd5e1", fontWeight: 500 }}>
+            <span style={{ fontSize: "0.825rem", color: "var(--ink)", fontWeight: 500 }}>
               Assignee:
             </span>
             <select
@@ -236,9 +236,9 @@ export function ContentDiscussionPanel({
               onChange={(e) => assignMutation.mutate(e.target.value || null)}
               disabled={assignMutation.isPending}
               style={{
-                background: "rgba(0, 0, 0, 0.3)",
-                border: "1px solid rgba(255, 255, 255, 0.12)",
-                color: "#f1f5f9",
+                background: "var(--surface2)",
+                border: "1px solid var(--border)",
+                color: "var(--ink)",
                 fontSize: "0.8rem",
                 padding: "4px 8px",
                 borderRadius: "6px",
@@ -287,7 +287,7 @@ export function ContentDiscussionPanel({
                 marginBottom: "12px",
               }}
             >
-              <span style={{ fontSize: "0.75rem", color: "#94a3b8", fontWeight: 500 }}>
+              <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontWeight: 500 }}>
                 Discussion Threads
               </span>
 
@@ -297,7 +297,7 @@ export function ContentDiscussionPanel({
                   onClick={() => setFilterResolved("unresolved")}
                   style={{
                     background: filterResolved === "unresolved" ? "rgba(99, 102, 241, 0.2)" : "transparent",
-                    color: filterResolved === "unresolved" ? "#a5b4fc" : "#64748b",
+                    color: filterResolved === "unresolved" ? "var(--accent)" : "#64748b",
                     border: "none",
                     borderRadius: "4px",
                     padding: "2px 8px",
@@ -311,7 +311,7 @@ export function ContentDiscussionPanel({
                   onClick={() => setFilterResolved("all")}
                   style={{
                     background: filterResolved === "all" ? "rgba(99, 102, 241, 0.2)" : "transparent",
-                    color: filterResolved === "all" ? "#a5b4fc" : "#64748b",
+                    color: filterResolved === "all" ? "var(--accent)" : "#64748b",
                     border: "none",
                     borderRadius: "4px",
                     padding: "2px 8px",
@@ -327,7 +327,7 @@ export function ContentDiscussionPanel({
             {/* Comment List */}
             <div style={{ maxHeight: "320px", overflowY: "auto", paddingRight: "4px", marginBottom: "16px" }}>
               {filteredComments.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "24px 0", color: "#64748b", fontSize: "0.85rem" }}>
+                <div style={{ textAlign: "center", padding: "24px 0", color: "var(--muted)", fontSize: "0.85rem" }}>
                   {filterResolved === "unresolved" && comments.length > 0
                     ? "All comment threads are resolved!"
                     : "No comments yet. Start the conversation below."}
@@ -337,8 +337,8 @@ export function ContentDiscussionPanel({
                   <div
                     key={c.id}
                     style={{
-                      background: c.resolved ? "rgba(255, 255, 255, 0.01)" : "rgba(255, 255, 255, 0.03)",
-                      border: "1px solid rgba(255, 255, 255, 0.06)",
+                      background: c.resolved ? "var(--surface2)" : "var(--surface2)",
+                      border: "1px solid var(--border)",
                       borderRadius: "8px",
                       padding: "12px",
                       marginBottom: "10px",
@@ -358,15 +358,15 @@ export function ContentDiscussionPanel({
                             justifyContent: "center",
                             fontSize: "0.7rem",
                             fontWeight: 700,
-                            color: "#fff",
+                            color: "var(--ink)",
                           }}
                         >
                           {c.author.name[0]}
                         </span>
-                        <strong style={{ fontSize: "0.85rem", color: "#f1f5f9" }}>
+                        <strong style={{ fontSize: "0.85rem", color: "var(--ink)" }}>
                           {c.author.name}
                         </strong>
-                        <span style={{ fontSize: "0.7rem", color: "#64748b" }}>
+                        <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>
                           {dateLabel(c.created_at)}
                         </span>
                       </div>
@@ -376,7 +376,7 @@ export function ContentDiscussionPanel({
                         style={{
                           background: "transparent",
                           border: "none",
-                          color: c.resolved ? "#34d399" : "#94a3b8",
+                          color: c.resolved ? "var(--success)" : "var(--muted)",
                           cursor: "pointer",
                           display: "flex",
                           alignItems: "center",
@@ -389,7 +389,7 @@ export function ContentDiscussionPanel({
                       </button>
                     </div>
 
-                    <p style={{ margin: "4px 0 8px", fontSize: "0.85rem", color: "#e2e8f0", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                    <p style={{ margin: "4px 0 8px", fontSize: "0.85rem", color: "var(--ink)", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
                       {c.comment}
                     </p>
 
@@ -403,7 +403,7 @@ export function ContentDiscussionPanel({
                         style={{
                           background: "transparent",
                           border: "none",
-                          color: replyParentId === c.id ? "#818cf8" : "#94a3b8",
+                          color: replyParentId === c.id ? "var(--accent)" : "var(--muted)",
                           fontSize: "0.75rem",
                           cursor: "pointer",
                           display: "flex",
@@ -422,14 +422,14 @@ export function ContentDiscussionPanel({
                         {c.replies.map((reply) => (
                           <div key={reply.id} style={{ marginTop: "8px" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "2px" }}>
-                              <strong style={{ fontSize: "0.8rem", color: "#cbd5e1" }}>
+                              <strong style={{ fontSize: "0.8rem", color: "var(--ink)" }}>
                                 {reply.author.name}
                               </strong>
-                              <span style={{ fontSize: "0.68rem", color: "#64748b" }}>
+                              <span style={{ fontSize: "0.68rem", color: "var(--muted)" }}>
                                 {dateLabel(reply.created_at)}
                               </span>
                             </div>
-                            <p style={{ margin: 0, fontSize: "0.8rem", color: "#cbd5e1", lineHeight: 1.4 }}>
+                            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--ink)", lineHeight: 1.4 }}>
                               {reply.comment}
                             </p>
                           </div>
@@ -444,15 +444,15 @@ export function ContentDiscussionPanel({
             {/* Comment Form */}
             <div
               style={{
-                background: "rgba(0, 0, 0, 0.25)",
-                border: "1px solid rgba(255, 255, 255, 0.08)",
+                background: "var(--surface2)",
+                border: "1px solid var(--border)",
                 borderRadius: "8px",
                 padding: "12px",
                 position: "relative",
               }}
             >
               {replyParentId && (
-                <div style={{ fontSize: "0.75rem", color: "#818cf8", marginBottom: "6px", display: "flex", alignItems: "center", gap: "4px" }}>
+                <div style={{ fontSize: "0.75rem", color: "var(--accent)", marginBottom: "6px", display: "flex", alignItems: "center", gap: "4px" }}>
                   <CornerDownRight size={12} />
                   Replying to comment thread…
                 </div>
@@ -468,21 +468,21 @@ export function ContentDiscussionPanel({
                   background: "transparent",
                   border: "none",
                   outline: "none",
-                  color: "#fff",
+                  color: "var(--ink)",
                   fontSize: "0.85rem",
                   resize: "none",
                 }}
               />
 
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "8px", borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: "8px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "8px", borderTop: "1px solid var(--border)", paddingTop: "8px" }}>
                 <div style={{ position: "relative" }}>
                   <button
                     type="button"
                     onClick={() => setShowMentionMenu(!showMentionMenu)}
                     style={{
-                      background: "rgba(255, 255, 255, 0.04)",
-                      border: "1px solid rgba(255, 255, 255, 0.1)",
-                      color: "#a5b4fc",
+                      background: "var(--surface2)",
+                      border: "1px solid var(--border)",
+                      color: "var(--accent)",
                       borderRadius: "6px",
                       padding: "4px 8px",
                       fontSize: "0.75rem",
@@ -503,8 +503,8 @@ export function ContentDiscussionPanel({
                         bottom: "100%",
                         left: 0,
                         marginBottom: "6px",
-                        background: "#1e2235",
-                        border: "1px solid rgba(255, 255, 255, 0.12)",
+                        background: "var(--surface2)",
+                        border: "1px solid var(--border)",
                         borderRadius: "8px",
                         boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
                         zIndex: 20,
@@ -521,14 +521,14 @@ export function ContentDiscussionPanel({
                             borderRadius: "4px",
                             cursor: "pointer",
                             fontSize: "0.8rem",
-                            color: "#f1f5f9",
+                            color: "var(--ink)",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
                           }}
                         >
                           <span>{m.name}</span>
-                          <span style={{ fontSize: "0.68rem", color: "#64748b" }}>{m.role}</span>
+                          <span style={{ fontSize: "0.68rem", color: "var(--muted)" }}>{m.role}</span>
                         </div>
                       ))}
                     </div>
@@ -553,7 +553,7 @@ export function ContentDiscussionPanel({
         {activeTab === "timeline" && (
           <div style={{ maxHeight: "420px", overflowY: "auto", paddingRight: "4px" }}>
             {timeline.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "24px 0", color: "#64748b", fontSize: "0.85rem" }}>
+              <div style={{ textAlign: "center", padding: "24px 0", color: "var(--muted)", fontSize: "0.85rem" }}>
                 No activity history recorded yet for this content item.
               </div>
             ) : (
@@ -562,8 +562,8 @@ export function ContentDiscussionPanel({
                   <div
                     key={item.id}
                     style={{
-                      background: "rgba(255, 255, 255, 0.02)",
-                      border: "1px solid rgba(255, 255, 255, 0.05)",
+                      background: "var(--surface2)",
+                      border: "1px solid var(--border)",
                       borderRadius: "8px",
                       padding: "10px 12px",
                       display: "flex",
@@ -571,26 +571,26 @@ export function ContentDiscussionPanel({
                       gap: "10px",
                     }}
                   >
-                    <div style={{ marginTop: "2px", color: item.type === "comment" ? "#a855f7" : "#38bdf8" }}>
+                    <div style={{ marginTop: "2px", color: item.type === "comment" ? "#a855f7" : "var(--accent)" }}>
                       {item.type === "comment" ? <MessageSquare size={14} /> : <Clock size={14} />}
                     </div>
 
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "2px" }}>
-                        <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#f1f5f9" }}>
+                        <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--ink)" }}>
                           {item.actor}
                         </span>
-                        <span style={{ fontSize: "0.7rem", color: "#64748b" }}>
+                        <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>
                           {dateLabel(item.created_at)}
                         </span>
                       </div>
 
-                      <div style={{ fontSize: "0.78rem", color: "#a5b4fc", fontWeight: 500 }}>
+                      <div style={{ fontSize: "0.78rem", color: "var(--accent)", fontWeight: 500 }}>
                         {item.action}
                       </div>
 
                       {item.details && (
-                        <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "#94a3b8", lineHeight: 1.4 }}>
+                        <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "var(--muted)", lineHeight: 1.4 }}>
                           {item.details}
                         </p>
                       )}

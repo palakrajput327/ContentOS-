@@ -12,6 +12,7 @@ import {
   ForbiddenException,
 } from "@nestjs/common";
 import { z } from "zod";
+import { assertDailySlot } from './calendar/daily-posting.js';
 import { randomUUID } from "node:crypto";
 import { audit, transaction, type DB } from "./db.js";
 import {
@@ -296,6 +297,9 @@ export class ContentController {
 
       if (!result.success || !result.providerPostId || result.providerPostId === 'unknown') {
         result.error ||= 'Provider did not confirm publication with a post ID. Check the account before retrying.';
+        if (result.error.includes('190') || result.error.includes('Access token expired') || result.error.includes('Reconnect Meta')) {
+          await db.query("UPDATE social_accounts SET state = 'TOKEN_EXPIRED', last_sync = NOW() WHERE id = $1", [acc.id]);
+        }
         await db.query(
           "UPDATE content SET status = $4, updated_at = NOW(), updated_by = $1 WHERE id = $2 AND workspace_id = $3",
           [r.user.id, contentId, w, content.status === 'PUBLISHED' ? 'PUBLISHED' : 'FAILED'],
@@ -602,20 +606,17 @@ export class ContentController {
             [r.workspace.id],
           )
         ).rows[0];
-        validateSchedule(p.status, ws.require_approval, at);
+        const knowledgeProposal = await db.query('SELECT 1 FROM knowledge_content_plans WHERE workspace_id=$1 AND content_id=$2 LIMIT 1',[r.workspace.id,id]);
+        validateSchedule(p.status, ws.require_approval || knowledgeProposal.rows.length > 0, at);
+        await assertDailySlot(db, r.workspace.id, p, at);
         for (const platform of p.platforms as string[]) {
-          if (!["LinkedIn", "Telegram", "YouTube"].includes(platform))
+          if (!Object.keys(PLATFORM_CAPABILITIES).includes(platform))
             throw new BadRequestException(
               `${platform} publishing is not available in this MVP.`,
             );
-          const body = p.variants[platform] || p.body;
-          const max = platform === "Telegram" ? 4096 : 3000;
+          await createPublishPlan(db,p,platform as Platform);
           if (platform === "YouTube")
             await validateYouTubeInput(db, r.workspace.id, p.youtube);
-          if (platform !== "YouTube" && body.length > max)
-            throw new BadRequestException(
-              `${platform} text must be no longer than ${max} characters.`,
-            );
           const account = (
             await db.query(
               "SELECT a.id FROM social_accounts a JOIN social_account_tokens t ON t.account_id=a.id WHERE a.workspace_id=$1 AND lower(a.platform)=lower($2) AND lower(a.state)='connected' AND (t.expires_at IS NULL OR t.expires_at>now() OR (lower(a.platform)='youtube' AND t.refresh_ciphertext IS NOT NULL)) FOR SHARE OF a",

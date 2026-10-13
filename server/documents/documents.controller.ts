@@ -6,6 +6,7 @@ import {
   Param,
   Post,
   Req,
+  Res,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
@@ -16,6 +17,11 @@ import { audit, pool, transaction } from "../db.js";
 import { assertPermission, WorkspaceRequired, type AuthedRequest } from "../security.js";
 import { Queue } from "bullmq";
 import { redis } from "../queues.js";
+import { getStorageProvider } from "../storage/storage.factory.js";
+import {storageUsage,readSourcePDF} from '../storage/storage-budget.js';
+import {extractSourceImages} from './extraction/source-images.js';
+import {createHash} from 'node:crypto';
+import {visionConfigured} from './visual-knowledge.service.js';
 
 const pdfProcessingQueue = new Queue("pdf-processing", {
   connection: redis,
@@ -135,7 +141,7 @@ export class DocumentsController {
     const w = r.workspace.id;
     const res = await pool.query(
       `SELECT id, media_asset_id, original_filename, mime_type, status, page_count,
-              processing_version, failure_code, failure_message, created_at,
+              processing_version, failure_code, failure_message, created_at, media_extraction_status, media_extraction_message,
               processing_started_at, processing_completed_at
        FROM documents WHERE id = $1 AND workspace_id = $2`,
       [documentId, w],
@@ -155,6 +161,76 @@ export class DocumentsController {
     }
 
     return { document: doc };
+  }
+
+  @WorkspaceRequired()
+  @Post(':documentId/source-media/extract')
+  async extractSourceMedia(@Req() r: AuthedRequest, @Param('documentId') documentId: string) {
+    assertPermission(r.workspace.role,'edit');
+    const doc = await pool.query(`SELECT m.bucket,m.object_key FROM documents d JOIN media_assets m ON m.id=d.media_asset_id
+      WHERE d.id=$1 AND d.workspace_id=$2 AND m.workspace_id=$2 AND m.deleted_at IS NULL AND m.status='COMPLETED'`,[documentId,r.workspace.id]);
+    if (!doc.rowCount) throw new NotFoundException('Document not found in this workspace.');
+    await audit(pool,r.workspace.id,r.user.id,'SOURCE_MEDIA_EXTRACTION_REQUESTED','document',documentId,'PDF source images');
+    const {provider} = getStorageProvider();
+    const pdf=await readSourcePDF(provider,doc.rows[0].bucket,doc.rows[0].object_key);
+    const {persistDocumentImages}=await import('./source-media.service.js');
+    await persistDocumentImages(documentId,r.workspace.id,pdf);
+    return this.sourceMedia(r,documentId);
+  }
+
+  @WorkspaceRequired()
+  @Get(':documentId/source-media/:sourceId/original')
+  async sourceOriginal(@Req() r:AuthedRequest,@Param('documentId') documentId:string,@Param('sourceId') sourceId:string,@Res() response:any) {
+    const result=await pool.query(`SELECT s.page_number,s.image_index,s.kind,m.checksum,p.bucket,p.object_key
+      FROM document_source_media s JOIN documents d ON d.id=s.document_id AND d.workspace_id=s.workspace_id
+      JOIN media_assets m ON m.id=s.media_asset_id AND m.workspace_id=s.workspace_id
+      JOIN media_assets p ON p.id=d.media_asset_id AND p.workspace_id=d.workspace_id
+      WHERE s.id=$1 AND s.document_id=$2 AND s.workspace_id=$3 AND m.deleted_at IS NULL AND p.deleted_at IS NULL AND p.status='COMPLETED'`,[sourceId,documentId,r.workspace.id]);
+    if(!result.rowCount)throw new NotFoundException('Source image not found in this workspace.');
+    const source=result.rows[0],{provider}=getStorageProvider();
+    const pdf=await readSourcePDF(provider,source.bucket,source.object_key);
+    let original:Buffer|undefined;
+    await extractSourceImages(pdf,async image=>{original=image.data;},{pageNumber:source.page_number,imageIndex:source.image_index,kind:source.kind,includeFiltered:true});
+    if(!original || createHash('sha256').update(original).digest('hex')!==source.checksum)
+      throw new BadRequestException('The source PDF/image changed. Re-extract images before using this source.');
+    response.setHeader('Content-Type','image/png');response.setHeader('Cache-Control','private, no-store');
+    response.setHeader('Content-Disposition',`attachment; filename="source-page-${source.page_number}.png"`);
+    return response.send(original);
+  }
+
+  @WorkspaceRequired()
+  @Get(":documentId/source-media")
+  async sourceMedia(@Req() r: AuthedRequest, @Param('documentId') documentId: string) {
+    const w = r.workspace.id;
+    const doc = await pool.query(`SELECT d.media_extraction_status,d.media_extraction_message,d.media_extraction_summary,m.bucket,m.object_key
+      FROM documents d JOIN media_assets m ON m.id=d.media_asset_id
+      WHERE d.id=$1 AND d.workspace_id=$2 AND m.workspace_id=$2 AND m.deleted_at IS NULL`,[documentId,w]);
+    if (!doc.rowCount) throw new NotFoundException('Document not found in this workspace.');
+    const result = await pool.query(`SELECT s.id AS source_id,s.page_number,s.image_index,s.kind,m.id AS asset_id,m.original_filename,m.metadata,m.bucket,m.object_key,m.size_bytes,a.ocr_status,a.vision_status,a.error_message,a.lease_until
+      FROM document_source_media s JOIN media_assets m ON m.id=s.media_asset_id
+      LEFT JOIN source_media_analysis a ON a.media_asset_id=m.id AND a.workspace_id=m.workspace_id
+      WHERE s.document_id=$1 AND s.workspace_id=$2 AND m.workspace_id=$2 AND m.deleted_at IS NULL AND m.status='COMPLETED'
+      ORDER BY s.page_number,s.image_index LIMIT 200`,[documentId,w]);
+    const {provider} = getStorageProvider();
+    const assets = await Promise.all(result.rows.map(async row => {
+      const meta = (typeof row.metadata === 'object' && row.metadata !== null) ? row.metadata : {};
+      return {
+        sourceId: row.source_id,
+        assetId: row.asset_id,
+        pageNumber: row.page_number,
+        imageIndex: row.image_index,
+        kind: row.kind,
+        previewOnly: meta.originalStored === false,
+        sizeBytes: Number(row.size_bytes),
+        width: meta.width,
+        height: meta.height,
+        reuseEligibility: meta.reuseEligibility || 'UNREVIEWED',
+        analysis:{ocrStatus:row.ocr_status||'PENDING',visionStatus:row.vision_status||'PENDING',error:row.error_message,processing:row.lease_until && new Date(row.lease_until).getTime()>Date.now()},
+        url: await provider.getSignedDownloadUrl(row.bucket, row.object_key, 900),
+      };
+    }));
+    return {visionAvailable:visionConfigured(),status:doc.rows[0].media_extraction_status,message:doc.rows[0].media_extraction_message,summary:doc.rows[0].media_extraction_summary,storage:await storageUsage(pool,w),
+      sourceUrl:await provider.getSignedDownloadUrl(doc.rows[0].bucket,doc.rows[0].object_key,900),assets};
   }
 
   @WorkspaceRequired()

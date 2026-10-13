@@ -35,7 +35,9 @@ export function NotificationBell() {
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    const closeOnEscape=(event:KeyboardEvent)=>{if(event.key==='Escape')setIsOpen(false);};
+    document.addEventListener('keydown',closeOnEscape);
+    return () => { document.removeEventListener("mousedown", handleClickOutside); document.removeEventListener('keydown',closeOnEscape); };
   }, []);
 
   async function fetchNotifications() {
@@ -78,13 +80,13 @@ export function NotificationBell() {
   function getNotificationIcon(type: string) {
     switch (type) {
       case "approved":
-        return <CheckCircle size={16} style={{ color: "#34d399" }} />;
+        return <CheckCircle size={16} style={{ color: "var(--success)" }} />;
       case "rejected":
       case "publish_failed":
       case "batch_failed":
-        return <XCircle size={16} style={{ color: "#f87171" }} />;
+        return <XCircle size={16} style={{ color: "var(--danger)" }} />;
       case "batch_partial":
-        return <AlertTriangle size={16} style={{ color: "#fbbf24" }} />;
+        return <AlertTriangle size={16} style={{ color: "var(--warning)" }} />;
       case "scheduled":
         return <Clock size={16} style={{ color: "#6366f1" }} />;
       default:
@@ -104,12 +106,14 @@ export function NotificationBell() {
           position: "relative",
           padding: "8px",
           borderRadius: "50%",
-          background: "rgba(255, 255, 255, 0.05)",
-          border: "1px solid rgba(255, 255, 255, 0.1)",
-          color: "#fff",
+          background: "var(--surface2)",
+          border: "1px solid var(--border)",
+          color: "var(--ink)",
           cursor: "pointer",
         }}
         aria-label="Notifications"
+        aria-expanded={isOpen}
+        aria-controls="notification-panel"
       >
         <Bell size={18} />
         {unreadCount > 0 && (
@@ -118,7 +122,7 @@ export function NotificationBell() {
               position: "absolute",
               top: "-2px",
               right: "-2px",
-              background: "#ef4444",
+              background: "#c63550",
               color: "#fff",
               fontSize: "0.7rem",
               fontWeight: 700,
@@ -139,7 +143,8 @@ export function NotificationBell() {
 
       {isOpen && (
         <div
-          className="panel"
+          id="notification-panel"
+          className="panel notification-panel"
           style={{
             position: "absolute",
             right: 0,
@@ -152,22 +157,22 @@ export function NotificationBell() {
             overflow: "hidden",
             zIndex: 9999,
             boxShadow: "0 12px 32px rgba(0, 0, 0, 0.5)",
-            border: "1px solid rgba(255, 255, 255, 0.12)",
-            background: "var(--color-bg-panel, #18181b)",
+            border: "1px solid var(--border)",
+            background: "var(--color-bg-panel, var(--surface2))",
           }}
         >
           {/* Header */}
           <div
             style={{
               padding: "14px 16px",
-              borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+              borderBottom: "1px solid var(--border)",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              background: "rgba(255, 255, 255, 0.02)",
+              background: "var(--surface2)",
             }}
           >
-            <strong style={{ fontSize: "0.95rem", color: "#fff", display: "flex", alignItems: "center", gap: "8px" }}>
+            <strong style={{ fontSize: "0.95rem", color: "var(--ink)", display: "flex", alignItems: "center", gap: "8px" }}>
               <Bell size={16} style={{ color: "#6366f1" }} />
               Notifications {unreadCount > 0 && `(${unreadCount})`}
             </strong>
@@ -203,7 +208,7 @@ export function NotificationBell() {
                   key={item.id}
                   style={{
                     padding: "12px 16px",
-                    borderBottom: "1px solid rgba(255, 255, 255, 0.04)",
+                    borderBottom: "1px solid var(--border)",
                     background: item.read ? "transparent" : "rgba(99, 102, 241, 0.06)",
                     display: "flex",
                     alignItems: "flex-start",

@@ -452,8 +452,10 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       }
       if (failures.length > 0) {
         const failMsg = failures.map((f) => `${f.platform}: ${f.error}`).join(" | ");
-        setError(`Failed for some accounts: ${failMsg}`);
-        toast.error(`Publishing issues on ${failures.length} account(s). Check error details.`);
+        setError(`Failed for ${failures.length} account(s): ${failMsg}`);
+        toast.error(`Publishing issues on ${failures.length} account(s). Check error details inside review modal.`);
+      } else if (successes.length === selected.length) {
+        setShowPreviewModal(false);
       }
 
     } catch (e) {
@@ -527,7 +529,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                 className="badge"
                 style={{
                   background: "rgba(99, 102, 241, 0.15)",
-                  color: "#818cf8",
+                  color: "var(--accent)",
                   border: "1px solid rgba(99, 102, 241, 0.3)",
                 }}
               >
@@ -591,7 +593,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
 
                     <div style={{ fontSize: "0.78rem" }}>
                       {isConnected ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: "4px", color: "#34d399" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "4px", color: "var(--success)" }}>
                           <CheckCircle2 size={12} />
                           <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {connectedAcc.name || `${p} Account`}
@@ -645,8 +647,8 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
               <div
                 style={{
                   padding: "14px 16px",
-                  background: "rgba(255, 255, 255, 0.02)",
-                  border: "1px dashed rgba(255, 255, 255, 0.2)",
+                  background: "var(--surface2)",
+                  border: "1px dashed var(--border-strong)",
                   borderRadius: "10px",
                   marginBottom: "16px",
                 }}
@@ -660,7 +662,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                     <button
                       type="button"
                       className="text-button"
-                      style={{ color: "#ef4444", fontSize: "0.8rem" }}
+                      style={{ color: "var(--danger)", fontSize: "0.8rem" }}
                       onClick={() => {
                         setMediaUrl("");
                         setMediaAssetId("");
@@ -679,7 +681,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                       <video src={mediaUrl} style={{ width: "110px", height: "80px", objectFit: "cover", borderRadius: "8px" }} />
                     )}
                     <div>
-                      <p style={{ margin: "0 0 4px", fontSize: "0.85rem", color: "#f1f5f9" }}>Media attached & routed across selected accounts</p>
+                      <p style={{ margin: "0 0 4px", fontSize: "0.85rem", color: "var(--ink)" }}>Media attached & routed across selected accounts</p>
                       <button type="button" className="text-button" onClick={()=>{setVisualTarget('shared');setShowClipdropModal(true);}}>Edit shared image in AI Visual Studio</button>
                     </div>
                   </div>
@@ -694,7 +696,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                       style={{
                         background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))",
                         border: "1px solid rgba(168, 85, 247, 0.4)",
-                        color: "#c084fc",
+                        color: "var(--accent)",
                         padding: "8px 14px",
                         borderRadius: "8px",
                         fontWeight: 600,
@@ -746,7 +748,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
               <div className="ai-controls" style={{ marginBottom: "16px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <Sparkles size={18} style={{ color: "#34d399" }} />
+                    <Sparkles size={18} style={{ color: "var(--success)" }} />
                     <h4 style={{ margin: 0, fontWeight: 700 }}>AI Creative Assistant</h4>
                   </div>
                 </div>
@@ -859,8 +861,8 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                       style={{
                         padding: "16px",
                         borderRadius: "12px",
-                        border: "1px solid rgba(255, 255, 255, 0.12)",
-                        background: "rgba(15, 23, 42, 0.6)",
+                        border: "1px solid var(--border)",
+                        background: "var(--surface2)",
                       }}
                     >
                       <summary style={{cursor:'pointer',fontWeight:600}}>{p} · {variants[p]?.metadata?.aiAdapted ? 'AI adapted' : variants[p]?.caption ? 'Custom caption' : 'Adapts before review'}{!validation.valid ? ' · Check media / format' : ''}</summary>
@@ -882,7 +884,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                             style={{
                               background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))",
                               border: "1px solid rgba(168, 85, 247, 0.4)",
-                              color: "#c084fc",
+                              color: "var(--accent)",
                               padding: "4px 10px",
                               borderRadius: "6px",
                               fontSize: "0.75rem",
@@ -896,11 +898,11 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                             <Wand2 size={13} /> Custom image
                           </button>
                           {validation.valid ? (
-                            <span className="badge" style={{ background: "rgba(16,185,129,0.15)", color: "#34d399" }}>
+                            <span className="badge" style={{ background: "rgba(16,185,129,0.15)", color: "var(--success)" }}>
                               <CheckCircle2 size={12} /> Valid
                             </span>
                           ) : (
-                            <span className="badge" style={{ background: "rgba(239,68,68,0.15)", color: "#f87171" }}>
+                            <span className="badge" style={{ background: "rgba(239,68,68,0.15)", color: "var(--danger)" }}>
                               <AlertTriangle size={12} /> Issues
                             </span>
                           )}
@@ -919,7 +921,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                       )}
                       {/* YouTube specific fields */}
                       {p === "YouTube" && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: "10px", background: "rgba(0,0,0,0.2)", padding: "12px", borderRadius: "8px" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "10px", background: "var(--border-strong)", padding: "12px", borderRadius: "8px" }}>
                           <label style={{ fontSize: "0.8rem", fontWeight: 600 }}>
                             YouTube Video Title (Required, max 100 chars)
                             <input
@@ -972,14 +974,14 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                           <span style={{ color: "var(--color-text-muted)" }}>{p} Caption Override</span>
                           <span
                             style={{
-                              color: currentCaption.length > (cap?.maxCaptionLength || 0) ? "#ef4444" : "#94a3b8",
+                              color: currentCaption.length > (cap?.maxCaptionLength || 0) ? "var(--danger)" : "var(--muted)",
                               fontWeight: 600,
                             }}
                           >
                             {currentCaption.length} / {cap?.maxCaptionLength || "∞"} chars
                           </span>
                         </div>
-                        <p style={{fontSize:'0.8rem',color:'var(--color-text-muted)',margin:0}}>{variants[p]?.metadata?.aiAdapted ? 'AI adapted for this channel' : variants[p]?.caption === undefined ? 'Adapted when you review' : 'Your caption'} · {variants[p]?.mediaAssetId || variants[p]?.mediaUrl ? 'Custom media' : 'Using attached media'}</p>
+                        <p style={{fontSize:'0.8rem',color: 'var(--color-text-muted)',margin:0}}>{variants[p]?.metadata?.aiAdapted ? 'AI adapted for this channel' : variants[p]?.caption === undefined ? 'Adapted when you review' : 'Your caption'} · {variants[p]?.mediaAssetId || variants[p]?.mediaUrl ? 'Custom media' : 'Using attached media'}</p>
                         {Array.isArray(varObj.metadata?.sourceEvidence) && varObj.metadata.sourceEvidence.length > 0 && <details>
                           <summary>Why did AI write this?</summary>
                           <p>Source inputs supplied during generation. Verify claims before approval.</p>
@@ -1001,7 +1003,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
 
                       {/* Validation Errors for this card */}
                       {!validation.valid && (
-                        <div style={{ padding: "8px 12px", background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: "6px", color: "#f87171", fontSize: "0.78rem" }}>
+                        <div style={{ padding: "8px 12px", background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: "6px", color: "var(--danger)", fontSize: "0.78rem" }}>
                           {validation.errors.map((err, idx) => (
                             <div key={idx}>• {err}</div>
                           ))}
@@ -1091,7 +1093,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
 
             {/* Title display if supported */}
             {focusedCap?.supportsTitle && (focusedVariant.title || title) && (
-              <h4 style={{ margin: "8px 0 4px", fontSize: "0.95rem", fontWeight: 700, color: "#f1f5f9" }}>
+              <h4 style={{ margin: "8px 0 4px", fontSize: "0.95rem", fontWeight: 700, color: "var(--ink)" }}>
                 {focusedVariant.title || title}
               </h4>
             )}
@@ -1101,11 +1103,11 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
             </p>
 
             {focusedVariant.mediaUrl && (
-              <div style={{ margin: "12px 0", borderRadius: "8px", overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)" }}>
+              <div style={{ margin: "12px 0", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border)" }}>
                 {focusedVariant.mediaType === "image" ? (
                   <img src={focusedVariant.mediaUrl} alt="Attached preview" style={{ width: "100%", maxHeight: "280px", objectFit: "cover", display: "block" }} />
                 ) : (
-                  <video src={focusedVariant.mediaUrl} controls style={{ width: "100%", maxHeight: "280px", display: "block", background: "#000" }} />
+                  <video src={focusedVariant.mediaUrl} controls style={{ width: "100%", maxHeight: "280px", display: "block", background: "var(--surface)" }} />
                 )}
               </div>
             )}
@@ -1129,6 +1131,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         variants={Object.fromEntries(selected.map(p=>[p,composedVariant(p)]))}
         onConfirmPublish={publishMultiAccount}
         isPublishing={busy === "publishing"}
+        publishError={error}
       />
 
       {/* Discussion Panel */}

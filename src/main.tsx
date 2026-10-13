@@ -6,6 +6,10 @@ import { Toaster } from "sonner";
 import App from "./AuthApp";
 import "./styles.css";
 import "./workspace.css";
+import "./design-system.css";
+import "./marketing.css";
+import { AppearanceProvider, useAppearance } from './lib/appearance';
+function Notifications() { const {theme}=useAppearance(); return <Toaster theme={theme} position="bottom-right" richColors />; }
 const client = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 15000 } },
 });
@@ -13,8 +17,7 @@ createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={client}>
       <BrowserRouter>
-        <App />
-        <Toaster theme="dark" position="bottom-right" richColors />
+        <AppearanceProvider><App /><Notifications /></AppearanceProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button, Logo } from "../components/ui";
 import { authRequest, type User } from "../lib/auth-client";
+import { ThemeToggle } from '../lib/appearance';
 
 export function AuthLayout({
   title,
@@ -54,6 +55,7 @@ export function AuthLayout({
         </small>
       </section>
       <section className="auth-form">
+        <div className="auth-appearance"><ThemeToggle /></div>
         <Link className="back-link" to="/">
           ← Back to home
         </Link>

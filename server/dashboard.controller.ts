@@ -34,7 +34,7 @@ export class DashboardController {
           (SELECT COUNT(*)::int FROM content WHERE workspace_id = $1 AND status = 'NEEDS_REVIEW') AS awaiting_approval,
           (SELECT COUNT(*)::int FROM content WHERE workspace_id = $1 AND status = 'APPROVED') AS approved_posts,
           (SELECT COUNT(*)::int FROM content WHERE workspace_id = $1) AS total_posts,
-          (SELECT COUNT(*)::int FROM content WHERE workspace_id = $1 AND (variants IS NOT NULL AND jsonb_array_length(variants) > 0)) AS ai_posts`,
+          (SELECT COUNT(*)::int FROM content WHERE workspace_id = $1 AND CASE WHEN jsonb_typeof(variants)='array' THEN jsonb_array_length(variants)>0 WHEN jsonb_typeof(variants)='object' THEN variants<>'{}'::jsonb ELSE false END) AS ai_posts`,
         [w],
       ),
       pool.query(

@@ -9,6 +9,7 @@ import { chunkDocumentPages } from "./documents/chunking/document-chunker.js";
 import { detectScannedPDF, TesseractOcrProvider } from "./documents/ocr/ocr.provider.js";
 import { ExtractionJobPayload } from "./documents/documents.types.js";
 import { KnowledgeService } from "./knowledge/knowledge.service.js";
+import { persistDocumentImages } from "./documents/source-media.service.js";
 
 const knowledgeService = new KnowledgeService();
 
@@ -85,6 +86,7 @@ export async function processPDFDocument(
     // 3. Extract Pages
     await pool.query("UPDATE documents SET status = 'EXTRACTING' WHERE id = $1", [documentId]);
     const { pageCount, pages } = await extractPDFPages(pdfBuffer);
+    await persistDocumentImages(documentId, workspaceId, pdfBuffer);
 
       // 4. OCR Detection & Handling
       const isScanned = detectScannedPDF(pages);

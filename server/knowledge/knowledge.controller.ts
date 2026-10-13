@@ -17,6 +17,7 @@ import { WorkspaceRequired, assertPermission, type AuthedRequest } from "../secu
 import { Queue } from "bullmq";
 import { redis } from "../queues.js";
 import { KnowledgeService } from "./knowledge.service.js";
+import {sourceReference} from '../documents/source-original.js';
 
 const knowledgeService = new KnowledgeService();
 
@@ -84,7 +85,7 @@ export class KnowledgeController {
     }
 
     // Clean up previously extracted knowledge so new comprehensive set populates cleanly
-    await pool.query("DELETE FROM document_knowledge WHERE document_id = $1 AND status = 'EXTRACTED'", [documentId]);
+    await pool.query("DELETE FROM document_knowledge WHERE document_id = $1 AND workspace_id=$2 AND status = 'EXTRACTED' AND COALESCE(metadata->>'origin','')<>'SOURCE_VISUAL'", [documentId,w]);
 
     const generationId = randomUUID();
 
@@ -154,7 +155,7 @@ export class KnowledgeController {
 
     const res = await pool.query(
       `SELECT id, generation_id, knowledge_type, knowledge_key, value,
-              page_start, page_end, source_excerpt, confidence, status, created_at, updated_at
+              page_start, page_end, source_excerpt, confidence, status, metadata, created_at, updated_at
        FROM document_knowledge
        WHERE document_id = $1 AND workspace_id = $2
        ORDER BY created_at DESC`,
@@ -175,7 +176,7 @@ export class KnowledgeController {
 
     const res = await pool.query(
       `SELECT id, generation_id, knowledge_type, knowledge_key, value,
-              page_start, page_end, source_excerpt, confidence, status, created_at, updated_at
+              page_start, page_end, source_excerpt, confidence, status, metadata, created_at, updated_at
        FROM document_knowledge
        WHERE id = $1 AND document_id = $2 AND workspace_id = $3`,
       [knowledgeId, documentId, w],
@@ -198,7 +199,7 @@ export class KnowledgeController {
     const w = r.workspace.id;
 
     const kRes = await pool.query(
-      "SELECT generation_id, knowledge_key FROM document_knowledge WHERE id = $1 AND document_id = $2 AND workspace_id = $3",
+      "SELECT generation_id, knowledge_key,metadata,page_start,page_end,source_excerpt FROM document_knowledge WHERE id = $1 AND document_id = $2 AND workspace_id = $3",
       [knowledgeId, documentId, w],
     );
 
@@ -207,6 +208,10 @@ export class KnowledgeController {
     }
 
     const { generation_id, knowledge_key } = kRes.rows[0];
+    if(kRes.rows[0].metadata?.origin==='SOURCE_VISUAL') {
+      const item=kRes.rows[0];await sourceReference(pool,w,documentId,item.metadata.sourceReferenceId);
+      return {sources:[{document_id:documentId,page_start:item.page_start,page_end:item.page_end,source_excerpt:item.source_excerpt,metadata:item.metadata}]};
+    }
 
     const sourcesRes = await pool.query(
       `SELECT s.id, s.generation_id, s.document_id, s.document_chunk_id,
@@ -253,7 +258,7 @@ export class KnowledgeController {
     const w = r.workspace.id;
 
     const itemRes = await pool.query(
-      "SELECT id, knowledge_key, status FROM document_knowledge WHERE id = $1 AND document_id = $2 AND workspace_id = $3",
+      "SELECT id, knowledge_key, status,metadata FROM document_knowledge WHERE id = $1 AND document_id = $2 AND workspace_id = $3",
       [knowledgeId, documentId, w],
     );
 
@@ -262,6 +267,10 @@ export class KnowledgeController {
     }
 
     const current = itemRes.rows[0];
+    if(current.metadata?.origin==='SOURCE_VISUAL' && ['CONFIRMED','LOCKED'].includes(v.status)) {
+      const source=await sourceReference(pool,w,documentId,current.metadata.sourceReferenceId);
+      if(source.media_asset_id!==current.metadata.sourceMediaAssetId || source.checksum!==current.metadata.originalChecksum)throw new BadRequestException('The visual source changed. Re-analyze and review its latest evidence.');
+    }
     if (current.status === "LOCKED" && r.workspace.role !== "Owner" && r.workspace.role !== "Admin") {
       throw new BadRequestException("Only Workspace Owner or Admin can modify a LOCKED knowledge item.");
     }
@@ -299,6 +308,7 @@ export class KnowledgeController {
     @Param("knowledgeId") knowledgeId: string,
   ) {
     const w = r.workspace.id;
+    assertPermission(r.workspace.role, "edit");
     await pool.query(
       "DELETE FROM document_knowledge WHERE id = $1 AND document_id = $2 AND workspace_id = $3",
       [knowledgeId, documentId, w],
@@ -313,6 +323,7 @@ export class KnowledgeController {
     @Param("documentId") documentId: string,
   ) {
     const w = r.workspace.id;
+    assertPermission(r.workspace.role, "edit");
     await pool.query(
       "DELETE FROM document_knowledge WHERE document_id = $1 AND workspace_id = $2",
       [documentId, w],

@@ -20,6 +20,7 @@ export interface SignedUploadInput {
   objectKey: string;
   mimeType: string;
   expiresInSeconds?: number;
+  sizeBytes?: number;
 }
 
 export interface SignedUrlResult {

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   X as CloseIcon,
   Send,
@@ -11,7 +11,7 @@ import {
   Info,
   ShieldCheck,
 } from "lucide-react";
-import { Button, PlatformIcon } from "./ui";
+import { Button, PlatformIcon, ModalFrame } from "./ui";
 import {
   PLATFORM_CAPABILITIES,
   normalizeVariant,
@@ -30,6 +30,7 @@ export interface PublishPreviewModalProps {
   youtube?: any;
   onConfirmPublish?: () => void;
   isPublishing?: boolean;
+  publishError?: string;
 }
 
 export function PublishPreviewModal({
@@ -42,11 +43,19 @@ export function PublishPreviewModal({
   youtube,
   onConfirmPublish,
   isPublishing = false,
+  publishError,
 }: PublishPreviewModalProps) {
   const [activePlatform, setActivePlatform] = useState<Platform>(
     platforms[0] || "LinkedIn"
   );
   const [showJsonPayload, setShowJsonPayload] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (publishError && scrollRef.current) {
+      scrollRef.current.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [publishError]);
 
   if (!isOpen) return null;
 
@@ -77,6 +86,13 @@ export function PublishPreviewModal({
     : "";
   const finalCaption = variantObj.caption || body || "";
   const mediaType = variantObj.mediaType || "text";
+  const isInstagramAutoPoster =
+    currentPlatform === "Instagram" &&
+    !variantObj.mediaAssetId &&
+    !variantObj.mediaUrl &&
+    finalCaption.trim().length > 0;
+
+  const isFormValid = validation.valid && finalCaption.trim().length > 0;
 
   const payloadJson = {
     platform: currentPlatform,
@@ -85,8 +101,9 @@ export function PublishPreviewModal({
     caption: finalCaption,
     media: {
       mediaAssetId: variantObj.mediaAssetId || null,
-      mediaUrl: variantObj.mediaUrl || null,
-      mediaType,
+      mediaUrl: isInstagramAutoPoster ? "[Auto-Generated JPEG Text Card]" : (variantObj.mediaUrl || null),
+      mediaType: isInstagramAutoPoster ? "image" : mediaType,
+      autoPoster: isInstagramAutoPoster,
     },
     capabilities: {
       maxChars: cap?.maxCaptionLength,
@@ -96,28 +113,12 @@ export function PublishPreviewModal({
   };
 
   return (
-    <div
-      className="modal-overlay"
-      style={{
-        position: "fixed",
-        inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.75)",
-        backdropFilter: "blur(6px)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 9999,
-        padding: "20px",
-      }}
-    >
+    <ModalFrame open={isOpen} onClose={()=>{if(!isPublishing)onClose();}} title="Review your post" className="publish-dialog">
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Review your post"
         className="modal-card"
         style={{
-          background: "#0f172a",
-          border: "1px solid rgba(255, 255, 255, 0.12)",
+          background: "var(--surface2)",
+          border: "1px solid var(--border)",
           borderRadius: "16px",
           width: "100%",
           maxWidth: "760px",
@@ -132,11 +133,11 @@ export function PublishPreviewModal({
         <div
           style={{
             padding: "20px 24px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+            borderBottom: "1px solid var(--border)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            background: "rgba(255, 255, 255, 0.02)",
+            background: "var(--surface2)",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -146,7 +147,7 @@ export function PublishPreviewModal({
                 height: "36px",
                 borderRadius: "10px",
                 background: "rgba(99, 102, 241, 0.15)",
-                color: "#818cf8",
+                color: "var(--accent)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -162,7 +163,7 @@ export function PublishPreviewModal({
                 style={{
                   margin: "2px 0 0",
                   fontSize: "0.8rem",
-                  color: "var(--color-text-muted, #94a3b8)",
+                  color: "var(--color-text-muted, var(--muted))",
                 }}
               >
                 Check the caption and media for each selected channel before publishing.
@@ -173,11 +174,12 @@ export function PublishPreviewModal({
             type="button"
             aria-label="Close post review"
             onClick={onClose}
+            disabled={isPublishing}
             style={{
               background: "none",
               border: "none",
               color: "var(--color-text-muted)",
-              cursor: "pointer",
+              cursor: isPublishing ? "not-allowed" : "pointer",
               padding: "4px",
             }}
           >
@@ -185,20 +187,44 @@ export function PublishPreviewModal({
           </button>
         </div>
 
+        {/* Sticky Real-time Publishing Error Banner */}
+        {publishError && (
+          <div
+            role="alert"
+            style={{
+              padding: "14px 24px",
+              background: "rgba(239, 68, 68, 0.2)",
+              borderBottom: "1px solid rgba(239, 68, 68, 0.4)",
+              color: "var(--danger)",
+              fontSize: "0.88rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+            }}
+          >
+            <AlertTriangle size={20} style={{ flexShrink: 0 }} />
+            <div>
+              <strong style={{ display: "block", fontSize: "0.9rem", marginBottom: "2px" }}>
+                Publishing Failed
+              </strong>
+              <span>{publishError}</span>
+            </div>
+          </div>
+        )}
+
         {/* Platform Tabs */}
         <div
           style={{
             display: "flex",
             gap: "8px",
             padding: "12px 24px",
-            background: "rgba(0, 0, 0, 0.2)",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.06)",
+            background: "var(--surface2)",
+            borderBottom: "1px solid var(--border)",
             overflowX: "auto",
           }}
         >
           {platforms.map((p) => {
             const isActive = currentPlatform === p;
-            const pCap = PLATFORM_CAPABILITIES[p];
             const pRaw = variants[p];
             const pVar = normalizeVariant(pRaw, body, title);
             const pValid = validatePlatformVariant(p, pVar, { isPublishing: true }).valid;
@@ -229,9 +255,9 @@ export function PublishPreviewModal({
                 <PlatformIcon platform={p} />
                 {p}
                 {pValid ? (
-                  <CheckCircle2 size={13} style={{ color: "#34d399" }} />
+                  <CheckCircle2 size={13} style={{ color: "var(--success)" }} />
                 ) : (
-                  <AlertTriangle size={13} style={{ color: "#f87171" }} />
+                  <AlertTriangle size={13} style={{ color: "var(--danger)" }} />
                 )}
               </button>
             );
@@ -239,7 +265,34 @@ export function PublishPreviewModal({
         </div>
 
         {/* Payload Body Content */}
-        <div style={{ padding: "24px", overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: "20px" }}>
+        <div
+          ref={scrollRef}
+          style={{ padding: "24px", overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: "20px" }}
+        >
+          {/* Real-time Publishing Error Banner */}
+          {publishError && (
+            <div
+              role="alert"
+              style={{
+                padding: "14px 16px",
+                borderRadius: "10px",
+                background: "rgba(239, 68, 68, 0.15)",
+                border: "1px solid rgba(239, 68, 68, 0.4)",
+                color: "var(--danger)",
+                fontSize: "0.88rem",
+                display: "flex",
+                alignItems: "flex-start",
+                gap: "10px",
+              }}
+            >
+              <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: "2px" }} />
+              <div>
+                <strong style={{ display: "block", marginBottom: "3px" }}>Publishing Failed</strong>
+                <span>{publishError}</span>
+              </div>
+            </div>
+          )}
+
           {/* Validation Status Box */}
           {!validation.valid ? (
             <div
@@ -248,12 +301,12 @@ export function PublishPreviewModal({
                 borderRadius: "10px",
                 background: "rgba(239, 68, 68, 0.12)",
                 border: "1px solid rgba(239, 68, 68, 0.3)",
-                color: "#f87171",
+                color: "var(--danger)",
                 fontSize: "0.85rem",
               }}
             >
               <strong style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }}>
-                <AlertTriangle size={16} /> Validation Warning for {currentPlatform}
+                <AlertTriangle size={16} /> Validation Issues for {currentPlatform}
               </strong>
               <ul style={{ margin: 0, paddingLeft: "20px" }}>
                 {validation.errors.map((err, idx) => (
@@ -268,7 +321,7 @@ export function PublishPreviewModal({
                 borderRadius: "8px",
                 background: "rgba(16, 185, 129, 0.1)",
                 border: "1px solid rgba(16, 185, 129, 0.25)",
-                color: "#34d399",
+                color: "var(--success)",
                 fontSize: "0.85rem",
                 display: "flex",
                 alignItems: "center",
@@ -276,7 +329,11 @@ export function PublishPreviewModal({
               }}
             >
               <CheckCircle2 size={16} />
-              <span>Content format checks passed for {currentPlatform}. Publishing may still require channel permissions and accessible media.</span>
+              <span>
+                {isInstagramAutoPoster
+                  ? `Content format checks passed for ${currentPlatform}. Auto-poster will create a branded JPEG card from your caption.`
+                  : `Content format checks passed for ${currentPlatform}. Ready to publish.`}
+              </span>
             </div>
           )}
 
@@ -286,34 +343,34 @@ export function PublishPreviewModal({
               display: "grid",
               gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
               gap: "12px",
-              background: "rgba(255, 255, 255, 0.02)",
+              background: "var(--surface2)",
               padding: "12px 16px",
               borderRadius: "10px",
-              border: "1px solid rgba(255, 255, 255, 0.06)",
+              border: "1px solid var(--border)",
               fontSize: "0.8rem",
             }}
           >
             <div>
               <span style={{ color: "var(--color-text-muted)", display: "block" }}>Max Caption</span>
-              <strong style={{ color: "#f1f5f9" }}>{cap?.maxCaptionLength} chars</strong>
+              <strong style={{ color: "var(--ink)" }}>{cap?.maxCaptionLength} chars</strong>
             </div>
             <div>
               <span style={{ color: "var(--color-text-muted)", display: "block" }}>Title Support</span>
-              <strong style={{ color: cap?.supportsTitle ? "#34d399" : "var(--color-text-muted)" }}>
+              <strong style={{ color: cap?.supportsTitle ? "var(--success)" : "var(--color-text-muted)" }}>
                 {cap?.supportsTitle ? (cap.requiresTitle ? "Required" : "Optional") : "Not Supported"}
               </strong>
             </div>
             <div>
               <span style={{ color: "var(--color-text-muted)", display: "block" }}>Media Requirement</span>
-              <strong style={{ color: cap?.requiresMedia ? "#fbbf24" : "#34d399" }}>
-                {cap?.requiresMedia ? `${cap.requiredMediaType || "Image/Video"} Required` : "Optional"}
+              <strong style={{ color: cap?.requiresMedia ? "var(--warning)" : "var(--success)" }}>
+                {isInstagramAutoPoster ? "Auto-Poster (JPEG Card)" : (cap?.requiresMedia ? `${cap.requiredMediaType || "Image/Video"} Required` : "Optional")}
               </strong>
             </div>
             <div>
               <span style={{ color: "var(--color-text-muted)", display: "block" }}>Current Length</span>
               <strong
                 style={{
-                  color: finalCaption.length > (cap?.maxCaptionLength || 0) ? "#ef4444" : "#f1f5f9",
+                  color: !finalCaption.trim() ? "var(--danger)" : finalCaption.length > (cap?.maxCaptionLength || 0) ? "var(--danger)" : "var(--success)",
                 }}
               >
                 {finalCaption.length} chars
@@ -331,8 +388,8 @@ export function PublishPreviewModal({
                 style={{
                   padding: "10px 14px",
                   borderRadius: "8px",
-                  background: "rgba(0, 0, 0, 0.3)",
-                  border: "1px solid rgba(255, 255, 255, 0.1)",
+                  background: "var(--surface2)",
+                  border: "1px solid var(--border)",
                   fontSize: "0.9rem",
                   fontWeight: 600,
                 }}
@@ -345,50 +402,67 @@ export function PublishPreviewModal({
           {/* Caption Box */}
           <div>
             <label style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text-muted)", marginBottom: "4px", display: "block" }}>
-              Caption
+              Effective Caption
             </label>
             <div
               style={{
                 padding: "12px 14px",
                 borderRadius: "8px",
-                background: "rgba(0, 0, 0, 0.3)",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
+                background: "var(--surface2)",
+                border: "1px solid var(--border)",
                 fontSize: "0.88rem",
                 lineHeight: 1.5,
                 whiteSpace: "pre-wrap",
               }}
             >
-              {finalCaption || <em style={{ color: "var(--color-text-muted)" }}>Empty caption</em>}
+              {finalCaption || <em style={{ color: "var(--danger)" }}>Empty caption — Caption cannot be empty</em>}
             </div>
           </div>
 
           {/* Media Info */}
           <div>
             <label style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text-muted)", marginBottom: "4px", display: "block" }}>
-              Attached media
+              Attached Media / Format
             </label>
             <div
               style={{
                 padding: "12px 14px",
                 borderRadius: "8px",
-                background: "rgba(0, 0, 0, 0.3)",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
+                background: "var(--surface2)",
+                border: "1px solid var(--border)",
                 display: "flex",
                 alignItems: "center",
                 gap: "12px",
                 fontSize: "0.85rem",
               }}
             >
-              {mediaType === "video" ? (
-                <VideoIcon size={20} style={{ color: "#818cf8" }} />
+              {isInstagramAutoPoster ? (
+                <ImageIcon size={20} style={{ color: "var(--accent)" }} />
+              ) : mediaType === "video" ? (
+                <VideoIcon size={20} style={{ color: "var(--accent)" }} />
               ) : mediaType === "image" ? (
-                <ImageIcon size={20} style={{ color: "#34d399" }} />
+                <ImageIcon size={20} style={{ color: "var(--success)" }} />
               ) : (
                 <FileText size={20} style={{ color: "var(--color-text-muted)" }} />
               )}
               <div>
-                <strong style={{ display: "block" }}>{mediaType === 'text' ? 'Text only' : mediaType === 'image' ? 'Image with caption' : 'Video with caption'}</strong>
-                {mediaType === 'image' && variantObj.mediaUrl && <img src={variantObj.mediaUrl} alt={`${currentPlatform} image preview`} style={{display:'block',maxWidth:'100%',maxHeight:200,objectFit:'contain',borderRadius:8,marginTop:8}} />}
+                <strong style={{ display: "block" }}>
+                  {isInstagramAutoPoster
+                    ? "Auto-generated JPEG text card (Auto-poster)"
+                    : mediaType === "text"
+                    ? "Text only"
+                    : mediaType === "image"
+                    ? "Image with caption"
+                    : "Video with caption"}
+                </strong>
+                {isInstagramAutoPoster && (
+                  <p style={{ margin: "4px 0 0", fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
+                    Instagram requires media. ContentOS will render a high-quality JPEG image card from your text caption during publishing.
+                  </p>
+                )}
+                {!isInstagramAutoPoster && mediaType === "image" && variantObj.mediaUrl && (
+                  <img src={variantObj.mediaUrl} alt={`${currentPlatform} image preview`} style={{ display: "block", maxWidth: "100%", maxHeight: 200, objectFit: "contain", borderRadius: 8, marginTop: 8 }} />
+                )}
               </div>
             </div>
           </div>
@@ -410,10 +484,10 @@ export function PublishPreviewModal({
                   marginTop: "8px",
                   padding: "12px",
                   borderRadius: "8px",
-                  background: "#020617",
-                  border: "1px solid rgba(255, 255, 255, 0.1)",
+                  background: "var(--surface)",
+                  border: "1px solid var(--border)",
                   fontSize: "0.78rem",
-                  color: "#a5b4fc",
+                  color: "var(--accent)",
                   overflowX: "auto",
                 }}
               >
@@ -427,35 +501,41 @@ export function PublishPreviewModal({
         <div
           style={{
             padding: "16px 24px",
-            borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+            borderTop: "1px solid var(--border)",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            background: "rgba(0, 0, 0, 0.2)",
+            background: "var(--surface2)",
             flexWrap: "wrap",
             gap: "12px",
           }}
         >
           <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-            {platforms.length} selected channels · Results reported separately
+            {platforms.length} selected channel(s) · Results reported separately
           </span>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-            <Button variant="secondary" onClick={onClose}>
+            <Button variant="secondary" onClick={onClose} disabled={isPublishing}>
               Close Preview
             </Button>
             {onConfirmPublish && (
               <Button
                 variant="primary"
                 onClick={onConfirmPublish}
-                disabled={isPublishing}
+                disabled={isPublishing || !isFormValid}
+                style={{
+                  opacity: isPublishing || !isFormValid ? 0.6 : 1,
+                  cursor: isPublishing || !isFormValid ? "not-allowed" : "pointer",
+                }}
               >
                 <Send size={15} />
-                {isPublishing ? "Publishing..." : "Confirm & Publish Now"}
+                {isPublishing
+                  ? `Publishing to ${platforms.length} channel(s)...`
+                  : "Confirm & Publish Now"}
               </Button>
             )}
           </div>
         </div>
       </div>
-    </div>
+    </ModalFrame>
   );
 }

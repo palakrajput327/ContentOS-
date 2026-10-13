@@ -27,6 +27,11 @@ import { ClipdropController } from "./clipdrop/clipdrop.controller.js";
 import { ClipdropService } from "./clipdrop/clipdrop.service.js";
 import { ProviderError } from "./providers/social.js";
 import { pool } from "./db.js";
+import { KnowledgeAutomationController } from "./knowledge/automation.controller.js";
+import {VisualMediaController} from './documents/visual-media.controller.js';
+import {DocumentsController} from './documents/documents.controller.js';
+import {KnowledgeController} from './knowledge/knowledge.controller.js';
+import {StorageController} from './storage/storage.controller.js';
 @Catch()
 class ErrorFilter implements ExceptionFilter {
   catch(error: unknown, host: ArgumentsHost) {
@@ -73,6 +78,11 @@ class ErrorFilter implements ExceptionFilter {
     ContentController,
     SocialController,
     AIController,
+    KnowledgeAutomationController,
+    VisualMediaController,
+    DocumentsController,
+    KnowledgeController,
+    StorageController,
     AnalyticsController,
     ClipdropController,
   ],

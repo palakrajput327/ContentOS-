@@ -1,0 +1,63 @@
+.festival-page {
+  max-width: 1200px;
+  margin: auto;
+  padding: 24px;
+}
+.festival-page h1 {
+  font-size: 28px;
+}
+.festival-card {
+  border: 1px solid var(--border, var(--border));
+  border-radius: 14px;
+  padding: 24px;
+  margin: 22px 0;
+  background: var(--surface, transparent);
+}
+.festival-fields,
+.festival-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 18px;
+}
+.festival-page label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+.festival-page input:not([type="checkbox"]),
+.festival-page select {
+  padding: 10px;
+  border: 1px solid var(--border, var(--border));
+  border-radius: 8px;
+  background: inherit;
+  color: inherit;
+}
+.festival-account {
+  flex-direction: row !important;
+  align-items: center;
+}
+.festival-preview {
+  width: 100%;
+  max-width: 480px;
+  margin-top: 20px;
+  border-radius: 12px;
+}
+.festival-history {
+  width: 120px;
+  display: block;
+  margin-top: 12px;
+  border-radius: 8px;
+}
+.festival-record {
+  border-top: 1px solid var(--border, var(--border));
+  padding: 18px 0;
+}
+.festival-warning {
+  color: #b7791f;
+}
+.festival-grid article {
+  padding: 16px;
+  border: 1px solid var(--border, var(--border));
+  border-radius: 10px;
+}

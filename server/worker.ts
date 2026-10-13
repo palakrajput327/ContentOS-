@@ -13,8 +13,9 @@ import { createPublishPlan } from "./publish-planner.js";
 import { PLATFORM_CAPABILITIES, type Platform } from "./platform-capabilities.js";
 import { pdfWorker } from "./pdf-worker.js";
 import { aiWorker } from "./ai-worker.js";
+import { knowledgeAutomationQueue, knowledgeAutomationWorker } from './knowledge/automation.worker.js';
 
-async function aggregate(
+export async function aggregate(
   db: DB,
   contentId: string,
   wid: string,
@@ -27,6 +28,7 @@ async function aggregate(
     )
   ).rows;
   const states = rows.map((r) => r.state);
+  if (!states.length) return;
   const status =
     states.every((s) => s === "PUBLISHED") &&
     rows.every((r) => r.processing_status !== "processing")
@@ -41,7 +43,8 @@ async function aggregate(
     [contentId, wid, status],
   );
 }
-async function claim(id: string) {
+
+export async function claim(id: string, now: Date = new Date()) {
   return transaction(async (db) => {
     const raw = (
       await db.query(
@@ -76,6 +79,8 @@ async function claim(id: string) {
       return null;
     }
     if (job.state === "PROCESSING") {
+      // Duplicate queue delivery must not change an attempt still in flight.
+      if (job.attempt_started_at && now.getTime() - new Date(job.attempt_started_at).getTime() < 10 * 60 * 1000) return null;
       await db.query(
         "UPDATE scheduled_posts SET state='UNCERTAIN',error_code='INTERRUPTED_ATTEMPT' WHERE id=$1",
         [id],
@@ -92,7 +97,7 @@ async function claim(id: string) {
       );
       return null;
     }
-    if (new Date(job.execute_at).getTime() > Date.now())
+    if (new Date(job.execute_at).getTime() > now.getTime())
       throw new Error("Job arrived before execution time");
     const account = (
       await db.query(
@@ -105,7 +110,7 @@ async function claim(id: string) {
       String(account.state).toLowerCase() !== "connected" ||
       (String(account.platform).toLowerCase() !== "youtube" &&
         account.expires_at &&
-        new Date(account.expires_at).getTime() <= Date.now())
+        new Date(account.expires_at).getTime() <= now.getTime())
     ) {
       await db.query(
         "UPDATE scheduled_posts SET state='FAILED',error_code='RECONNECT_REQUIRED' WHERE id=$1",
@@ -134,42 +139,61 @@ async function claim(id: string) {
     return { job, content, account };
   });
 }
-const worker = new Worker(
-  "social-publishing",
-  async (job) => {
-    const c = await claim(job.data.id);
-    if (!c) return;
-    const { account, content, job: record } = c;
-    if (String(account.platform).toLowerCase() === "youtube") {
-      await publishYouTubeRecord(record, content, account);
-      return;
-    }
-    let providerId: string;
-    try {
-      const metaPlatform = String(account.platform).toLowerCase();
-      const plan = await createPublishPlan(
-        pool,
-        content,
-        (Object.keys(PLATFORM_CAPABILITIES).find(p=>p.toLowerCase()===metaPlatform) || account.platform) as Platform,
-        { isPublishing: true }
+
+export async function executePublishRecord(
+  id: string,
+  options?: { now?: Date; attemptsMade?: number; maxAttempts?: number },
+): Promise<{ success: boolean; state: string; error?: string; retry?: boolean; providerPostId?: string }> {
+  const now = options?.now || new Date();
+  const attemptsMade = options?.attemptsMade ?? 0;
+  const maxAttempts = options?.maxAttempts ?? 1;
+
+  const c = await claim(id, now);
+  if (!c) return { success: false, state: "SKIPPED_OR_TERMINAL" };
+  const { account, content, job: record } = c;
+  if (String(account.platform).toLowerCase() === "youtube") {
+    await publishYouTubeRecord(record, content, account);
+    return { success: true, state: "PUBLISHED" };
+  }
+  let providerId: string;
+  let dispatchStarted = false;
+  try {
+    const metaPlatform = String(account.platform).toLowerCase();
+    const plan = await createPublishPlan(
+      pool,
+      content,
+      (Object.keys(PLATFORM_CAPABILITIES).find((p) => p.toLowerCase() === metaPlatform) || account.platform) as Platform,
+      { isPublishing: true },
+    );
+    if (
+      ["facebook", "instagram", "telegram"].includes(metaPlatform) ||
+      (metaPlatform === "linkedin" && plan.mediaType !== "video")
+    ) {
+      let token: string;
+      try {
+        token = decryptToken(account.ciphertext, record.workspace_id);
+      } catch {
+        token = decryptToken(account.ciphertext, `${record.workspace_id}:${account.id}`);
+      }
+      dispatchStarted = true;
+      const result = await SocialProviderRegistry.getProvider(metaPlatform as any).publishText(
+        metaPlatform === "telegram" ? { botToken: token, chatId: account.provider_id } : { token, author: account.provider_id },
+        { destination: account.provider_id, text: plan.caption, mediaUrl: plan.mediaUrl, mediaType: plan.mediaType, metadata: plan.metadata },
       );
-      if (['facebook','instagram','telegram'].includes(metaPlatform) || metaPlatform === 'linkedin' && plan.mediaType !== 'video') {
-        let token: string;
-        try { token=decryptToken(account.ciphertext,record.workspace_id); }
-        catch { token=decryptToken(account.ciphertext,`${record.workspace_id}:${account.id}`); }
-        const result = await SocialProviderRegistry.getProvider(metaPlatform as any).publishText(metaPlatform==='telegram'?{botToken:token,chatId:account.provider_id}:{token,author:account.provider_id}, {destination:account.provider_id,text:plan.caption,mediaUrl:plan.mediaUrl,mediaType:plan.mediaType,metadata:plan.metadata});
-        if (!result.success || !result.providerPostId) throw new ProviderError(result.error || 'META_PUBLISH_FAILED',false,Boolean(result.uncertain));
-        providerId = result.providerPostId;
-      } else {
+      if (!result.success || !result.providerPostId)
+        throw new ProviderError(result.error || "META_PUBLISH_FAILED", false, Boolean(result.uncertain));
+      providerId = result.providerPostId;
+    } else {
       const provider = socialProvider(account.platform);
       const conn = {
         token: decryptToken(
           account.ciphertext,
-          `${record.workspace_id}:${account.id}`
+          `${record.workspace_id}:${account.id}`,
         ),
         providerId: account.provider_id,
       };
 
+      dispatchStarted = true;
       if (plan.mediaUrl && plan.mediaType === "video") {
         providerId = await provider.publishVideo(conn, plan.mediaUrl);
       } else if (plan.mediaUrl) {
@@ -177,70 +201,30 @@ const worker = new Worker(
       } else {
         providerId = await provider.publishText(conn, plan.caption);
       }
-      }
-    } catch (error) {
-      const e =
-        error instanceof ProviderError
-          ? error
-          : new ProviderError("PROVIDER_OUTCOME_UNKNOWN", false, true);
-      const retry =
-        e.retryable && job.attemptsMade + 1 < (job.opts.attempts || 1);
-      await transaction(async (db) => {
-        await db.query("SELECT id FROM content WHERE id=$1 FOR UPDATE", [
-          content.id,
-        ]);
-        await db.query(
-          "UPDATE scheduled_posts SET state=$2,error_code=$3 WHERE id=$1",
-          [
-            record.id,
-            retry ? "ENQUEUED" : e.uncertain ? "UNCERTAIN" : "FAILED",
-            e.code,
-          ],
-        );
-        if (e.code === "RECONNECT_REQUIRED")
-          await db.query(
-            "UPDATE social_accounts SET state='Reconnect required' WHERE id=$1",
-            [account.id],
-          );
-        await aggregate(
-          db,
-          content.id,
-          record.workspace_id,
-          record.content_version,
-        );
-        await audit(
-          db,
-          record.workspace_id,
-          null,
-          retry
-            ? "publishing retry queued"
-            : e.uncertain
-              ? "publishing requires verification"
-              : "publishing failed",
-          "content",
-          content.id,
-          content.title,
-          null,
-          { code: e.code, platform: account.platform },
-        );
-      });
-      if (retry) throw new Error(e.code);
-      throw new UnrecoverableError(e.code);
     }
-    // If the database fails after the provider accepts the post, leave PROCESSING.
-    // A recovered job becomes UNCERTAIN; it must never publish a second time.
+  } catch (error) {
+    const e =
+      error instanceof ProviderError
+        ? error
+        : new ProviderError(dispatchStarted ? "PROVIDER_OUTCOME_UNKNOWN" : "PUBLISHING_PREFLIGHT_FAILED", false, dispatchStarted);
+    const retry = e.retryable && !e.uncertain && attemptsMade + 1 < maxAttempts;
     await transaction(async (db) => {
       await db.query("SELECT id FROM content WHERE id=$1 FOR UPDATE", [
         content.id,
       ]);
       await db.query(
-        "UPDATE scheduled_posts SET state='PUBLISHED',provider_post_id=$2,error_code=NULL WHERE id=$1",
-        [record.id, providerId],
+        "UPDATE scheduled_posts SET state=$2,error_code=$3 WHERE id=$1",
+        [
+          record.id,
+          retry ? "ENQUEUED" : e.uncertain ? "UNCERTAIN" : "FAILED",
+          e.code,
+        ],
       );
-      await db.query(
-        "INSERT INTO published_posts(id,workspace_id,scheduled_post_id,provider_post_id) VALUES($1,$2,$3,$4) ON CONFLICT(scheduled_post_id) DO NOTHING",
-        [randomUUID(), record.workspace_id, record.id, providerId],
-      );
+      if (e.code === "RECONNECT_REQUIRED")
+        await db.query(
+          "UPDATE social_accounts SET state='Reconnect required' WHERE id=$1",
+          [account.id],
+        );
       await aggregate(
         db,
         content.id,
@@ -251,14 +235,70 @@ const worker = new Worker(
         db,
         record.workspace_id,
         null,
-        "published",
+        retry
+          ? "publishing retry queued"
+          : e.uncertain
+            ? "publishing requires verification"
+            : "publishing failed",
         "content",
         content.id,
         content.title,
         null,
-        { platform: account.platform, providerPostId: providerId },
+        { code: e.code, platform: account.platform },
       );
     });
+    return {
+      success: false,
+      state: retry ? "ENQUEUED" : e.uncertain ? "UNCERTAIN" : "FAILED",
+      error: e.code,
+      retry,
+    };
+  }
+
+  await transaction(async (db) => {
+    await db.query("SELECT id FROM content WHERE id=$1 FOR UPDATE", [
+      content.id,
+    ]);
+    await db.query(
+      "UPDATE scheduled_posts SET state='PUBLISHED',provider_post_id=$2,error_code=NULL WHERE id=$1",
+      [record.id, providerId],
+    );
+    await db.query(
+      "INSERT INTO published_posts(id,workspace_id,scheduled_post_id,provider_post_id) VALUES($1,$2,$3,$4) ON CONFLICT(scheduled_post_id) DO NOTHING",
+      [randomUUID(), record.workspace_id, record.id, providerId],
+    );
+    await aggregate(
+      db,
+      content.id,
+      record.workspace_id,
+      record.content_version,
+    );
+    await audit(
+      db,
+      record.workspace_id,
+      null,
+      "published",
+      "content",
+      content.id,
+      content.title,
+      null,
+      { platform: account.platform, providerPostId: providerId },
+    );
+  });
+  return { success: true, state: "PUBLISHED", providerPostId: providerId };
+}
+
+const worker = new Worker(
+  "social-publishing",
+  async (job) => {
+    const res = await executePublishRecord(job.data.id, {
+      attemptsMade: job.attemptsMade,
+      maxAttempts: job.opts.attempts || 1,
+    });
+    if (!res.success && res.error) {
+      if (res.retry) throw new Error(res.error);
+      throw new UnrecoverableError(res.error);
+    }
   },
   {
     connection: redis,
@@ -280,10 +320,22 @@ await maintenanceQueue.upsertJobScheduler(
     opts: { removeOnComplete: true, removeOnFail: 100 },
   },
 );
+import { FestivalAutoSchedulerService } from "./calendar/festival-auto-scheduler.js";
+
 const maintenance = new Worker(
   "scheduler-maintenance",
   async () => {
     await pollYouTubeProcessing();
+    try {
+      await FestivalAutoSchedulerService.runFestivalAutoScheduler(pool);
+    } catch (err: any) {
+      console.error(
+        JSON.stringify({
+          event: "festival_auto_scheduler_error",
+          error: err?.message,
+        }),
+      );
+    }
     const jobs = (
       await pool.query(
         "SELECT id,execute_at FROM scheduled_posts WHERE state='PENDING' ORDER BY execute_at LIMIT 200",
@@ -323,7 +375,7 @@ const maintenance = new Worker(
   },
   { connection: redis, concurrency: 1 },
 );
-for (const w of [worker, maintenance, pdfWorker, aiWorker]) {
+for (const w of [worker, maintenance, pdfWorker, aiWorker, knowledgeAutomationWorker]) {
   w.on("failed", (j) =>
     console.error(
       JSON.stringify({ event: "queue_failed", queue: w.name, jobId: j?.id }),
@@ -339,6 +391,8 @@ async function shutdown() {
     worker.close(),
     pdfWorker.close(),
     aiWorker.close(),
+    knowledgeAutomationWorker.close(),
+    knowledgeAutomationQueue.close(),
     maintenanceQueue.close(),
     publishingQueue.close(),
   ]);

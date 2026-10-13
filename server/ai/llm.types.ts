@@ -3,6 +3,7 @@ import { z } from "zod";
 export interface LLMMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  images?: string[];
 }
 
 export interface GenerateTextInput {

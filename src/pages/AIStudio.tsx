@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate, useOutletContext } from "react-router-dom";
+import React, { useState, useEffect,useRef } from "react";
+import { Link, useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -36,6 +36,9 @@ import { useSession } from "../lib/session";
 import { PublishPreviewModal } from "../components/PublishPreviewModal";
 import { ClipdropImageModal } from "../components/ClipdropImageModal";
 import { BatchProgressIndicator } from "../components/BatchProgressIndicator";
+import KnowledgeAutomation from './KnowledgeAutomation';
+import { DocumentSourceMedia } from '../components/DocumentSourceMedia';
+import './studio-integration.css';
 
 function formatExcerpt(text: string | null | undefined): string {
   if (!text) return "";
@@ -53,6 +56,9 @@ function formatExcerpt(text: string | null | undefined): string {
 
   return clean.length > 160 ? clean.substring(0, 160) + "..." : clean;
 }
+function visualEvidence(item:KnowledgeItem) {
+  return item.metadata?.origin==='SOURCE_VISUAL'?{sourceMediaAssetId:item.metadata.sourceMediaAssetId,sourceReferenceId:item.metadata.sourceReferenceId,evidenceKind:item.metadata.evidenceKind,originalChecksum:item.metadata.originalChecksum}:{};
+}
 
 export default function AIStudio() {
   const s = useOutletContext<Snapshot>();
@@ -64,7 +70,9 @@ export default function AIStudio() {
   const [attachedVisual, setAttachedVisual] = useState<{ assetId: string; url: string; filename: string } | null>(null);
 
   // Studio Mode: 'topic' | 'pdf'
-  const [activeTab, setActiveTab] = useState<"topic" | "pdf">("topic");
+  const [studioParams, setStudioParams] = useSearchParams();
+  const activeTab = studioParams.get('tab') === 'automation' ? 'automation' : studioParams.get('tab') === 'pdf' ? 'pdf' : 'topic';
+  const setActiveTab = (tab: 'topic' | 'pdf' | 'automation') => setStudioParams({tab});
 
   // Topic Mode state
   const [topic, setTopic] = useState("");
@@ -79,6 +87,7 @@ export default function AIStudio() {
   // PDF Mode state
   const [documents, setDocuments] = useState<DocItem[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  const selectedDocRef=useRef(selectedDocId);selectedDocRef.current=selectedDocId;
   const [activeDoc, setActiveDoc] = useState<DocItem | null>(null);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [selectedKnowledgeIds, setSelectedKnowledgeIds] = useState<string[]>([]);
@@ -477,7 +486,7 @@ export default function AIStudio() {
         tone,
         goal,
         platforms: selectedPlatforms,
-        sourceEvidence:[{documentId:selectedDocId,documentName:activeDoc?.original_filename,knowledgeId:k.id,pageStart:k.page_start,pageEnd:k.page_end,excerpt:k.source_excerpt}],
+        sourceEvidence:[{documentId:selectedDocId,documentName:activeDoc?.original_filename,knowledgeId:k.id,pageStart:k.page_start,pageEnd:k.page_end,excerpt:k.source_excerpt,...visualEvidence(k)}],
       }));
 
       const res = (await request("/batch/ai-generation", "POST", {
@@ -509,7 +518,7 @@ export default function AIStudio() {
 
       // Attach visual media asset to variants if generated
       const finalVariants: Record<string, any> = {};
-      const sourceEvidence = generation ? (activeTab === 'pdf' ? knowledgeItems.filter(k=>selectedKnowledgeIds.includes(k.id)).map(k=>({documentId:selectedDocId,documentName:activeDoc?.original_filename,knowledgeId:k.id,pageStart:k.page_start,pageEnd:k.page_end,excerpt:k.source_excerpt})) : []) : generatedEvidence;
+      const sourceEvidence = generation ? (activeTab === 'pdf' ? knowledgeItems.filter(k=>selectedKnowledgeIds.includes(k.id)).map(k=>({documentId:selectedDocId,documentName:activeDoc?.original_filename,knowledgeId:k.id,pageStart:k.page_start,pageEnd:k.page_end,excerpt:k.source_excerpt,...visualEvidence(k)})) : []) : generatedEvidence;
       if (generation) setGeneratedEvidence(sourceEvidence);
       for (const [p, val] of Object.entries(variantsToSave)) {
         if (visual) {
@@ -569,7 +578,7 @@ export default function AIStudio() {
               className="badge"
               style={{
                 background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(16, 185, 129, 0.2))",
-                color: "#a5b4fc",
+                color: "var(--accent)",
                 border: "1px solid rgba(99, 102, 241, 0.3)",
                 fontWeight: 600,
                 fontSize: "0.75rem",
@@ -582,10 +591,10 @@ export default function AIStudio() {
             </span>
           </div>
           <h1 style={{ fontSize: "1.75rem", fontWeight: 700, margin: "0 0 6px" }}>
-            AI Studio & PDF-to-Content Workflow
+            AI Studio
           </h1>
-          <p style={{ color: "var(--color-text-muted, #94a3b8)", margin: 0 }}>
-            Turn prompts or document knowledge into platform-specific posts. Generated content is automatically saved to Needs Review before approval, scheduling and publishing.
+          <p style={{ color: "var(--color-text-muted, var(--muted))", margin: 0 }}>
+            Add your business knowledge, create content, and keep your calendar active. Every generated post goes to your approval queue.
           </p>
         </div>
       </div>
@@ -597,16 +606,18 @@ export default function AIStudio() {
           display: "flex",
           gap: "8px",
           marginBottom: "24px",
-          background: "rgba(255, 255, 255, 0.03)",
+          background: "var(--surface2)",
           padding: "6px",
           borderRadius: "12px",
-          border: "1px solid rgba(255, 255, 255, 0.08)",
+          border: "1px solid var(--border)",
           width: "fit-content",
         }}
       >
         <button
           type="button"
           onClick={() => setActiveTab("topic")}
+          className={activeTab==='topic'?'active':''}
+          aria-pressed={activeTab==='topic'}
           style={{
             display: "flex",
             alignItems: "center",
@@ -623,11 +634,13 @@ export default function AIStudio() {
           }}
         >
           <FileText size={17} />
-          Topic & Prompt Mode
+          Create content
         </button>
         <button
           type="button"
           onClick={() => setActiveTab("pdf")}
+          className={activeTab==='pdf'?'active':''}
+          aria-pressed={activeTab==='pdf'}
           style={{
             display: "flex",
             alignItems: "center",
@@ -644,23 +657,26 @@ export default function AIStudio() {
           }}
         >
           <BookOpen size={17} />
-          PDF-to-Content Workflow
+          Business knowledge
           <span
             style={{
               background: "rgba(16, 185, 129, 0.2)",
-              color: "#34d399",
+              color: "var(--success)",
               fontSize: "0.7rem",
               padding: "2px 6px",
               borderRadius: "10px",
               marginLeft: "4px",
             }}
           >
-            Evidence Engine
+            PDFs
           </span>
         </button>
+        <button type="button" className={`studio-automation-tab ${activeTab === 'automation' ? 'active' : ''}`} onClick={()=>setActiveTab('automation')}><Clock size={17}/>Automate content</button>
       </div>
 
-      <div className="composer-grid" style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "24px" }}>
+      <div className="studio-workflow-strip"><span>Business knowledge → Content → Approval → Scheduled publishing</span><div><Link to="/app/approvals">Approvals</Link><Link to="/app/calendar">Calendar</Link></div></div>
+      {activeTab === 'automation' && <KnowledgeAutomation embedded />}
+      <div className="composer-grid studio-creation-grid" style={{ display: activeTab === 'automation' ? 'none' : "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 420px)", gap: "24px" }}>
         {/* Main Creation Column */}
         <section style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           {activeTab === "topic" ? (
@@ -719,8 +735,8 @@ export default function AIStudio() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                   <div>
                     <h2 style={{ fontSize: "1.15rem", fontWeight: 600, margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
-                      <BookOpen size={18} style={{ color: "#10b981" }} />
-                      PDF Knowledge & Document Processing
+                      <BookOpen size={18} style={{ color: "var(--success)" }} />
+                Your business knowledge
                     </h2>
                     <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", margin: "4px 0 0" }}>
                       Upload whitepapers, research reports, or specs to extract verifiable claims and insights.
@@ -731,11 +747,11 @@ export default function AIStudio() {
                 {/* Upload Dropzone */}
                 <div
                   style={{
-                    border: "2px dashed rgba(255, 255, 255, 0.15)",
+                    border: "2px dashed var(--border)",
                     borderRadius: "12px",
                     padding: "24px",
                     textAlign: "center",
-                    background: "rgba(255, 255, 255, 0.02)",
+                    background: "var(--surface2)",
                     marginBottom: "20px",
                     transition: "all 0.2s ease",
                   }}
@@ -747,14 +763,14 @@ export default function AIStudio() {
                   </p>
                   
                   {batchProgress && (
-                    <div style={{ margin: "0 auto 14px", maxWidth: "320px", background: "rgba(255,255,255,0.05)", borderRadius: "8px", padding: "10px", border: "1px solid rgba(255,255,255,0.1)" }}>
+                    <div style={{ margin: "0 auto 14px", maxWidth: "320px", background: "var(--border)", borderRadius: "8px", padding: "10px", border: "1px solid var(--border)" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", marginBottom: "6px" }}>
-                        <span style={{ color: "#818cf8", fontWeight: 600 }}>Batch Processing: {batchProgress.completed}/{batchProgress.total}</span>
+                        <span style={{ color: "var(--accent)", fontWeight: 600 }}>Batch Processing: {batchProgress.completed}/{batchProgress.total}</span>
                         <span style={{ color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "150px", whiteSpace: "nowrap" }}>
                           {batchProgress.currentName}
                         </span>
                       </div>
-                      <div style={{ height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden" }}>
+                      <div style={{ height: "4px", background: "var(--border)", borderRadius: "2px", overflow: "hidden" }}>
                         <div
                           style={{
                             height: "100%",
@@ -804,8 +820,8 @@ export default function AIStudio() {
                             justifyContent: "space-between",
                             padding: "10px 14px",
                             borderRadius: "8px",
-                            background: selectedDocId === doc.id ? "rgba(99, 102, 241, 0.15)" : "rgba(255, 255, 255, 0.03)",
-                            border: selectedDocId === doc.id ? "1px solid rgba(99, 102, 241, 0.4)" : "1px solid rgba(255, 255, 255, 0.06)",
+                            background: selectedDocId === doc.id ? "rgba(99, 102, 241, 0.15)" : "var(--surface2)",
+                            border: selectedDocId === doc.id ? "1px solid rgba(99, 102, 241, 0.4)" : "1px solid var(--border)",
                             cursor: "pointer",
                           }}
                         >
@@ -849,7 +865,7 @@ export default function AIStudio() {
                               style={{
                                 background: "transparent",
                                 border: "none",
-                                color: "#ef4444",
+                                color: "var(--danger)",
                                 cursor: "pointer",
                                 padding: "4px",
                                 borderRadius: "4px",
@@ -867,14 +883,15 @@ export default function AIStudio() {
                 )}
 
                 {/* Active Document Status & Knowledge Extract Action */}
+                {selectedDocId && activeDoc && <DocumentSourceMedia key={selectedDocId} documentId={selectedDocId} documentStatus={activeDoc.status} canExtract={['Owner','Admin','Content Manager','Editor'].includes(s.workspace.role)} onKnowledgeChanged={id=>{if(selectedDocRef.current===id)void fetchKnowledge(id);}} />}
                 {activeDoc && (
                   <div
                     style={{
                       marginTop: "16px",
                       padding: "14px",
                       borderRadius: "8px",
-                      background: "rgba(255, 255, 255, 0.02)",
-                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      background: "var(--surface2)",
+                      border: "1px solid var(--border)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
@@ -905,13 +922,13 @@ export default function AIStudio() {
                         </Button>
                       ) : (
                         <>
-                          <span style={{ fontSize: "0.8rem", color: "#fbbf24", display: "flex", alignItems: "center", gap: "6px" }}>
+                          <span style={{ fontSize: "0.8rem", color: "var(--warning)", display: "flex", alignItems: "center", gap: "6px" }}>
                             <Clock size={14} className="animate-spin" /> Processing PDF...
                           </span>
                           <Button
                             variant="secondary"
                             onClick={() => handleFastTrack(activeDoc.id)}
-                            style={{ fontSize: "0.8rem", padding: "4px 10px", border: "1px solid rgba(16, 185, 129, 0.4)", color: "#34d399", background: "rgba(16, 185, 129, 0.1)" }}
+                            style={{ fontSize: "0.8rem", padding: "4px 10px", border: "1px solid rgba(16, 185, 129, 0.4)", color: "var(--success)", background: "rgba(16, 185, 129, 0.1)" }}
                           >
                             <Sparkles size={14} /> Fast-Track to READY
                           </Button>
@@ -927,7 +944,7 @@ export default function AIStudio() {
                           gap: "6px",
                           background: "rgba(239, 68, 68, 0.15)",
                           border: "1px solid rgba(239, 68, 68, 0.3)",
-                          color: "#f87171",
+                          color: "var(--danger)",
                           fontSize: "0.8rem",
                           padding: "6px 12px",
                           borderRadius: "6px",
@@ -947,10 +964,10 @@ export default function AIStudio() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                   <div>
                     <h3 style={{ fontSize: "1.1rem", fontWeight: 600, margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
-                      <Quote size={18} style={{ color: "#34d399" }} />
+                      <Quote size={18} style={{ color: "var(--success)" }} />
                       Extracted Knowledge & Evidence ({knowledgeItems.length})
                       {(activeDoc?.status === "EXTRACTING" || activeDoc?.status === "PROCESSING" || activeDoc?.status === "CHUNKING" || extractingKnowledge) && (
-                        <span style={{ fontSize: "0.75rem", padding: "3px 9px", borderRadius: "12px", background: "rgba(16, 185, 129, 0.15)", color: "#34d399", border: "1px solid rgba(16, 185, 129, 0.3)", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                        <span style={{ fontSize: "0.75rem", padding: "3px 9px", borderRadius: "12px", background: "rgba(16, 185, 129, 0.15)", color: "var(--success)", border: "1px solid rgba(16, 185, 129, 0.3)", display: "inline-flex", alignItems: "center", gap: "6px" }}>
                           <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#10b981", display: "inline-block", boxShadow: "0 0 8px #10b981" }} />
                           Live Streaming Facts...
                         </span>
@@ -979,7 +996,7 @@ export default function AIStudio() {
                       <button
                         type="button"
                         className="text-button"
-                        style={{ fontSize: "0.8rem", color: "#f87171" }}
+                        style={{ fontSize: "0.8rem", color: "var(--danger)" }}
                         onClick={async () => {
                           if (!selectedDocId) return;
                           try {
@@ -1001,7 +1018,7 @@ export default function AIStudio() {
                 {loadingKnowledge && knowledgeItems.length === 0 ? (
                   <div style={{ padding: "32px", textAlign: "center", color: "var(--color-text-muted)" }}>
                     <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                      <RotateCw size={18} className="animate-spin" style={{ color: "#34d399" }} />
+                      <RotateCw size={18} className="animate-spin" style={{ color: "var(--success)" }} />
                       <span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>Extracting knowledge & claims in real-time...</span>
                     </div>
                     <p style={{ margin: "4px 0 0", fontSize: "0.85rem" }}>
@@ -1009,7 +1026,7 @@ export default function AIStudio() {
                     </p>
                   </div>
                 ) : knowledgeItems.length === 0 ? (
-                  <div style={{ padding: "30px", textAlign: "center", color: "var(--color-text-muted)", border: "1px dashed rgba(255,255,255,0.1)", borderRadius: "8px" }}>
+                  <div style={{ padding: "30px", textAlign: "center", color: "var(--color-text-muted)", border: "1px dashed var(--border)", borderRadius: "8px" }}>
                     <Info size={24} style={{ marginBottom: "8px", opacity: 0.7 }} />
                     <p style={{ margin: 0 }}>
                       {activeDoc?.status === "FAILED"
@@ -1030,14 +1047,14 @@ export default function AIStudio() {
                           style={{
                             padding: "14px",
                             borderRadius: "10px",
-                            background: isSelected ? "rgba(16, 185, 129, 0.08)" : "rgba(255, 255, 255, 0.02)",
-                            border: isSelected ? "1px solid rgba(16, 185, 129, 0.35)" : "1px solid rgba(255, 255, 255, 0.06)",
+                            background: isSelected ? "rgba(16, 185, 129, 0.08)" : "var(--surface2)",
+                            border: isSelected ? "1px solid rgba(16, 185, 129, 0.35)" : "1px solid var(--border)",
                             cursor: "pointer",
                             transition: "all 0.15s ease",
                           }}
                         >
                           <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
-                            <div style={{ paddingTop: "2px", color: isSelected ? "#34d399" : "var(--color-text-muted)" }}>
+                            <div style={{ paddingTop: "2px", color: isSelected ? "var(--success)" : "var(--color-text-muted)" }}>
                               {isSelected ? <CheckSquare size={18} /> : <Square size={18} />}
                             </div>
                             <div style={{ flex: 1 }}>
@@ -1067,21 +1084,21 @@ export default function AIStudio() {
                                   {item.knowledge_type}
                                 </span>
                                 {item.page_start && (
-                                  <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", background: "rgba(255,255,255,0.05)", padding: "1px 6px", borderRadius: "4px" }}>
+                                  <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", background: "var(--border)", padding: "1px 6px", borderRadius: "4px" }}>
                                     Page {item.page_start}{item.page_end && item.page_end !== item.page_start ? `–${item.page_end}` : ""}
                                   </span>
                                 )}
                                 {item.confidence && (
-                                  <span style={{ fontSize: "0.75rem", color: "#34d399", marginLeft: "auto" }}>
+                                  <span style={{ fontSize: "0.75rem", color: "var(--success)", marginLeft: "auto" }}>
                                     {Math.round(item.confidence * 100)}% confidence
                                   </span>
                                 )}
                               </div>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px", margin: "0 0 6px" }}>
-                                <strong style={{ fontSize: "0.95rem", color: "#38bdf8", display: "block", marginBottom: "4px" }}>
+                                <strong style={{ fontSize: "0.95rem", color: "var(--accent)", display: "block", marginBottom: "4px" }}>
                                   {item.knowledge_key}
                                 </strong>
-                                <p style={{ margin: 0, fontSize: "0.88rem", fontWeight: 400, lineHeight: 1.5, color: "#e2e8f0" }}>
+                                <p style={{ margin: 0, fontSize: "0.88rem", fontWeight: 400, lineHeight: 1.5, color: "var(--ink)" }}>
                                   {typeof item.value === "string" ? item.value : JSON.stringify(item.value)}
                                 </p>
                                 <button
@@ -1121,8 +1138,8 @@ export default function AIStudio() {
                                   style={{
                                     margin: 0,
                                     padding: "6px 10px",
-                                    borderLeft: "2px solid rgba(255,255,255,0.2)",
-                                    background: "rgba(0,0,0,0.25)",
+                                    borderLeft: "2px solid var(--border-strong)",
+                                    background: "var(--surface2)",
                                     borderRadius: "0 4px 4px 0",
                                     fontSize: "0.8rem",
                                     fontStyle: "italic",
@@ -1133,6 +1150,11 @@ export default function AIStudio() {
                                   "{formatExcerpt(item.source_excerpt)}"
                                 </blockquote>
                               )}
+                              <div className="studio-fact-approval">
+                                {item.metadata?.origin==='SOURCE_VISUAL'&&<p style={{fontSize:12,color:'var(--muted)'}}>{item.metadata.evidenceKind==='OCR_TEXT'?'OCR text from source image':'AI visual interpretation · verify against the source image'}</p>}
+                                <span>{['CONFIRMED','LOCKED'].includes(item.status) ? 'Approved for automatic content' : 'Approve this fact to use it in automatic content'}</span>
+                                {!demo && ['Owner','Admin','Content Manager','Editor'].includes(s.workspace.role) && !['CONFIRMED','LOCKED'].includes(item.status) && <Button disabled={!item.source_excerpt?.trim()} onClick={async(e)=>{e.stopPropagation();if(!selectedDocId)return;try{await request(`/documents/${selectedDocId}/knowledge/${item.id}`,'PATCH',{status:'CONFIRMED'});await fetchKnowledge(selectedDocId);await query.invalidateQueries({queryKey:['knowledge-automation']});toast.success('Fact approved. Automation can now use it.');}catch(error:any){toast.error(error.message || 'Could not approve fact.');}}}>Approve fact</Button>}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1164,8 +1186,8 @@ export default function AIStudio() {
                       gap: "8px",
                       padding: "8px 14px",
                       borderRadius: "8px",
-                      border: isSel ? "1px solid #6366f1" : "1px solid rgba(255,255,255,0.1)",
-                      background: isSel ? "rgba(99, 102, 241, 0.2)" : "rgba(255,255,255,0.03)",
+                      border: isSel ? "1px solid #6366f1" : "1px solid var(--border)",
+                      background: isSel ? "rgba(99, 102, 241, 0.2)" : "var(--surface2)",
                       color: isSel ? "#fff" : "var(--color-text-muted)",
                       cursor: "pointer",
                     }}
@@ -1178,7 +1200,7 @@ export default function AIStudio() {
             </div>
 
             {error && (
-              <div className="error-box" role="alert" style={{ marginBottom: "16px", padding: "10px 14px", background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.3)", borderRadius: "8px", color: "#f87171", fontSize: "0.85rem" }}>
+              <div className="error-box" role="alert" style={{ marginBottom: "16px", padding: "10px 14px", background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.3)", borderRadius: "8px", color: "var(--danger)", fontSize: "0.85rem" }}>
                 <AlertCircle size={15} style={{ display: "inline", marginRight: "6px" }} />
                 {error}
               </div>
@@ -1210,7 +1232,7 @@ export default function AIStudio() {
                     fontWeight: 700,
                     background: "linear-gradient(135deg, #ec4899, #8b5cf6)",
                     border: "none",
-                    color: "#fff",
+                    color: "var(--ink)",
                     boxShadow: "0 4px 15px rgba(236, 72, 153, 0.35)",
                     display: "flex",
                     alignItems: "center",
@@ -1228,7 +1250,7 @@ export default function AIStudio() {
                   variant="secondary"
                   onClick={handleBatchGenerateFromKnowledge}
                   disabled={isGenerating}
-                  style={{ width: "100%", padding: "10px", fontSize: "0.88rem", background: "rgba(99, 102, 241, 0.15)", border: "1px solid rgba(99, 102, 241, 0.35)", color: "#a5b4fc" }}
+                  style={{ width: "100%", padding: "10px", fontSize: "0.88rem", background: "rgba(99, 102, 241, 0.15)", border: "1px solid rgba(99, 102, 241, 0.35)", color: "var(--accent)" }}
                 >
                   <Layers size={16} />
                   Batch Generate Posts for Each Selected Knowledge ({selectedKnowledgeIds.length} Independent Posts)
@@ -1247,7 +1269,7 @@ export default function AIStudio() {
             </div>
 
             {/* Platform Variant Tabs */}
-            <div className="preview-tabs" style={{ display: "flex", gap: "6px", marginBottom: "16px", overflowX: "auto", paddingBottom: "4px" }}>
+            <div className="preview-tabs" style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "16px", paddingBottom: "4px" }}>
               {selectedPlatforms.map((p) => {
                 const isActive = activePreviewPlatform === p;
                 const hasVariant = !!generatedVariants[p];
@@ -1264,7 +1286,7 @@ export default function AIStudio() {
                       padding: "6px 12px",
                       borderRadius: "6px",
                       border: "none",
-                      background: isActive ? "#6366f1" : "rgba(255,255,255,0.05)",
+                      background: isActive ? "#6366f1" : "var(--surface2)",
                       color: isActive ? "#fff" : "var(--color-text-muted)",
                       cursor: "pointer",
                       fontSize: "0.8rem",
@@ -1285,10 +1307,10 @@ export default function AIStudio() {
               {generatedEvidence.length ? generatedEvidence.map(e=><div key={e.knowledgeId}><strong>{e.documentName} · {e.pageStart ? `Page ${e.pageStart}${e.pageEnd && e.pageEnd!==e.pageStart ? `–${e.pageEnd}` : ''}` : 'Page unavailable'}</strong><blockquote>{e.excerpt || 'No source excerpt available.'}</blockquote></div>) : <p>Generated from your prompt and Brand Kit. No document page evidence was supplied.</p>}
             </details>}
             {Object.keys(generatedVariants).length === 0 ? (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px", textAlign: "center", color: "var(--color-text-muted)", border: "1px dashed rgba(255,255,255,0.1)", borderRadius: "10px", gap: "14px" }}>
-                <Sparkles size={38} style={{ color: "#818cf8", opacity: 0.8 }} />
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px", textAlign: "center", color: "var(--color-text-muted)", border: "1px dashed var(--border)", borderRadius: "10px", gap: "14px" }}>
+                <Sparkles size={38} style={{ color: "var(--accent)", opacity: 0.8 }} />
                 <div>
-                  <h3 style={{ margin: "0 0 6px", fontSize: "1.05rem", color: "#f1f5f9", fontWeight: 700 }}>Ready for Generation</h3>
+                  <h3 style={{ margin: "0 0 6px", fontSize: "1.05rem", color: "var(--ink)", fontWeight: 700 }}>Ready for Generation</h3>
                   <p style={{ margin: 0, fontSize: "0.85rem", maxWidth: "290px", lineHeight: 1.5 }}>
                     {activeTab === "pdf"
                       ? "Select extracted claims from your PDF and click Generate to produce channel-specific copy."
@@ -1344,7 +1366,7 @@ export default function AIStudio() {
                         style={{
                           background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))",
                           border: "1px solid rgba(168, 85, 247, 0.4)",
-                          color: "#c084fc",
+                          color: "var(--accent)",
                           padding: "4px 10px",
                           borderRadius: "6px",
                           fontSize: "0.75rem",
@@ -1384,7 +1406,7 @@ export default function AIStudio() {
                 </div>
 
                 {/* Simulated Social Card */}
-                <div className="social-preview" style={{ background: "rgba(0, 0, 0, 0.3)", borderRadius: "10px", padding: "14px", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div className="social-preview" style={{ background: "var(--border-strong)", borderRadius: "10px", padding: "14px", border: "1px solid var(--border)" }}>
                   <div className="social-profile" style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
                     <span className="workspace-avatar" style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#6366f1", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: "0.8rem" }}>
                       {s?.brand?.name?.[0] || "C"}
@@ -1401,7 +1423,7 @@ export default function AIStudio() {
                   </p>
 
                   {attachedVisual ? (
-                    <div style={{ margin: "10px 0", borderRadius: "10px", overflow: "hidden", position: "relative", border: "1px solid rgba(255,255,255,0.15)" }}>
+                    <div style={{ margin: "10px 0", borderRadius: "10px", overflow: "hidden", position: "relative", border: "1px solid var(--border)" }}>
                       <img
                         src={attachedVisual.url}
                         alt="Attached Visual"
@@ -1414,9 +1436,9 @@ export default function AIStudio() {
                           position: "absolute",
                           bottom: "8px",
                           right: "8px",
-                          background: "rgba(15, 23, 42, 0.85)",
-                          border: "1px solid rgba(255,255,255,0.25)",
-                          color: "#fff",
+                          background: "var(--surface2)",
+                          border: "1px solid var(--border-strong)",
+                          color: "var(--ink)",
                           fontSize: "0.75rem",
                           fontWeight: 600,
                           padding: "5px 12px",
@@ -1439,7 +1461,7 @@ export default function AIStudio() {
                         style={{
                           background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2))",
                           border: "1px dashed rgba(168, 85, 247, 0.5)",
-                          color: "#c084fc",
+                          color: "var(--accent)",
                           padding: "10px 14px",
                           borderRadius: "10px",
                           fontSize: "0.84rem",
@@ -1457,7 +1479,7 @@ export default function AIStudio() {
                     </div>
                   )}
 
-                  <div className="social-reactions" style={{ display: "flex", gap: "16px", fontSize: "0.75rem", color: "var(--color-text-muted)", paddingTop: "8px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                  <div className="social-reactions" style={{ display: "flex", gap: "16px", fontSize: "0.75rem", color: "var(--color-text-muted)", paddingTop: "8px", borderTop: "1px solid var(--border)" }}>
                     <span style={{ display: "flex", alignItems: "center", gap: "4px" }}><ThumbsUp size={13} /> Like</span>
                     <span style={{ display: "flex", alignItems: "center", gap: "4px" }}><MessageSquare size={13} /> Comment</span>
                     <span style={{ display: "flex", alignItems: "center", gap: "4px" }}><Share2 size={13} /> Share</span>
@@ -1475,7 +1497,7 @@ export default function AIStudio() {
                       fontSize: "0.9rem",
                       background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2))",
                       border: "1px solid rgba(168, 85, 247, 0.4)",
-                      color: "#c084fc",
+                      color: "var(--accent)",
                       fontWeight: 600,
                     }}
                   >

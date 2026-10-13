@@ -3,8 +3,25 @@ export const META_SCOPES =
 export const metaVersion = () =>
   process.env.FACEBOOK_GRAPH_API_VERSION || "v25.0";
 export class MetaGraphError extends Error {
-  constructor(public readonly endpoint: string, public readonly status: number, public readonly code?: number, public readonly subcode?: number) {
-    super(`Meta ${endpoint} failed (HTTP ${status}, code ${code ?? "unknown"}${subcode === undefined ? "" : `, subcode ${subcode}`}). ${code === 190 ? "Access token expired or invalid; reconnect Meta." : code === 10 || code === 200 ? "Check granted permissions and access to the selected Page." : "Check the Meta app configuration and retry."}`);
+  constructor(
+    public readonly endpoint: string,
+    public readonly status: number,
+    public readonly code?: number,
+    public readonly subcode?: number,
+    public readonly errorType?: string,
+    public readonly apiMessage?: string,
+    public readonly fbtraceId?: string,
+  ) {
+    const mainMsg = apiMessage
+      ? apiMessage
+      : code === 190
+      ? "Access token expired or invalid; reconnect Meta."
+      : code === 10 || code === 200
+      ? "Check granted permissions and access to the selected Page."
+      : "Check the Meta app configuration and retry.";
+    super(
+      `Meta API error on '${endpoint}' (HTTP ${status}, code ${code ?? "unknown"}${subcode === undefined ? "" : `, subcode ${subcode}`}): ${mainMsg}`,
+    );
   }
 }
 export async function metaRequest(
@@ -30,8 +47,29 @@ export async function metaRequest(
   let data: any;
   try { data = await response.json(); }
   catch { throw new Error(`Meta ${path} returned an invalid response (HTTP ${response.status}).`); }
-  if (!response.ok || data.error)
-    throw new MetaGraphError(path, response.status, typeof data.error?.code === "number" ? data.error.code : undefined, typeof data.error?.error_subcode === "number" ? data.error.error_subcode : undefined);
+  if (!response.ok || data.error) {
+    const err = data.error || {};
+    const code = typeof err.code === "number" ? err.code : undefined;
+    const subcode = typeof err.error_subcode === "number" ? err.error_subcode : undefined;
+    const errorType = typeof err.type === "string" ? err.type : undefined;
+    const apiMessage = typeof err.message === "string" ? err.message.replace(/access_token=[^&]+/gi, "access_token=[REDACTED]") : undefined;
+    const fbtraceId = typeof err.fbtrace_id === "string" ? err.fbtrace_id : undefined;
+
+    console.error(
+      JSON.stringify({
+        event: "meta_api_failure",
+        endpoint: path,
+        status: response.status,
+        code,
+        subcode,
+        type: errorType,
+        message: apiMessage,
+        fbtrace_id: fbtraceId,
+      }),
+    );
+
+    throw new MetaGraphError(path, response.status, code, subcode, errorType, apiMessage, fbtraceId);
+  }
   return data;
 }
 export async function metaPermissions(token: string): Promise<void> {

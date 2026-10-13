@@ -368,4 +368,80 @@ export class WorkspaceController {
       return { success: true, role: v.role };
     });
   }
+
+  @WorkspaceRequired()
+  @Get("settings/festival-automation")
+  async getFestivalAutomationSettings(@Req() r: AuthedRequest) {
+    const wsRes = await pool.query(
+      `SELECT festival_automation_enabled, festival_prep_days, festival_region, festival_language, festival_post_time
+       FROM workspaces WHERE id = $1`,
+      [r.workspace.id],
+    );
+
+    if (!wsRes.rows.length) {
+      throw new NotFoundException("Workspace not found.");
+    }
+
+    const ws = wsRes.rows[0];
+    return {
+      festivalAutomationEnabled: ws.festival_automation_enabled,
+      festivalPrepDays: ws.festival_prep_days,
+      festivalRegion: ws.festival_region,
+      festivalLanguage: ws.festival_language,
+      festivalPostTime: ws.festival_post_time,
+    };
+  }
+
+  @WorkspaceRequired()
+  @Patch("settings/festival-automation")
+  async updateFestivalAutomationSettings(
+    @Req() r: AuthedRequest,
+    @Body() input: unknown,
+  ) {
+    assertPermission(r.workspace.role, "manage");
+    const v = z
+      .object({
+        festivalAutomationEnabled: z.boolean(),
+        festivalPrepDays: z.number().int().min(1).max(30).default(2),
+        festivalRegion: z.enum(["ALL", "NORTH", "SOUTH", "WEST", "EAST"]).default("ALL"),
+        festivalLanguage: z.enum(["EN", "HI", "HINGLISH"]).default("HINGLISH"),
+        festivalPostTime: z.string().regex(/^[0-2][0-9]:[0-5][0-9]$/).default("09:00"),
+      })
+      .parse(input);
+
+    return transaction(async (db) => {
+      await db.query(
+        `UPDATE workspaces 
+         SET festival_automation_enabled = $2,
+             festival_prep_days = $3,
+             festival_region = $4,
+             festival_language = $5,
+             festival_post_time = $6
+         WHERE id = $1`,
+        [
+          r.workspace.id,
+          v.festivalAutomationEnabled,
+          v.festivalPrepDays,
+          v.festivalRegion,
+          v.festivalLanguage,
+          v.festivalPostTime,
+        ],
+      );
+
+      await audit(
+        db,
+        r.workspace.id,
+        r.user.id,
+        "updated festival automation settings",
+        "workspace",
+        r.workspace.id,
+        "Festival Automation Settings",
+        null,
+        v,
+      );
+
+      return v;
+    });
+  }
 }
+

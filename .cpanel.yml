@@ -1,0 +1,33 @@
+---
+deployment:
+  tasks:
+    # ------------------------------------------------------------------ #
+    # ContentOS — cPanel Git Deployment Script                            #
+    # Triggered manually via cPanel > Git Version Control > Deploy        #
+    # NOT triggered automatically on git push — must click "Deploy"       #
+    # ------------------------------------------------------------------ #
+
+    # 1. Use Node.js 22 (matches cPanel configured version)
+    - export PATH=/opt/alt/alt-nodejs22/root/usr/bin:$PATH
+
+    # 2. Confirm runtime versions (logged to deployment output)
+    - node --version
+    - npm --version
+
+    # 3. Install ALL dependencies (including devDependencies needed for build)
+    #    --ignore-scripts prevents postinstall from re-running build:api early
+    - npm ci --include=dev --ignore-scripts
+
+    # 4. Build backend (tsc → dist-api/) then frontend (vite → dist/)
+    - node scripts/build.mjs
+
+    # 5. Prune devDependencies after build to keep node_modules lean
+    - npm prune --omit=dev
+
+    # 6. Confirm critical build outputs exist (deployment fails if missing)
+    - test -f dist-api/phase-main.js || (echo "ERROR: dist-api/phase-main.js missing" && exit 1)
+    - test -f dist/index.html || (echo "ERROR: dist/index.html missing" && exit 1)
+
+    # NOTE: .env must be placed manually at /home/hindust1/contentos/.env
+    # NOTE: uploads/ directory is preserved across deploys (never deleted)
+    # NOTE: After deploy, restart the app in cPanel > Setup Node.js App

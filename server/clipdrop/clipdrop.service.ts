@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, ServiceUnavailableException, NotFoundException } from "@nestjs/common";
 import { randomUUID, createHash } from "node:crypto";
 import { pool, transaction, audit } from "../db.js";
+import { uploadManagedMedia } from "../storage/managed-media.js";
 import { getStorageProvider } from "../storage/storage.factory.js";
 import { getLLMProvider } from "../ai/llm.service.js";
 
@@ -145,7 +146,7 @@ STRICT RULES:
     const existingAssetRes = await pool.query(
       `SELECT * FROM media_assets 
        WHERE workspace_id = $1 
-         AND deleted_at IS NULL 
+         AND deleted_at IS NULL AND status='COMPLETED'
          AND mime_type != 'image/svg+xml'
          AND metadata->>'idempotency_key' = $2 
        ORDER BY created_at DESC LIMIT 1`,
@@ -270,40 +271,8 @@ STRICT RULES:
     const ext = mimeType.includes("jpeg") || mimeType.includes("jpg") ? ".jpg" : ".png";
     const objectKey = `workspaces/${opts.workspaceId}/generated_asset/${assetId}/visual_${usedEngine}${ext}`;
 
-    await provider.upload({
-      bucket,
-      objectKey,
-      body: finalBuffer,
-      mimeType,
-    });
-
-    // 5. DB Record in media_assets
-    const filename = `${usedEngine}_visual_${Date.now()}${ext}`;
-    await pool.query(
-      `INSERT INTO media_assets(id, workspace_id, type, storage_provider, bucket, object_key, mime_type, size_bytes, original_filename, status, metadata, created_by)
-       VALUES($1, $2, 'GENERATED_ASSET', 's3', $3, $4, $5, $6, $7, 'COMPLETED', $8, $9)`,
-      [
-        assetId,
-        opts.workspaceId,
-        bucket,
-        objectKey,
-        mimeType,
-        finalBuffer.length,
-        filename,
-        JSON.stringify({
-          idempotency_key: keyHash,
-          prompt: opts.prompt,
-          engine: usedEngine,
-          aspect_ratio: aspectRatio,
-          headline: opts.headline || null,
-          logo_text: opts.logoText || null,
-          cta: opts.cta || null,
-          remaining_credits: remainingCredits,
-          content_id: opts.contentId || null,
-        }),
-        opts.userId,
-      ]
-    );
+    const filename=`${usedEngine}_visual_${Date.now()}${ext}`;
+    await uploadManagedMedia({assetId,workspaceId:opts.workspaceId,userId:opts.userId,provider,bucket,objectKey,body:finalBuffer,mimeType,filename,type:'GENERATED_ASSET',metadata:{idempotency_key:keyHash,prompt:opts.prompt,engine:usedEngine,aspect_ratio:aspectRatio,headline:opts.headline||null,logo_text:opts.logoText||null,cta:opts.cta||null,remaining_credits:remainingCredits,content_id:opts.contentId||null}});
 
     const downloadUrl = await provider.getSignedDownloadUrl(bucket, objectKey, 3600);
 
@@ -403,29 +372,8 @@ STRICT RULES:
     const { provider, bucket } = getStorageProvider();
     const objectKey = `workspaces/${opts.workspaceId}/generated_asset/${assetId}/nobg.png`;
 
-    await provider.upload({
-      bucket,
-      objectKey,
-      body: outBuffer,
-      mimeType,
-    });
-
-    const filename = `nobg_${originalName.replace(/\.[^/.]+$/, "")}.png`;
-    await pool.query(
-      `INSERT INTO media_assets(id, workspace_id, type, storage_provider, bucket, object_key, mime_type, size_bytes, original_filename, status, metadata, created_by)
-       VALUES($1, $2, 'GENERATED_ASSET', 's3', $3, $4, $5, $6, $7, 'COMPLETED', $8, $9)`,
-      [
-        assetId,
-        opts.workspaceId,
-        bucket,
-        objectKey,
-        mimeType,
-        outBuffer.length,
-        filename,
-        JSON.stringify({ operation: "remove-background", remaining_credits: remainingCredits }),
-        opts.userId,
-      ]
-    );
+    const filename=`nobg_${originalName.replace(/\.[^/.]+$/, "")}.png`;
+    await uploadManagedMedia({assetId,workspaceId:opts.workspaceId,userId:opts.userId,provider,bucket,objectKey,body:outBuffer,mimeType,filename,type:'GENERATED_ASSET',metadata:{operation:'remove-background',remaining_credits:remainingCredits}});
 
     const downloadUrl = await provider.getSignedDownloadUrl(bucket, objectKey, 3600);
     return {

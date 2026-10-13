@@ -95,6 +95,7 @@ export class AuthController {
     );
     if (!user || !valid)
       throw new UnauthorizedException("Email or password is incorrect.");
+    if(user.account_status!=='ACTIVE')throw new UnauthorizedException('This account is inactive. Contact support.');
     return this.session(user, res);
   }
   @Get("me") async me(@Req() req: AuthedRequest) {

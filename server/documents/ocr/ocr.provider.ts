@@ -42,12 +42,12 @@ export class TesseractOcrProvider implements OcrProvider {
     try {
       // @ts-ignore
       const { createWorker } = await import("tesseract.js");
-      const worker = await createWorker("eng");
+      const worker = await createWorker(process.env.OCR_LANGUAGES || "eng");
       try {
         const ret = await worker.recognize(input.buffer);
         return {
           text: ret.data.text || "",
-          confidence: (ret.data.confidence || 80) / 100,
+          confidence: (ret.data.confidence ?? 0) / 100,
           provider: "tesseract",
         };
       } finally {

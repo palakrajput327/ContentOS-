@@ -1,5 +1,6 @@
 import { resolveMetaMedia } from './meta.media.js';
 import { getStorageProvider } from './storage/storage.factory.js';
+import { uploadAutoPosterJpegToStorage } from './auto-poster.js';
 import { pool, type DB } from "./db.js";
 import {
   PLATFORM_CAPABILITIES,
@@ -10,6 +11,7 @@ import {
   type MediaType,
 } from "./platform-capabilities.js";
 import { BadRequestException } from "@nestjs/common";
+import {assertSourceMediaPublication} from './documents/source-publishing-guard.js';
 
 export interface ProviderPublishPayload {
   platform: Platform;
@@ -33,6 +35,8 @@ export async function createPublishPlan(
     youtube?: any;
     media_asset_id?: string;
     media_url?: string;
+    status?:string;
+    approved_by?:string|null;
   },
   platform: Platform,
   options?: { isPublishing?: boolean }
@@ -49,6 +53,22 @@ export async function createPublishPlan(
     variantObj.mediaAssetId ||= content.media_asset_id;
     variantObj.mediaUrl ||= content.media_url || variants?.mediaUrl;
     if (variantObj.mediaType === 'text' && (variantObj.mediaAssetId || variantObj.mediaUrl)) variantObj.mediaType = variants?.mediaType || 'image';
+    if (platform === 'Instagram' && !variantObj.mediaAssetId && !variantObj.mediaUrl) {
+      if (isPublishing) {
+        const autoPoster = await uploadAutoPosterJpegToStorage(
+          variantObj.caption || content.body || 'ContentOS Update',
+          variantObj.title || content.title || '',
+          {workspaceId:content.workspace_id,db}
+        );
+        variantObj.mediaUrl = autoPoster.url;
+      } else {
+        const appUrl = process.env.APP_URL || 'http://localhost:5173';
+        const textQuery = encodeURIComponent(variantObj.caption || content.body || 'ContentOS Update');
+        const titleQuery = encodeURIComponent(variantObj.title || content.title || '');
+        variantObj.mediaUrl = `${appUrl}/api/v1/social/meta/text-card?text=${textQuery}&title=${titleQuery}`;
+      }
+      variantObj.mediaType = 'image';
+    }
   }
   // Special case for YouTube legacy fields if present
   if (platform === "YouTube" && content.youtube) {
@@ -65,6 +85,7 @@ export async function createPublishPlan(
   }
 
   // 2. Validate against PlatformCapabilities
+  if(variantObj.mediaAssetId)await assertSourceMediaPublication(db,content.workspace_id,variantObj.mediaAssetId,content);
   const validation = validatePlatformVariant(platform, variantObj, { isPublishing });
   if (!validation.valid) {
     throw new BadRequestException(

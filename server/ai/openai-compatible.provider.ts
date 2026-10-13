@@ -130,7 +130,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     const endpoint = new URL("chat/completions", this.baseUrl).toString();
     const payload = {
       model: this.model,
-      messages: input.messages,
+      messages: input.messages.map(m=>m.images?.length?{role:m.role,content:[{type:'text',text:m.content},...m.images.map(url=>({type:'image_url',image_url:{url}}))]}:{role:m.role,content:m.content}),
       temperature: input.temperature ?? 0.2,
       max_tokens: input.maxTokens,
     };
@@ -170,7 +170,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     const payload: any = {
       model: this.model,
-      messages,
+      messages: messages.map(m=>'images' in m && m.images?.length?{role:m.role,content:[{type:'text',text:m.content},...m.images.map(url=>({type:'image_url',image_url:{url}}))]}:{role:m.role,content:m.content}),
       temperature: input.temperature ?? 0.1,
       max_tokens: input.maxTokens ?? 2048,
       response_format: { type: "json_object" },

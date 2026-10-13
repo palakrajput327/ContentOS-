@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { NavLink, Link, Outlet, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { NavLink, Link, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard,
@@ -26,6 +26,8 @@ import { data, request } from "../lib/api";
 import { useSession } from "../lib/session";
 import { platforms, type Snapshot } from "../lib/model";
 import { NotificationBell } from "./NotificationBell";
+import { ThemeToggle } from '../lib/appearance';
+import WorkspaceSkeleton from './WorkspaceSkeleton';
 export const useWorkspace = () => {
   const id = useSession((x) => x.workspaceId);
   return useQuery({ queryKey: ["workspace", id], queryFn: data.snapshot, refetchInterval: 15000 });
@@ -33,6 +35,33 @@ export const useWorkspace = () => {
 export default function Shell() {
   const { data: s, error, isLoading } = useWorkspace();
   const [mobile, setMobile] = useState(false);
+  const [narrow,setNarrow] = useState(()=>window.matchMedia('(max-width: 850px)').matches);
+  useEffect(()=>{
+    const media=window.matchMedia('(max-width: 850px)');
+    const resize=()=>{setNarrow(media.matches);if(!media.matches)setMobile(false);};
+    media.addEventListener('change',resize);
+    return ()=>media.removeEventListener('change',resize);
+  },[]);
+  const location = useLocation();
+  const sidebarRef = useRef<HTMLElement>(null);
+  const menuRef = useRef<HTMLButtonElement>(null);
+  useEffect(()=>{
+    if (!mobile) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow='hidden';
+    sidebarRef.current?.querySelector<HTMLElement>('button')?.focus();
+    const onKey=(event:KeyboardEvent)=>{
+      if (event.key==='Escape') setMobile(false);
+      if (event.key==='Tab') {
+        const focusable=Array.from(sidebarRef.current?.querySelectorAll<HTMLElement>('a[href],button,select')||[]).filter(el=>el.getClientRects().length && !el.hasAttribute('disabled'));
+        const first=focusable[0],last=focusable[focusable.length-1];
+        if (event.shiftKey && document.activeElement===first) {event.preventDefault();last?.focus();}
+        else if(!event.shiftKey && document.activeElement===last) {event.preventDefault();first?.focus();}
+      }
+    };
+    document.addEventListener('keydown',onKey);
+    return ()=>{document.body.style.overflow=previous;document.removeEventListener('keydown',onKey);menuRef.current?.focus();};
+  },[mobile]);
   const session = useSession();
   const [search, setSearch] = useState("");
   const [notifications, setNotifications] = useState(false);
@@ -47,11 +76,13 @@ export default function Shell() {
     ["studio", "AI Studio", Sparkles],
     ["compose", "Create post", SquarePen],
     ["calendar", "Calendar", CalendarDays],
+    ["festivals", "Festival Automation", Sparkles],
     ["library", "Content library", Library],
   ] as const;
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${mobile ? "mobile-open" : ""}`}>
+      <a href="#workspace-main" className="skip-link">Skip to content</a>
+      <aside ref={sidebarRef} inert={narrow && !mobile} id="workspace-navigation" aria-label="Workspace navigation" className={`sidebar ${mobile ? "mobile-open" : ""}`}>
         <div className="sidebar-logo">
           <Link to="/">
             <Logo />
@@ -203,8 +234,11 @@ export default function Shell() {
           </form>
           <div className="row">
             <button
+              ref={menuRef}
               className="icon-button mobile-only"
               aria-label="Open navigation"
+              aria-expanded={mobile}
+              aria-controls="workspace-navigation"
               onClick={() => setMobile(true)}
             >
               <Menu size={21} />
@@ -238,7 +272,7 @@ export default function Shell() {
                     <option
                       value={w.id}
                       key={w.id}
-                      style={{ background: "#18222b", color: "#f1f5f9" }}
+                      style={{ background: "var(--surface2)", color: "var(--ink)" }}
                     >
                       {w.name}
                     </option>
@@ -250,6 +284,7 @@ export default function Shell() {
             </span>
           </div>
           <div className="row">
+            <ThemeToggle />
             <NotificationBell />
             <span className="timezone-label">{session.user?.name}</span>
             <Link
@@ -275,9 +310,9 @@ export default function Shell() {
             </Link>
           </div>
         )}
-        <main className="app-main">
+        <main className="app-main" id="workspace-main" tabIndex={-1}>
           {isLoading ? (
-            <div className="loading-state">Loading your workspace…</div>
+            <WorkspaceSkeleton />
           ) : error ? (
             <div className="empty">
               <h2>We couldn’t load your workspace.</h2>
@@ -291,11 +326,11 @@ export default function Shell() {
               </Button>
             </div>
           ) : (
-            s && <Outlet context={s} />
+            s && <div className="page-enter" key={location.pathname}><Outlet context={s} /></div>
           )}
         </main>
         <footer className="app-footer">
-          A little structure. More space to create.<span>ContentOS / MVP</span>
+          A little structure. More space to create.<span>Hindustan Social Network · ContentOS</span>
         </footer>
       </div>
     </div>

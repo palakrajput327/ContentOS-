@@ -19,7 +19,7 @@ export async function request<T>(
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  const isAuthRequest = path.startsWith("/auth/");
+  const isAuthRequest = path.startsWith("/auth/") || path.startsWith("/admin/");
   if (res.status === 401 && retry && !isAuthRequest) {
     try {
       await refresh();
@@ -136,6 +136,7 @@ export interface KnowledgeItem {
   source_excerpt?: string;
   confidence?: number;
   status: "EXTRACTED" | "CONFIRMED" | "EDITED" | "REJECTED" | "LOCKED";
+  metadata?:{origin?:string;evidenceKind?:string;sourceMediaAssetId?:string;sourceReferenceId?:string;originalChecksum?:string};
   created_at: string;
 }
 

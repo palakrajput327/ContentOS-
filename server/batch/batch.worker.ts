@@ -1,4 +1,5 @@
 import { Worker, UnrecoverableError } from "bullmq";
+import { assertDailySlot } from '../calendar/daily-posting.js';
 import { randomUUID } from "node:crypto";
 import { pool, transaction, audit, type DB } from "../db.js";
 import { redis, publishingQueue } from "../queues.js";
@@ -104,6 +105,7 @@ export async function executeChildItem(db: DB, item: any, workspaceId: string, s
       ).rows[0];
 
       validateSchedule(post.status, ws?.require_approval ?? true, at);
+      await assertDailySlot(db, workspaceId, post, at);
 
       const targetPlatforms = post.platforms as string[];
       for (const platform of targetPlatforms) {

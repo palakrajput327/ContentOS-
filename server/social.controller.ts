@@ -86,6 +86,77 @@ export class SocialController {
     stream.on('error',()=>res.destroy());
     stream.pipe(res);
   }
+  @Public()
+  @Get('social/meta/text-card')
+  async metaTextCard(@Query('text') text: string, @Query('title') titleStr: string, @Res() res: Response) {
+    const cleanText = (text || 'ContentOS Post').slice(0, 500);
+    const cleanTitle = (titleStr || '').slice(0, 80);
+
+    const words = cleanText.split(/\s+/);
+    const lines: string[] = [];
+    let currentLine = '';
+    for (const word of words) {
+      if ((currentLine + ' ' + word).length > 28) {
+        lines.push(currentLine.trim());
+        currentLine = word;
+      } else {
+        currentLine += (currentLine ? ' ' : '') + word;
+      }
+    }
+    if (currentLine) lines.push(currentLine.trim());
+    const displayLines = lines.slice(0, 10);
+
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const svg = `<svg width="1080" height="1080" viewBox="0 0 1080 1080" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#0f172a"/>
+          <stop offset="50%" stop-color="#1e1b4b"/>
+          <stop offset="100%" stop-color="#311042"/>
+        </linearGradient>
+        <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#6366f1"/>
+          <stop offset="100%" stop-color="#a855f7"/>
+        </linearGradient>
+      </defs>
+      <rect width="1080" height="1080" fill="url(#bg)"/>
+      <rect x="80" y="80" width="920" height="12" fill="url(#accent)" rx="6"/>
+      ${cleanTitle ? `<text x="80" y="160" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="30" font-weight="700" fill="#a855f7" letter-spacing="1.5">${esc(cleanTitle.toUpperCase())}</text>` : ''}
+      <g transform="translate(80, ${cleanTitle ? 260 : 220})">
+        ${displayLines.map((line, idx) => `<text x="0" y="${idx * 68}" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="44" font-weight="600" fill="#f8fafc">${esc(line)}</text>`).join('\n')}
+      </g>
+      <rect x="80" y="960" width="920" height="2" fill="rgba(255,255,255,0.15)"/>
+      <text x="80" y="1005" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="24" font-weight="500" fill="#94a3b8">ContentOS Brand Post</text>
+    </svg>`;
+
+    const executable = ffmpeg as unknown as string | null;
+    if (executable) {
+      const { Readable } = await import('node:stream');
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      const conversion = spawn(executable, [
+        '-hide_banner', '-loglevel', 'error',
+        '-f', 'image2', '-i', 'pipe:0',
+        '-frames:v', '1',
+        '-f', 'image2pipe', '-vcodec', 'mjpeg', '-q:v', '2', 'pipe:1'
+      ], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+
+      const timeout = setTimeout(() => { conversion.kill(); if (!res.headersSent) res.destroy(); }, 15000);
+      conversion.stderr.resume();
+      conversion.on('close', () => clearTimeout(timeout));
+      res.on('close', () => { clearTimeout(timeout); if (conversion.exitCode === null) conversion.kill(); });
+
+      const stream = new Readable();
+      stream.push(Buffer.from(svg));
+      stream.push(null);
+      stream.pipe(conversion.stdin);
+      conversion.stdout.pipe(res);
+      return;
+    }
+    res.status(400).json({
+      error: "Instagram auto-poster generation failed: JPEG image conversion unavailable on server. Upload a JPG or PNG image.",
+    });
+  }
   @WorkspaceRequired()
   @Get("social/accounts")
   async listAccounts(@Req() r: AuthedRequest) {
@@ -876,7 +947,7 @@ export class SocialController {
     );
 
     const config =
-      acc.platform === "telegram"
+      String(acc.platform).toLowerCase() === "telegram"
         ? { botToken: token, chatId: acc.provider_id }
         : { token, destination: acc.provider_id };
     const valResult = await provider.validateConnection(config);

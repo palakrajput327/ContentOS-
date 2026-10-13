@@ -3,6 +3,7 @@ export interface MetaPost {
   destination: string;
   text: string;
   mediaUrl?: string;
+  mediaUrls?: string[];
   mediaType?: string;
   metadata?: Record<string, any>;
 }
@@ -92,20 +93,57 @@ export async function publishMeta(
 ): Promise<string> {
   if (!token || !post.destination)
     throw new MetaPublishError("Reconnect Meta before publishing.");
-  const type = post.mediaType || (post.mediaUrl ? "image" : "text");
+  const type = post.mediaType || (post.mediaUrl || post.mediaUrls?.length ? "image" : "text");
   if (!["text", "image", "video"].includes(type))
     throw new MetaPublishError(
       "Meta supports text (Facebook), images and video/Reels here; documents and audio-only posts are unsupported.",
     );
-  if (platform === "instagram" && type === "text")
+  if (platform === "instagram" && type === "text" && !post.mediaUrl && !post.mediaUrls?.length)
     throw new MetaPublishError(
       "Instagram requires an image or video; text-only publishing is unsupported.",
     );
-  if (type !== "text" && !post.mediaUrl)
+  if (type !== "text" && !post.mediaUrl && !post.mediaUrls?.length)
     throw new MetaPublishError("Attach an image or video before publishing.");
-  const url = post.mediaUrl ? publicMetaUrl(post.mediaUrl) : "";
+
+  const rawUrls: string[] = post.mediaUrls && post.mediaUrls.length ? post.mediaUrls : (post.mediaUrl ? [post.mediaUrl] : []);
+  const url = post.mediaUrl ? publicMetaUrl(post.mediaUrl) : (rawUrls[0] ? publicMetaUrl(rawUrls[0]) : "");
   let submitted = false;
   try {
+    if (platform === "instagram" && rawUrls.length > 1) {
+      const itemIds: string[] = [];
+      for (const itemUrl of rawUrls.slice(0, 20)) {
+        const item = await metaRequest(
+          post.destination + "/media",
+          token,
+          { image_url: publicMetaUrl(itemUrl), is_carousel_item: "true" },
+          "POST",
+        );
+        if (!item.id) throw new MetaPublishError("Instagram did not return a carousel item ID.");
+        await waitMetaReady(item.id, token, "instagram");
+        itemIds.push(item.id);
+      }
+      const carousel = await metaRequest(
+        post.destination + "/media",
+        token,
+        {
+          media_type: "CAROUSEL",
+          children: itemIds.join(","),
+          caption: post.text,
+        },
+        "POST",
+      );
+      if (!carousel.id) throw new MetaPublishError("Instagram did not return a carousel container ID.");
+      await waitMetaReady(carousel.id, token, "instagram");
+      submitted = true;
+      const published = await metaRequest(
+        post.destination + "/media_publish",
+        token,
+        { creation_id: carousel.id },
+        "POST",
+      );
+      if (!published.id) throw new MetaPublishError("Instagram did not return a published carousel ID.", true);
+      return published.id;
+    }
     if (platform === "instagram") {
       const container = await metaRequest(
         post.destination + "/media",

@@ -10,6 +10,7 @@ import Composer from "./pages/Composer";
 import AIStudio from "./pages/AIStudio";
 import Library from "./pages/Library";
 import Calendar from "./pages/Calendar";
+import FestivalAutomation from './pages/FestivalAutomation';
 import {
   Channels,
   Members,
@@ -91,6 +92,8 @@ export default function App() {
         <Route path="library" element={<Library />} />
         <Route path="approvals" element={<Library approvals />} />
         <Route path="calendar" element={<Calendar />} />
+        <Route path="festivals" element={<FestivalAutomation />} />
+        <Route path="automation" element={<Navigate to="/app/studio?tab=automation" replace />} />
         <Route path="channels" element={<Channels />} />
         <Route path="members" element={<Members />} />
         <Route path="activity" element={<Activity />} />

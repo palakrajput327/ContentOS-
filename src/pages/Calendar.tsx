@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { Link, useOutletContext, useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronLeft,
   ChevronRight,
@@ -16,17 +16,40 @@ import {
   Edit,
   Trash2,
 } from "lucide-react";
-import { Button, PlatformIcon, StatusBadge, Empty } from "../components/ui";
+import { Button, PlatformIcon, StatusBadge, Empty, ModalFrame } from "../components/ui";
 import { type Snapshot, type Platform, type Status, dateLabel } from "../lib/model";
 import { request } from "../lib/api";
 import { toast } from "sonner";
 import { PostingSlotsModal } from "../components/PostingSlotsModal";
 import { BatchRescheduleModal } from "../components/BatchRescheduleModal";
+import { useSession } from '../lib/session';
+import './studio-integration.css';
 
 export default function Calendar() {
   const s = useOutletContext<Snapshot>();
   const nav = useNavigate();
   const query = useQueryClient();
+  const demo = useSession(x=>x.demo);
+  const canApprove = ['Owner','Admin','Approver'].includes(s.workspace.role);
+  const canSchedule = ['Owner','Admin','Content Manager'].includes(s.workspace.role);
+  const canEdit = ['Owner','Admin','Content Manager','Editor'].includes(s.workspace.role);
+  const [proposalBusy,setProposalBusy] = useState(false);
+  async function scheduleProposal(post: Snapshot['posts'][number]) {
+    setProposalBusy(true);
+    try {
+      await request(`/calendar/proposals/${post.id}/schedule`,'POST',{approve:post.status==='NEEDS_REVIEW',version:post.version});
+      await Promise.all([query.invalidateQueries({queryKey:['workspace']}),query.invalidateQueries({queryKey:['knowledge-automation',s.workspace.id]})]);
+      setDetailPostId(null);
+      toast.success('Post scheduled at the proposed time');
+    } catch (error: any) { toast.error(error.message || 'Scheduling failed. Review the post and its connected accounts.'); }
+    finally { setProposalBusy(false); }
+  }
+  const proposals = useQuery({queryKey:['knowledge-automation',s.workspace.id],queryFn:()=>request<{plans:{content_id:string|null;state:string;proposed_at:string}[]}>('/knowledge-automation'),enabled:!demo,refetchInterval:15000});
+  const calendarPosts = useMemo(()=>s.posts.map(post=>{
+    const proposal = proposals.data?.plans.find(p=>p.content_id===post.id && p.state==='REVIEW');
+    return {...post,proposedAt: !post.scheduledAt && proposal && ['NEEDS_REVIEW','APPROVED'].includes(post.status) ? proposal.proposed_at : undefined};
+  }),[s.posts,proposals.data]);
+  const displayAt = (post: {scheduledAt?:string;proposedAt?:string}) => post.scheduledAt || post.proposedAt;
 
   // Navigation & View state
   const [cursor, setCursor] = useState(new Date());
@@ -50,13 +73,13 @@ export default function Calendar() {
 
   // Filtered post items
   const filteredPosts = useMemo(() => {
-    return s.posts.filter((p) => {
-      if (!p.scheduledAt && view !== "Agenda") return false;
+    return calendarPosts.filter((p) => {
+      if (!displayAt(p) && view !== "Agenda") return false;
       if (selectedPlatform !== "ALL" && !p.platforms.includes(selectedPlatform)) return false;
       if (selectedStatus !== "ALL" && p.status !== selectedStatus) return false;
       return true;
     });
-  }, [s.posts, view, selectedPlatform, selectedStatus]);
+  }, [calendarPosts, view, selectedPlatform, selectedStatus]);
 
   // Date formatting helpers
   const y = cursor.getFullYear();
@@ -132,7 +155,7 @@ export default function Calendar() {
     }
   }
 
-  const detailPost = s.posts.find((p) => p.id === detailPostId);
+  const detailPost = calendarPosts.find((p) => p.id === detailPostId);
 
   return (
     <div style={{ paddingBottom: "40px" }}>
@@ -147,7 +170,7 @@ export default function Calendar() {
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: "10px" }}>
+        <div className="page-actions" style={{ display: "flex", gap: "10px" }}>
           <Button variant="secondary" onClick={() => setShowSlotsModal(true)}>
             <Clock size={16} />
             Posting Slots
@@ -208,15 +231,16 @@ export default function Calendar() {
         </div>
 
         {/* Filters */}
-        <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+        <div className="calendar-filters" style={{ display: "flex", gap: "12px", alignItems: "center" }}>
           <select
+            aria-label="Filter calendar by platform"
             value={selectedPlatform}
             onChange={(e) => setSelectedPlatform(e.target.value as any)}
             style={{
-              background: "rgba(255, 255, 255, 0.05)",
-              border: "1px solid rgba(255, 255, 255, 0.1)",
+              background: "var(--surface2)",
+              border: "1px solid var(--border)",
               borderRadius: "8px",
-              color: "#fff",
+              color: "var(--ink)",
               padding: "6px 12px",
               fontSize: "0.85rem",
             }}
@@ -228,13 +252,14 @@ export default function Calendar() {
           </select>
 
           <select
+            aria-label="Filter calendar by status"
             value={selectedStatus}
             onChange={(e) => setSelectedStatus(e.target.value as any)}
             style={{
-              background: "rgba(255, 255, 255, 0.05)",
-              border: "1px solid rgba(255, 255, 255, 0.1)",
+              background: "var(--surface2)",
+              border: "1px solid var(--border)",
               borderRadius: "8px",
-              color: "#fff",
+              color: "var(--ink)",
               padding: "6px 12px",
               fontSize: "0.85rem",
             }}
@@ -275,7 +300,7 @@ export default function Calendar() {
               const dateStrKey = `${y}-${String(m + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
 
               const dayPosts = filteredPosts.filter(
-                (p) => p.scheduledAt && dateToKey(new Date(p.scheduledAt)) === dateStrKey
+                (p) => displayAt(p) && dateToKey(new Date(displayAt(p)!)) === dateStrKey
               );
 
               const isDropTarget = dropTargetDate === dateStrKey;
@@ -301,16 +326,20 @@ export default function Calendar() {
                     dayPosts.map((p) => (
                       <div
                         key={p.id}
-                        draggable
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`View ${p.title}`}
+                        onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();setDetailPostId(p.id);}}}
+                        draggable={!p.proposedAt}
                         onDragStart={(e) => handleDragStart(e, p.id)}
                         onClick={() => setDetailPostId(p.id)}
-                        className="calendar-post"
-                        style={{ cursor: "grab" }}
+                        className={`calendar-post ${p.proposedAt ? 'calendar-proposal' : ''}`}
+                        style={{ cursor: p.proposedAt ? "pointer" : "grab" }}
                       >
                         <div className="row">
                           <PlatformIcon platform={p.platforms[0]} />
                           <small>
-                            {new Date(p.scheduledAt!).toLocaleTimeString("en-US", {
+                            {new Date(displayAt(p)!).toLocaleTimeString("en-US", {
                               hour: "numeric",
                               minute: "2-digit",
                               timeZone: tz,
@@ -318,6 +347,7 @@ export default function Calendar() {
                           </small>
                         </div>
                         <strong>{p.title}</strong>
+                        {p.proposedAt && <span className="calendar-proposal-label">Proposed · approval & scheduling needed</span>}
                       </div>
                     ))}
                 </div>
@@ -332,7 +362,7 @@ export default function Calendar() {
         <div className="panel" style={{ padding: "20px" }}>
           {filteredPosts.length ? (
             filteredPosts
-              .sort((a, b) => (a.scheduledAt || "").localeCompare(b.scheduledAt || ""))
+              .sort((a, b) => (displayAt(a) || "").localeCompare(displayAt(b) || ""))
               .map((p) => (
                 <div
                   key={p.id}
@@ -345,7 +375,7 @@ export default function Calendar() {
                     <div>
                       <strong>{p.title}</strong>
                       <div style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-                        {p.scheduledAt ? dateLabel(p.scheduledAt, tz) : "Unscheduled Draft"}
+                        {displayAt(p) ? `${p.proposedAt ? 'Proposed · ' : ''}${dateLabel(displayAt(p)!, tz)}` : "Unscheduled Draft"}
                       </div>
                     </div>
                   </div>
@@ -370,19 +400,7 @@ export default function Calendar() {
 
       {/* QUICK DETAIL MODAL */}
       {detailPost && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 999,
-            background: "rgba(0,0,0,0.75)",
-            backdropFilter: "blur(6px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "20px",
-          }}
-        >
+        <ModalFrame open={!!detailPost} onClose={()=>setDetailPostId(null)} title={detailPost.title} className="calendar-dialog">
           <div
             className="panel"
             style={{
@@ -390,8 +408,8 @@ export default function Calendar() {
               maxWidth: "540px",
               borderRadius: "16px",
               overflow: "hidden",
-              background: "var(--color-bg-panel, #18181b)",
-              border: "1px solid rgba(255,255,255,0.12)",
+              background: "var(--color-bg-panel, var(--surface2))",
+              border: "1px solid var(--border)",
               padding: "24px",
             }}
           >
@@ -405,32 +423,37 @@ export default function Calendar() {
                 </div>
                 <h2 style={{ fontSize: "1.2rem", fontWeight: 700, margin: 0 }}>{detailPost.title}</h2>
               </div>
-              <button onClick={() => setDetailPostId(null)} className="icon-button">
+              <button onClick={() => setDetailPostId(null)} aria-label="Close post details" className="icon-button">
                 <XCircle size={20} />
               </button>
             </div>
 
-            <p style={{ fontSize: "0.9rem", color: "var(--color-text-muted)", background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "8px", marginBottom: "16px" }}>
+            <p style={{ fontSize: "0.9rem", color: "var(--color-text-muted)", background: "var(--border)", padding: "12px", borderRadius: "8px", marginBottom: "16px" }}>
               {detailPost.body}
             </p>
 
             <div style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", marginBottom: "20px" }}>
-              Scheduled Time: <strong>{detailPost.scheduledAt ? dateLabel(detailPost.scheduledAt, tz) : "Not Scheduled"}</strong>
+              {detailPost.proposedAt ? 'Proposed time (approval and scheduling needed)' : 'Scheduled time'}: <strong>{displayAt(detailPost) ? dateLabel(displayAt(detailPost)!, tz) : "Not scheduled"}</strong>
             </div>
 
             <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
               <Button variant="ghost" onClick={() => setDetailPostId(null)}>Close</Button>
-              {detailPost.status === "APPROVED" && (
+              {detailPost.proposedAt && canSchedule && (detailPost.status === 'APPROVED' || canApprove) && (
+                <Button disabled={proposalBusy} onClick={() => scheduleProposal(detailPost)}>
+                  <CheckCircle size={16} /> {detailPost.status === 'NEEDS_REVIEW' ? 'Approve & schedule' : 'Schedule proposed time'}
+                </Button>
+              )}
+              {detailPost.status === "APPROVED" && canSchedule && (
                 <Button variant="secondary" onClick={() => { handleAutoSchedule(detailPost.id); setDetailPostId(null); }}>
                   <Sparkles size={16} /> Auto-Schedule
                 </Button>
               )}
-              <Button variant="primary" onClick={() => nav(`/app/compose?id=${detailPost.id}`)}>
+              {canEdit && <Button variant="primary" onClick={() => nav(`/app/compose?id=${detailPost.id}`)}>
                 <Edit size={16} /> Edit Post
-              </Button>
+              </Button>}
             </div>
           </div>
-        </div>
+        </ModalFrame>
       )}
 
       {/* POSTING SLOTS MODAL */}
