@@ -51,6 +51,8 @@ scratch/
 
 # Local deployment backups and sensitive operational artifacts
 .deploy-backup-*/
+.deploy-stage-*/
+.deploy-lock/
 *.rdb
 *.sql.gz
 scripts/update-telegram-token.mjs

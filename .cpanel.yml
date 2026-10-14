@@ -8,7 +8,8 @@ deployment:
     #  Frontend:   /home/hindust1/public_html/                           #
     # ================================================================== #
 
-    # One shell owns activation, build, verification and static asset copying.
+    # Bootstrap from the Git checkout, not the stale production script.
     # This runs only when an operator invokes cPanel Git deployment.
     # It never migrates/imports data, selects a queue backend or installs cron jobs.
-    - /bin/bash /home/hindust1/api.hidustansocialnetwork.in/deploy/cpanel-deploy.sh --restart
+    # Preparation updates files/dependencies only; it never restarts the API.
+    - /bin/bash /home/hindust1/repositories/ContentOS-/deploy/cpanel-deploy.sh
