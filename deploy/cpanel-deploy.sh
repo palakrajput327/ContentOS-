@@ -1,96 +1,80 @@
 #!/usr/bin/env bash
-# =============================================================================
-# ContentOS — cPanel Manual Deployment Script
-# Run this in cPanel Terminal AFTER cloning the repo and setting up .env
-#
-# Usage:
-#   bash deploy/cpanel-deploy.sh
-#
-# Prerequisites:
-#   - Repo cloned at: /home/hindust1/contentos/
-#   - .env placed at: /home/hindust1/contentos/.env
-#   - Node.js 22 activated in cPanel Setup Node.js App
-#   - Run this script from the repo root: /home/hindust1/contentos/
-# =============================================================================
-
+# Operator-invoked deployment only; never run by npm lifecycle hooks.
+# Usage: bash deploy/cpanel-deploy.sh [--restart]
+# Production .env, uploads and application data are preserved.
 set -euo pipefail
 
-# ── Colour helpers ────────────────────────────────────────────────────────────
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-info()    { echo -e "${GREEN}[DEPLOY]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-error()   { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
-
-# ── Guard: must be run from repo root ─────────────────────────────────────────
-[[ -f "package.json" && -f "app.mjs" ]] || error "Run this script from the repo root (e.g. /home/hindust1/contentos/)"
-
-# ── Activate Node.js 22 (cPanel path) ────────────────────────────────────────
-APP_ROOT=$(pwd -P)
-[[ "$APP_ROOT" == "$HOME/"* ]] || error "Application must be inside the cPanel user's home directory."
-ACTIVATE="$HOME/nodevenv/${APP_ROOT#"$HOME/"}/22/bin/activate"
-[[ -f "$ACTIVATE" ]] || error "Activate/create the Node.js 22 app in cPanel first: $ACTIVATE is missing."
+APP_TARGET=/home/hindust1/api.hidustansocialnetwork.in
+FRONTEND_TARGET=/home/hindust1/public_html
+ACTIVATE=/home/hindust1/nodevenv/api.hidustansocialnetwork.in/22/bin/activate
+RESTART=false
+if [[ "${1:-}" == --restart && $# == 1 ]]; then
+  RESTART=true
+elif [[ $# != 0 ]]; then
+  echo "Usage: bash deploy/cpanel-deploy.sh [--restart]" >&2
+  exit 1
+fi
+error() { echo "[DEPLOY ERROR] $*" >&2; exit 1; }
+[[ -d "$APP_TARGET" && -d "$FRONTEND_TARGET" ]] || error "Expected production application/frontend directories are missing."
+[[ $(cd "$FRONTEND_TARGET" && pwd -P) == "$FRONTEND_TARGET" ]] || error "Frontend root must not redirect through a symlink."
+cd "$APP_TARGET"
+[[ "$(pwd -P)" == "$APP_TARGET" ]] || error "Application root must resolve to $APP_TARGET."
+[[ -f package.json && -f app.mjs && -f .env ]] || error "Application files and existing .env are required."
+[[ -f "$ACTIVATE" ]] || error "Create the CloudLinux Node.js 22 application first."
+# CloudLinux activation may reference unset shell variables.
+set +u
 source "$ACTIVATE"
-[[ -L node_modules ]] || error "CloudLinux node_modules symlink is missing. Repair it through cPanel before deploying."
-NODE_VER=$(node --version 2>/dev/null || echo "missing")
-info "Node.js: $NODE_VER"
-[[ "$NODE_VER" == v22* ]] || error "Node.js 22 required. Got: $NODE_VER. Activate it in cPanel Setup Node.js App first."
+set -u
+[[ $(node --version) == v22.* ]] || error "CloudLinux Node.js 22 is required."
+[[ -L node_modules ]] || error "CloudLinux node_modules symlink is missing."
+EXPECTED_MODULES="${ACTIVATE%/bin/activate}/lib/node_modules"
+[[ $(readlink -f node_modules) == $(readlink -f "$EXPECTED_MODULES") ]] || error "Unexpected node_modules symlink target."
 
-# ── Guard: .env must exist (never auto-create it) ────────────────────────────
-[[ -f ".env" ]] || error ".env not found. Copy deploy/.env.production.example to .env and fill in all values."
-
-# ── Backup existing build outputs (safe rollback) ────────────────────────────
-BACKUP_DIR=".deploy-backup-$(date +%Y%m%d-%H%M%S)"
-info "Creating backup at $BACKUP_DIR ..."
+BACKUP_DIR=".deploy-backup-$(date +%Y%m%d-%H%M%S)-$$"
 mkdir -p "$BACKUP_DIR"
-[[ -d "dist" ]]     && cp -r dist     "$BACKUP_DIR/dist"
-[[ -d "dist-api" ]] && cp -r dist-api "$BACKUP_DIR/dist-api"
-info "Backup complete: $BACKUP_DIR"
+for directory in dist dist-api; do
+  if [[ -d "$directory" ]]; then cp -a "$directory" "$BACKUP_DIR/$directory"; fi
+ done
+# Back up only frontend files this script intentionally replaces.
+for file in index.html favicon.svg .htaccess; do
+  if [[ -f "$FRONTEND_TARGET/$file" ]]; then cp -a "$FRONTEND_TARGET/$file" "$BACKUP_DIR/frontend-$file"; fi
+ done
 
-# ── Install dependencies (devDeps included for build) ────────────────────────
-info "Installing dependencies (including devDependencies for build) ..."
 npm install --include=dev --ignore-scripts --no-audit --no-fund
-
-# ── Build ─────────────────────────────────────────────────────────────────────
-info "Building backend (tsc) and frontend (vite) ..."
+[[ -L node_modules ]] || error "Install replaced CloudLinux's dependency symlink."
 node scripts/build.mjs
-
-# ── Validate build outputs ────────────────────────────────────────────────────
-info "Validating build outputs ..."
-[[ -f "dist-api/phase-main.js" ]] || error "Build failed: dist-api/phase-main.js not found. Rolling back would restore $BACKUP_DIR."
-[[ -f "dist/index.html" ]]        || error "Build failed: dist/index.html not found. Rolling back would restore $BACKUP_DIR."
-info "✓ dist-api/phase-main.js exists"
-info "✓ dist/index.html exists"
-
-# ── Prune devDependencies ─────────────────────────────────────────────────────
-info "Pruning devDependencies from node_modules ..."
+[[ -f dist-api/phase-main.js && -f dist-api/cron-worker.js && -f dist/index.html ]] || error "Required build outputs are missing."
 npm prune --omit=dev --ignore-scripts
-
-info "Installing and verifying the Linux FFmpeg executable ..."
+[[ -L node_modules ]] || error "Prune replaced CloudLinux's dependency symlink."
 npm rebuild ffmpeg-static --ignore-scripts=false
 node scripts/verify-ffmpeg.mjs
 
-# ── Ensure uploads/ directory exists (never delete it) ───────────────────────
-mkdir -p uploads
-info "✓ uploads/ directory preserved"
-
-# ── Final instructions ────────────────────────────────────────────────────────
-echo ""
-info "============================================================"
-info " DEPLOY COMPLETE"
-info "============================================================"
-info " Next steps:"
-info "   1. Go to cPanel > Setup Node.js App"
-info "   2. Confirm: Application root = contentos/"
-info "   3. Confirm: Application startup file = app.mjs"
-info "   4. Confirm: Application URL = api.hidustansocialnetwork.in"
-info "   5. Click 'Restart' in Setup Node.js App"
-info ""
-warn " If something is wrong, restore the backup with:"
-warn "   rm -rf dist dist-api && cp -r $BACKUP_DIR/dist . && cp -r $BACKUP_DIR/dist-api ."
-info "============================================================"
-
-# ── Cleanup old backups (keep last 3) ────────────────────────────────────────
-BACKUP_COUNT=$(ls -d .deploy-backup-* 2>/dev/null | wc -l)
-if [[ "$BACKUP_COUNT" -gt 3 ]]; then
-  warn "More than 3 deploy backups found. Clean old ones with: ls -d .deploy-backup-*"
+# Copy only generated frontend outputs; never recursively copy all of dist.
+# .env, uploads, database files and custom root content are not copy targets.
+for file in index.html favicon.svg .htaccess; do
+  if [[ -f "dist/$file" && ! -L "dist/$file" ]]; then
+    [[ ! -L "$FRONTEND_TARGET/$file" ]] || error "Frontend output target is a symlink: $file"
+    cp "dist/$file" "$FRONTEND_TARGET/$file"
+  fi
+ done
+[[ ! -L "$FRONTEND_TARGET/assets" ]] || error "Frontend assets directory must not be a symlink."
+mkdir -p "$FRONTEND_TARGET/assets"
+if [[ -d dist/assets && ! -L dist/assets ]]; then
+  for file in dist/assets/*; do
+    [[ -f "$file" && ! -L "$file" ]] || continue
+    name=${file##*/}
+    [[ "$name" =~ ^[A-Za-z0-9_-]+\.(js|css)$ ]] || continue
+    [[ ! -L "$FRONTEND_TARGET/assets/$name" ]] || error "Frontend asset target is a symlink: $name"
+    if [[ -f "$FRONTEND_TARGET/assets/$name" ]]; then
+      cp -a "$FRONTEND_TARGET/assets/$name" "$BACKUP_DIR/frontend-$name"
+    fi
+    cp "$file" "$FRONTEND_TARGET/assets/$name"
+  done
 fi
+# No migrations, reconciliation, QUEUE_BACKEND changes or worker/cron startup.
+if $RESTART; then
+  mkdir -p tmp
+  touch tmp/restart.txt
+fi
+echo "[DEPLOY] Build/dependencies/static assets verified. Backup: $APP_TARGET/$BACKUP_DIR"
+echo "[DEPLOY] .env, uploads and application data preserved. Queue cutover requires separate approval."

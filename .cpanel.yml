@@ -8,29 +8,7 @@ deployment:
     #  Frontend:   /home/hindust1/public_html/                           #
     # ================================================================== #
 
-    # 1. Use the application's CloudLinux Node.js 22 environment.
-    - source /home/hindust1/nodevenv/api.hidustansocialnetwork.in/22/bin/activate
-    - test -L node_modules
-
-    # 2. Install prod + dev deps (dev needed for tsc)
-    - npm install --include=dev --ignore-scripts --no-audit --no-fund
-
-    # 3. Build backend TypeScript → dist-api/
-    - npx tsc -p server/tsconfig.json
-
-    # 4. Remove devDeps to save disk space
-    - npm prune --omit=dev --ignore-scripts
-
-    # Install only FFmpeg's lifecycle script; the application has no postinstall build.
-    - npm rebuild ffmpeg-static --ignore-scripts=false
-    - node scripts/verify-ffmpeg.mjs
-
-    # 5. Copy frontend build (dist/) → public_html/
-    - /bin/cp -Rf dist/. /home/hindust1/public_html/
-
-    # 6. Verify backend build
-    - test -f dist-api/phase-main.js || (echo "ERROR: Backend build failed" && exit 1)
-
-    # 7. Restart Node.js app (Passenger restart trigger)
-    - /bin/mkdir -p /home/hindust1/api.hidustansocialnetwork.in/tmp
-    - /bin/touch /home/hindust1/api.hidustansocialnetwork.in/tmp/restart.txt
+    # One shell owns activation, build, verification and static asset copying.
+    # This runs only when an operator invokes cPanel Git deployment.
+    # It never migrates/imports data, selects a queue backend or installs cron jobs.
+    - /bin/bash /home/hindust1/api.hidustansocialnetwork.in/deploy/cpanel-deploy.sh --restart

@@ -48,3 +48,16 @@ uploads/
 # Scratch & OCR cache
 scratch/
 *.traineddata
+
+# Local deployment backups and sensitive operational artifacts
+.deploy-backup-*/
+*.rdb
+*.sql.gz
+scripts/update-telegram-token.mjs
+err.txt
+prompt.txt
+test_out.txt
+text.txt
+_git_diff_stat.txt
+_git_status.txt
+_storage_diff.txt
