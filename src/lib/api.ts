@@ -10,7 +10,8 @@ export async function request<T>(
   retry = true,
 ): Promise<T> {
   const wid = useSession.getState().workspaceId;
-  const res = await fetch(`/api/v1${path}`, {
+  const apiBase = import.meta.env.VITE_API_BASE ?? "";
+  const res = await fetch(`${apiBase}/api/v1${path}`, {
     method,
     credentials: "include",
     headers: {
