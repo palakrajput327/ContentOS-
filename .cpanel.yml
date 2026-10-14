@@ -2,42 +2,30 @@
 deployment:
   tasks:
     # ================================================================== #
-    #  ContentOS — cPanel Git Deployment (Backend API only)              #
-    #  Server User:  hindust1                                             #
-    #  App Folder:   /home/hindust1/api.hidustansocialnetwork.in/        #
-    #  API Domain:   https://api.hidustansocialnetwork.in                #
-    #  Frontend:     Build locally → upload dist/ via FTP                #
-    #                to /home/hindust1/hidustansocialnetwork.in/         #
-    #  Trigger:      cPanel > Git Version Control > Deploy HEAD          #
+    #  ContentOS — cPanel Git Deployment                                  #
+    #  User:       hindust1                                               #
+    #  API Folder: /home/hindust1/api.hidustansocialnetwork.in/          #
+    #  Frontend:   /home/hindust1/public_html/                           #
     # ================================================================== #
 
-    # 1. Use Node.js 22 (must match cPanel "Setup Node.js App" selection)
+    # 1. Use Node.js 22
     - export PATH=/opt/alt/alt-nodejs22/root/usr/bin:$PATH
 
-    # 2. Verify runtime versions (shown in deploy log)
-    - node --version
-    - npm --version
-
-    # 3. Install all dependencies including devDeps (needed for tsc)
-    #    --ignore-scripts prevents postinstall from double-building
+    # 2. Install prod + dev deps (dev needed for tsc)
     - npm ci --include=dev --ignore-scripts
 
-    # 4. Compile TypeScript backend → dist-api/
-    #    (Frontend is NOT built here — build locally and upload dist/)
+    # 3. Build backend TypeScript → dist-api/
     - npx tsc -p server/tsconfig.json
 
-    # 5. Remove devDependencies after build to save disk space
+    # 4. Remove devDeps to save disk space
     - npm prune --omit=dev
 
-    # 6. Verify critical output files — deploy fails if these are missing
-    - test -f dist-api/phase-main.js  || (echo "DEPLOY ERROR: dist-api/phase-main.js missing" && exit 1)
-    - test -f dist-api/worker.js      || (echo "DEPLOY ERROR: dist-api/worker.js missing" && exit 1)
-    - test -f dist-api/mail-worker.js || (echo "DEPLOY ERROR: dist-api/mail-worker.js missing" && exit 1)
+    # 5. Copy frontend build (dist/) → public_html/
+    - /bin/cp -Rf dist/. /home/hindust1/public_html/
 
-    # ------------------------------------------------------------------ #
-    # AFTER DEPLOY — Manual steps required in cPanel:                     #
-    # 1. cPanel > Setup Node.js App > Restart the app                     #
-    # 2. Make sure .env exists at:                                         #
-    #    /home/hindust1/api.hidustansocialnetwork.in/.env                 #
-    # 3. uploads/ and dist-api/ are preserved across deploys              #
-    # ------------------------------------------------------------------ #
+    # 6. Verify backend build
+    - test -f dist-api/phase-main.js || (echo "ERROR: Backend build failed" && exit 1)
+
+    # 7. Restart Node.js app (Passenger restart trigger)
+    - /bin/mkdir -p /home/hindust1/api.hidustansocialnetwork.in/tmp
+    - /bin/touch /home/hindust1/api.hidustansocialnetwork.in/tmp/restart.txt
