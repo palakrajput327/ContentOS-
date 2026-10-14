@@ -46,16 +46,18 @@ if (!(globalThis as any).__dnsFallbackPatched) {
   } as any;
 }
 
+const databaseHost = process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).hostname : '';
+const localDatabase = ['localhost','127.0.0.1','[::1]'].includes(databaseHost);
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 20,
+  max: Number(process.env.PG_POOL_MAX) || (process.env.QUEUE_BACKEND === 'postgres' ? 6 : 20),
   connectionTimeoutMillis: 30000,
   idleTimeoutMillis: 30000,
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
-  ssl: {
+  ssl: localDatabase ? false : {
     rejectUnauthorized: false,
-    servername: "ep-odd-wind-b309rvnv.c-4.ap-southeast-1.aws.neon.tech",
+    servername: databaseHost || undefined,
   },
 } as any);
 

@@ -1,22 +1,24 @@
+import { queueBackend } from './queue-backend.js';
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { loadConfig } from "./config.js";
 import { deliverEmails } from "./mail.js";
 import { pool } from "./db.js";
 import { requireMail } from './codes.js';
+if (queueBackend()==='postgres') throw new Error('Use cron-worker in PostgreSQL mode');
 const config = loadConfig();
 try { requireMail(); } catch {
   console.error('Mail worker not started: set Gmail MAIL_USERNAME and MAIL_PASSWORD in the private .env file.');
   process.exit(1);
 }
-const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
+const redis = new Redis(config.REDIS_URL!, { maxRetriesPerRequest: null });
 redis.on("error", () =>
   console.error(JSON.stringify({ event: "mail_redis_unavailable" })),
 );
 const queue = new Queue("auth-email-dispatch", { connection: redis });
 await queue.upsertJobScheduler(
   "email-outbox",
-  { every: 2000 },
+  { every: 10000 },
   {
     name: "deliver",
     data: {},

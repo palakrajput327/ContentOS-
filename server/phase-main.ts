@@ -29,7 +29,8 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
-import { Redis } from "ioredis";
+import { createRateLimiter } from './rate-limiter.js';
+import { queueBackend } from './queue-backend.js';
 import { ZodError } from "zod";
 import { map } from "rxjs";
 import { fileURLToPath } from "node:url";
@@ -42,7 +43,7 @@ import { WorkspaceSessionController } from "./workspace-session.js";
 import { ContentController } from "./content.controller.js";
 import { DashboardController } from "./dashboard.controller.js";
 import { AdminController, AdminGuard } from "./admin.controller.js";
-let redis: Redis;
+let redis: Awaited<ReturnType<typeof createRateLimiter>>;
 @Injectable()
 class PhaseGuard implements CanActivate {
   constructor(private reflector: Reflector, private adminGuard: AdminGuard) {}
@@ -154,7 +155,7 @@ class HealthController {
     try {
       await pool.query("SELECT 1");
       await redis.ping();
-      return { status: "ready", postgres: "ok", redis: "ok" };
+      return { status: "ready", postgres: "ok", queueBackend: queueBackend(), redis: queueBackend() === 'postgres' ? 'disabled' : 'ok' };
     } catch {
       throw new ServiceUnavailableException(
         "A required service is unavailable.",
@@ -206,14 +207,9 @@ import { ClipdropService } from "./clipdrop/clipdrop.service.js";
 class PhaseModule {}
 export async function bootstrap() {
   const config = loadConfig();
-  redis = new Redis(config.REDIS_URL, {
-    maxRetriesPerRequest: 1,
-    connectTimeout: 5000,
-  });
-  redis.on("error", () =>
-    console.error(JSON.stringify({ event: "redis_unavailable" })),
-  );
+  redis = await createRateLimiter();
   await pool.query("SELECT 1");
+  if (queueBackend() === 'postgres') await pool.query('SELECT id FROM queue_jobs LIMIT 1');
   await redis.ping();
   const app = await NestFactory.create(PhaseModule, {
     logger: ["error", "warn"],
@@ -274,9 +270,7 @@ export async function bootstrap() {
         const limit = read ? 120 : 20;
         const ip = hash(req.ip || req.socket.remoteAddress || "unknown");
         const key = `auth-rate:${read ? "read" : "write"}:${ip}`;
-        const script =
-          "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n";
-        const n = Number(await redis.eval(script, 1, key, 60));
+        const n = await redis.count(key,60);
         if (n > limit) {
           res.setHeader("Retry-After", "60");
           return res.status(429).json({

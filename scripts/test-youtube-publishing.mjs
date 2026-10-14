@@ -379,18 +379,21 @@ test("scheduler preserves workspace, selected account, version and execution tim
             {
               id: assetId,
               title: "Scheduled Short",
+              workspace_id: wid,
               status: "APPROVED",
               version: 3,
               platforms: ["YouTube"],
               variants: {},
-              body: "",
+              body: "Scheduled video regression test",
               youtube: plain,
             },
           ],
         };
       if (sql.startsWith("SELECT require_approval"))
         return { rows: [{ require_approval: true }] };
-      if (sql.startsWith("SELECT * FROM media_assets")) {
+      if (sql.startsWith("SELECT timezone"))
+        return { rows: [{ timezone: "Asia/Calcutta", daily_posting_target: 10, festival_automation_enabled: false }] };
+      if (sql.startsWith("SELECT * FROM media_assets") || sql.startsWith("SELECT id, bucket, object_key")) {
         assert.equal(args[1], wid);
         return {
           rows: [
@@ -400,6 +403,7 @@ test("scheduler preserves workspace, selected account, version and execution tim
               size_bytes: size,
               bucket: "test",
               object_key: "test.mp4",
+              mime_type: "video/mp4",
             },
           ],
         };

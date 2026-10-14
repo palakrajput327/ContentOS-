@@ -71,7 +71,7 @@ async function ensureRedis() {
   });
 }
 
-await ensureRedis();
+if ((process.env.QUEUE_BACKEND || 'bullmq') === 'bullmq') await ensureRedis();
 
 // 3. Process-level safety nets to prevent cloud timeouts from crashing the server
 process.on("unhandledRejection", (reason) => {

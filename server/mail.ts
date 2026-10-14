@@ -64,7 +64,10 @@ export async function queueTokenEmail(
     ],
   );
 }
-export async function deliverEmails() {
+export async function deliverEmails(options: {limit?:number;budgetMs?:number} = {}) {
+  const started=Date.now();
+  const limit=options.limit ?? 20;
+  let delivered=0,expired=0,maxLatencyMs=0;
   const transport = nodemailer.createTransport({
     host: process.env.MAIL_HOST,
     port: Number(process.env.MAIL_PORT),
@@ -81,13 +84,14 @@ export async function deliverEmails() {
     connectionTimeout: 10000,
     socketTimeout: 15000,
   });
+  try {
   await pool.query(
     "UPDATE email_outbox SET state='PENDING' WHERE state='PROCESSING' AND claimed_at<now()-interval '2 minutes'",
   );
   await pool.query(
     "UPDATE email_outbox SET state='EXPIRED',encrypted_body=NULL WHERE state IN ('PENDING','PROCESSING','FAILED') AND expires_at<now()",
   );
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < limit && Date.now()-started < (options.budgetMs ?? Infinity); i++) {
     const mail = await transaction(async (db) => {
       const row = (
         await db.query(
@@ -103,6 +107,10 @@ export async function deliverEmails() {
     });
     if (!mail) break;
     try {
+      if (mail.expires_at && new Date(mail.expires_at).getTime() <= Date.now()) {
+        await pool.query("UPDATE email_outbox SET state='EXPIRED',encrypted_body=NULL WHERE id=$1",[mail.id]);
+        expired++;continue;
+      }
       const body = decryptToken(mail.encrypted_body, `mail:${mail.id}`);
       const receipt = await transport.sendMail({
         from: process.env.MAIL_FROM_ADDRESS,
@@ -117,6 +125,8 @@ export async function deliverEmails() {
         "UPDATE email_outbox SET state='SENT',sent_at=now(),encrypted_body=NULL WHERE id=$1",
         [mail.id],
       );
+      delivered++;
+      if (mail.created_at) maxLatencyMs=Math.max(maxLatencyMs,Date.now()-new Date(mail.created_at).getTime());
       console.log(
         JSON.stringify({ event: "email_smtp_accepted", id: mail.id }),
       );
@@ -134,5 +144,6 @@ export async function deliverEmails() {
       );
     }
   }
-  transport.close();
+  return {delivered,expired,maxLatencyMs};
+  } finally {transport.close();}
 }

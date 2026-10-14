@@ -8,17 +8,22 @@ deployment:
     #  Frontend:   /home/hindust1/public_html/                           #
     # ================================================================== #
 
-    # 1. Use Node.js 22
-    - export PATH=/opt/alt/alt-nodejs22/root/usr/bin:$PATH
+    # 1. Use the application's CloudLinux Node.js 22 environment.
+    - source /home/hindust1/nodevenv/api.hidustansocialnetwork.in/22/bin/activate
+    - test -L node_modules
 
     # 2. Install prod + dev deps (dev needed for tsc)
-    - npm ci --include=dev --ignore-scripts
+    - npm install --include=dev --ignore-scripts --no-audit --no-fund
 
     # 3. Build backend TypeScript → dist-api/
     - npx tsc -p server/tsconfig.json
 
     # 4. Remove devDeps to save disk space
-    - npm prune --omit=dev
+    - npm prune --omit=dev --ignore-scripts
+
+    # Install only FFmpeg's lifecycle script; the application has no postinstall build.
+    - npm rebuild ffmpeg-static --ignore-scripts=false
+    - node scripts/verify-ffmpeg.mjs
 
     # 5. Copy frontend build (dist/) → public_html/
     - /bin/cp -Rf dist/. /home/hindust1/public_html/

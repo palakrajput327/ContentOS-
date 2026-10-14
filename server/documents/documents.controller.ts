@@ -1,3 +1,4 @@
+import { queueBackend } from '../queue-backend.js';
 import {
   Body,
   Controller,
@@ -15,16 +16,14 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { audit, pool, transaction } from "../db.js";
 import { assertPermission, WorkspaceRequired, type AuthedRequest } from "../security.js";
-import { Queue } from "bullmq";
-import { redis } from "../queues.js";
+import { createQueue } from '../queues.js';
 import { getStorageProvider } from "../storage/storage.factory.js";
 import {storageUsage,readSourcePDF} from '../storage/storage-budget.js';
 import {extractSourceImages} from './extraction/source-images.js';
 import {createHash} from 'node:crypto';
 import {visionConfigured} from './visual-knowledge.service.js';
 
-const pdfProcessingQueue = new Queue("pdf-processing", {
-  connection: redis,
+const pdfProcessingQueue = createQueue("pdf-processing", {
   defaultJobOptions: {
     attempts: Number(process.env.PDF_JOB_ATTEMPTS) || 3,
     backoff: { type: "exponential", delay: 10000 },
@@ -94,6 +93,7 @@ export class DocumentsController {
           correlationId: r.requestId,
         },
         { jobId: documentId },
+        db,
       );
 
       await audit(
@@ -114,7 +114,7 @@ export class DocumentsController {
     });
 
     // Proactively start PDF extraction immediately
-    import("../pdf-worker.js")
+    if (queueBackend()==='bullmq') import("../pdf-processing.js")
       .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
       .catch((err) => console.warn(`[PDF Immediate Trigger] For ${documentId}:`, err?.message || err));
 
@@ -155,7 +155,7 @@ export class DocumentsController {
 
     // If document is QUEUED and not yet picked up by worker after 2s, trigger real processing
     if (doc.status === "QUEUED" && (Date.now() - new Date(doc.created_at).getTime()) > 2000) {
-      import("../pdf-worker.js")
+      if (queueBackend()==='bullmq') import("../pdf-processing.js")
         .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
         .catch((err) => console.warn(`[PDF Direct Trigger] Failed for ${documentId}:`, err?.message || err));
     }
@@ -332,6 +332,7 @@ export class DocumentsController {
           correlationId: r.requestId,
         },
         { jobId: `${documentId}-reprocess-${Date.now()}` },
+        db,
       );
 
       await audit(
@@ -348,7 +349,7 @@ export class DocumentsController {
     });
 
     // Proactively start reprocess immediately
-    import("../pdf-worker.js")
+    if (queueBackend()==='bullmq') import("../pdf-processing.js")
       .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
       .catch((err) => console.warn(`[PDF Reprocess Trigger] For ${documentId}:`, err?.message || err));
 
@@ -370,7 +371,11 @@ export class DocumentsController {
       throw new NotFoundException("Document not found in this workspace.");
     }
 
-    const { processPDFDocument } = await import("../pdf-worker.js");
+    if (queueBackend()==='postgres') {
+      await pdfProcessingQueue.add('extract',{documentId,workspaceId:w},{jobId:`${documentId}-fast-${Date.now()}`});
+      return {documentId,status:'QUEUED'};
+    }
+    const { processPDFDocument } = await import("../pdf-processing.js");
     const result = await processPDFDocument(documentId, w);
 
     return {

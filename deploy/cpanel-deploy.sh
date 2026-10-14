@@ -25,7 +25,12 @@ error()   { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 [[ -f "package.json" && -f "app.mjs" ]] || error "Run this script from the repo root (e.g. /home/hindust1/contentos/)"
 
 # ── Activate Node.js 22 (cPanel path) ────────────────────────────────────────
-export PATH=/opt/alt/alt-nodejs22/root/usr/bin:$PATH
+APP_ROOT=$(pwd -P)
+[[ "$APP_ROOT" == "$HOME/"* ]] || error "Application must be inside the cPanel user's home directory."
+ACTIVATE="$HOME/nodevenv/${APP_ROOT#"$HOME/"}/22/bin/activate"
+[[ -f "$ACTIVATE" ]] || error "Activate/create the Node.js 22 app in cPanel first: $ACTIVATE is missing."
+source "$ACTIVATE"
+[[ -L node_modules ]] || error "CloudLinux node_modules symlink is missing. Repair it through cPanel before deploying."
 NODE_VER=$(node --version 2>/dev/null || echo "missing")
 info "Node.js: $NODE_VER"
 [[ "$NODE_VER" == v22* ]] || error "Node.js 22 required. Got: $NODE_VER. Activate it in cPanel Setup Node.js App first."
@@ -43,7 +48,7 @@ info "Backup complete: $BACKUP_DIR"
 
 # ── Install dependencies (devDeps included for build) ────────────────────────
 info "Installing dependencies (including devDependencies for build) ..."
-npm ci --include=dev --ignore-scripts
+npm install --include=dev --ignore-scripts --no-audit --no-fund
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 info "Building backend (tsc) and frontend (vite) ..."
@@ -58,7 +63,11 @@ info "✓ dist/index.html exists"
 
 # ── Prune devDependencies ─────────────────────────────────────────────────────
 info "Pruning devDependencies from node_modules ..."
-npm prune --omit=dev
+npm prune --omit=dev --ignore-scripts
+
+info "Installing and verifying the Linux FFmpeg executable ..."
+npm rebuild ffmpeg-static --ignore-scripts=false
+node scripts/verify-ffmpeg.mjs
 
 # ── Ensure uploads/ directory exists (never delete it) ───────────────────────
 mkdir -p uploads

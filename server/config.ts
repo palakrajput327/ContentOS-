@@ -7,7 +7,8 @@ export function loadConfig() {
         .default("development"),
       APP_URL: z.string().url(),
       DATABASE_URL: z.string().url(),
-      REDIS_URL: z.string().url(),
+      QUEUE_BACKEND: z.enum(['bullmq','postgres']).default('bullmq'),
+      REDIS_URL: z.string().url().optional(),
       ENCRYPTION_KEY: z.string().regex(/^[0-9a-f]{64}$/i),
       PORT: z.coerce.number().int().min(1).max(65535).default(3001),
       MAIL_HOST: z.string().min(1),
@@ -42,6 +43,9 @@ export function loadConfig() {
       LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(10).default(3),
       FEATURE_KNOWLEDGE_ENGINE: z.string().default("true"),
       CLIPDROP_API_KEY: z.string().optional(),
+    })
+    .superRefine((config,ctx) => {
+      if (config.QUEUE_BACKEND === 'bullmq' && !config.REDIS_URL) ctx.addIssue({code:'custom',path:['REDIS_URL'],message:'Required for BullMQ mode'});
     })
     .parse(process.env);
   if (

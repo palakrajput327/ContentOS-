@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { queueBackend } from '../queue-backend.js';
+import { randomUUID, createHash } from "node:crypto";
 import { pool, transaction, audit } from "../db.js";
 import { getLLMProvider } from "../ai/llm.service.js";
 import { SYSTEM_KNOWLEDGE_EXTRACTION_PROMPT } from "./prompts.js";
@@ -8,6 +9,11 @@ import {
   knowledgeExtractionOutputSchema,
 } from "./knowledge.types.js";
 
+function factId(generationId:string,type:string,key:string) {
+  if(queueBackend()!=='postgres')return randomUUID();
+  const hex=createHash('sha256').update(JSON.stringify([generationId,type,key])).digest('hex').slice(0,32);
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
 export class KnowledgeService {
   /**
    * Process asynchronous knowledge extraction for a queued document_knowledge generation
@@ -42,7 +48,7 @@ export class KnowledgeService {
     let currentChunks = chunksRes.rows;
     if (!currentChunks.length) {
       console.log(`[KnowledgeService] Document ${documentId} has no extracted chunks. Running PDF extraction now...`);
-      const { processPDFDocument } = await import("../pdf-worker.js");
+      const { processPDFDocument } = await import("../pdf-processing.js");
       await processPDFDocument(documentId, workspaceId);
       const refetched = await pool.query(
         "SELECT id, chunk_index, page_start, page_end, content, token_count FROM document_chunks WHERE document_id = $1 AND workspace_id = $2 ORDER BY chunk_index ASC",
@@ -148,7 +154,7 @@ export class KnowledgeService {
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'EXTRACTED')
                 ON CONFLICT DO NOTHING`,
                 [
-                  randomUUID(),
+                  factId(generationId,fact.type,fact.key),
                   workspaceId,
                   documentId,
                   generationId,
@@ -183,7 +189,7 @@ export class KnowledgeService {
             ) VALUES ($1, $2, $3, $4, 'INSIGHT', $5, $6, $7, $8, $9, 0.85, 'EXTRACTED')
             ON CONFLICT DO NOTHING`,
             [
-              randomUUID(),
+              factId(generationId,'INSIGHT',`Technical Concept ${i + 1}`),
               workspaceId,
               documentId,
               generationId,

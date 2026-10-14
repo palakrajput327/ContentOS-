@@ -1,3 +1,4 @@
+import { queueBackend } from '../queue-backend.js';
 import {
   Body,
   Controller,
@@ -14,15 +15,13 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { pool, transaction, audit } from "../db.js";
 import { WorkspaceRequired, assertPermission, type AuthedRequest } from "../security.js";
-import { Queue } from "bullmq";
-import { redis } from "../queues.js";
+import { createQueue } from '../queues.js';
 import { KnowledgeService } from "./knowledge.service.js";
 import {sourceReference} from '../documents/source-original.js';
 
 const knowledgeService = new KnowledgeService();
 
-const contentGenQueue = new Queue("content-generation", {
-  connection: redis,
+const contentGenQueue = createQueue("content-generation", {
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: "exponential", delay: 10000 },
@@ -57,7 +56,7 @@ export class KnowledgeController {
     const doc = docRes.rows[0];
     if (doc.status === "QUEUED" || doc.status === "PROCESSING" || doc.status === "EXTRACTING" || doc.status === "CHUNKING") {
       // Proactively start PDF extraction in case worker had queue delay
-      import("../pdf-worker.js")
+      if (queueBackend()==='bullmq') import("../pdf-processing.js")
         .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
         .catch((err) => console.warn(`[Knowledge Trigger PDF] Warning for ${documentId}:`, err?.message || err));
 
@@ -78,9 +77,10 @@ export class KnowledgeController {
       [documentId, w],
     );
     const chunkCount = parseInt(chunkCheck.rows[0]?.count || "0", 10);
-    if (chunkCount === 0 || (doc.page_count > 5 && chunkCount <= 2)) {
+    const forcePdf=chunkCount === 0 || (doc.page_count > 5 && chunkCount <= 2);
+    if (forcePdf && queueBackend()==='bullmq') {
       console.log(`[KnowledgeController] Document ${documentId} (pages: ${doc.page_count}) has ${chunkCount} chunks. Running processPDFDocument...`);
-      const { processPDFDocument } = await import("../pdf-worker.js");
+      const { processPDFDocument } = await import("../pdf-processing.js");
       await processPDFDocument(documentId, w, { force: true });
     }
 
@@ -108,11 +108,13 @@ export class KnowledgeController {
         {
           generationId,
           documentId,
+          forcePdf,
           workspaceId: w,
           actorId: r.user.id,
           correlationId: r.requestId,
         },
         { jobId: generationId },
+        db,
       );
 
       await audit(

@@ -1,3 +1,4 @@
+import { queueBackend } from './queue-backend.js';
 import { Worker } from "bullmq";
 import { pool } from "./db.js";
 import { redis } from "./queues.js";
@@ -6,6 +7,7 @@ import { KnowledgeExtractionJobPayload } from "./knowledge/knowledge.types.js";
 
 const knowledgeService = new KnowledgeService();
 
+if (queueBackend()==='postgres') throw new Error('Use cron-worker in PostgreSQL mode');
 export const aiWorker = new Worker<KnowledgeExtractionJobPayload>(
   "content-generation",
   async (job) => {

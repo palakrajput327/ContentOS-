@@ -12,7 +12,8 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
-import { Redis } from "ioredis";
+import { createRateLimiter } from './rate-limiter.js';
+import { queueBackend } from './queue-backend.js';
 import { fileURLToPath } from "node:url";
 import { ZodError } from "zod";
 import { map } from "rxjs";
@@ -92,7 +93,6 @@ class AppModule {}
 export async function bootstrap() {
   for (const key of [
     "DATABASE_URL",
-    "REDIS_URL",
     "TOKEN_ENCRYPTION_KEY",
     "APP_ORIGIN",
   ])
@@ -103,9 +103,9 @@ export async function bootstrap() {
   if (process.env.NODE_ENV === "production" && origin.protocol !== "https:")
     throw new Error("Production requires HTTPS");
   await pool.query("SELECT 1");
-  const limiter = new Redis(process.env.REDIS_URL!, {
-    maxRetriesPerRequest: 1,
-  });
+  if (queueBackend() === 'bullmq' && !process.env.REDIS_URL) throw new Error('Missing REDIS_URL');
+  if (queueBackend() === 'postgres') await pool.query('SELECT id FROM queue_jobs LIMIT 1');
+  const limiter = await createRateLimiter();
   const app = await NestFactory.create(AppModule, {
     logger: ["error", "warn"],
     bodyParser: false,
@@ -137,14 +137,7 @@ export async function bootstrap() {
         const ai = req.path.startsWith("/api/v1/ai");
         const bucket = auth ? "auth" : ai ? "ai" : "api";
         const key = `limit:${bucket}:${hash(req.ip || req.socket.remoteAddress || "unknown")}`;
-        const count = Number(
-          await limiter.eval(
-            "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n",
-            1,
-            key,
-            60,
-          ),
-        );
+        const count = await limiter.count(key,60);
         if (count > (auth ? 20 : ai ? 10 : 180)) {
           res.setHeader("Retry-After", "60");
           return res

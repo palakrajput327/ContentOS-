@@ -1,20 +1,24 @@
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { pool } from "./db.js";
-export async function migrate() {
+export async function migrate(options: {only?:string;list?:boolean} = {}) {
   const client = await pool.connect();
   try {
     await client.query("SELECT pg_advisory_lock(74152023)");
-    await client.query(
+    if(!options.list)await client.query(
       "CREATE TABLE IF NOT EXISTS schema_migrations(name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
     );
     const dir = fileURLToPath(
       new URL("../server/migrations/", import.meta.url),
     );
-    for (const f of (await readdir(dir))
+    const files=(await readdir(dir))
       .filter((f) => f.endsWith(".sql"))
-      .sort()) {
-      if (
+      .sort();
+    if(options.only&&!files.includes(options.only))throw new Error('Migration file not found');
+    const historyExists=(await client.query("SELECT to_regclass('schema_migrations') AS table_name")).rows[0].table_name;
+    for (const f of files) {
+      if(options.only && f!==options.only)continue;
+      if (historyExists &&
         (
           await client.query("SELECT 1 FROM schema_migrations WHERE name=$1", [
             f,
@@ -22,6 +26,7 @@ export async function migrate() {
         ).rowCount
       )
         continue;
+      if(options.list) {console.log(JSON.stringify({event:'migration_pending',name:f}));continue;}
       await client.query("BEGIN");
       try {
         await client.query(await readFile(`${dir}/${f}`, "utf8"));
@@ -41,7 +46,9 @@ export async function migrate() {
   }
 }
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  migrate()
+  const only=process.argv.find(a=>a.startsWith('--only='))?.slice(7);
+  if(only && !/^\d{3}_[a-z0-9_]+\.sql$/.test(only))throw new Error('Invalid migration filename');
+  migrate({only,list:process.argv.includes('--list')})
     .then(() => pool.end())
     .catch(() => {
       console.error(

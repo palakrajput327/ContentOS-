@@ -2,14 +2,13 @@ import { randomUUID } from "node:crypto";
 import { pool, transaction, audit, type DB } from "../db.js";
 import { BadRequestException, NotFoundException, ForbiddenException } from "@nestjs/common";
 import { assertPermission } from "../security.js";
-import { Queue } from "bullmq";
-import { redis } from "../queues.js";
+import { createQueue } from '../queues.js';
+import { queueBackend } from '../queue-backend.js';
 import { createPublishPlan } from "../publish-planner.js";
 import type { Platform } from "../platform-capabilities.js";
 import { generateCaptions } from "../ai.controller.js";
 
-export const batchQueue = new Queue("batch-processing", {
-  connection: redis,
+export const batchQueue = createQueue("batch-processing", {
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: "exponential", delay: 5000 },
@@ -62,8 +61,8 @@ export class BatchService {
         
         const childRow = (
           await db.query(
-            `INSERT INTO batch_child_items(id, batch_id, workspace_id, operation_type, target_id, payload, status, idempotency_key)
-             VALUES($1, $2, $3, $4, $5, $6, 'PENDING', $7)
+            `INSERT INTO batch_child_items(id, batch_id, workspace_id, operation_type, target_id, payload, status, idempotency_key${queueBackend()==='postgres'?', item_index':''})
+             VALUES($1, $2, $3, $4, $5, $6, 'PENDING', $7${queueBackend()==='postgres'?', $8':''})
              RETURNING *`,
             [
               childId,
@@ -73,6 +72,7 @@ export class BatchService {
               item.targetId || null,
               JSON.stringify(item.payload || {}),
               idempotencyKey,
+              ...(queueBackend()==='postgres'?[i]:[]),
             ]
           )
         ).rows[0];
@@ -92,7 +92,7 @@ export class BatchService {
       );
 
       // 3. Queue batch execution in BullMQ
-      await batchQueue.add("process-batch", { batchId, workspaceId: input.workspaceId });
+      await batchQueue.add("process-batch", { batchId, workspaceId: input.workspaceId }, {jobId:batchId}, db);
 
       return {
         batchId: batch.id,
@@ -235,7 +235,7 @@ export class BatchService {
       );
 
       // Queue batch re-processing
-      await batchQueue.add("process-batch", { batchId, workspaceId });
+      await batchQueue.add("process-batch", { batchId, workspaceId }, {jobId:`${batchId}-retry-${Date.now()}`}, db);
 
       return {
         batchId,

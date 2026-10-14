@@ -23,7 +23,8 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { pool, transaction } from "./db.js";
 import { hash, Public } from "./security.js";
-import { Redis } from "ioredis";
+import { queueBackend } from './queue-backend.js';
+import { createRateLimiter } from './rate-limiter.js';
 import {adminUserImpact,mutateAdminUser} from './admin-users.js';
 
 const adminCookieOptions = () => ({
@@ -307,13 +308,9 @@ export class AdminController {
     }
 
     let redisStatus = "healthy";
-    let redis: Redis | undefined;
+    let redis: Awaited<ReturnType<typeof createRateLimiter>> | undefined;
     try {
-      redis = new Redis(process.env.REDIS_URL || "redis://127.0.0.1:63799", {
-        maxRetriesPerRequest: 1,
-        connectTimeout: 2000,
-      });
-      redis.on('error',()=>{});
+      redis = await createRateLimiter();
       await redis.ping();
       await redis.quit();
     } catch {
@@ -327,8 +324,8 @@ export class AdminController {
     return {
       services: {
         postgres: { status: pgStatus, note: "Configured application database" },
-        redis: { status: redisStatus, note: "Local Redis instance" },
-        queue: { status: "not_checked", note: "Redis connectivity does not verify workers or queue processing" },
+        redis: { status: queueBackend() === 'postgres' ? 'disabled' : redisStatus, note: 'Selected queue backend: '+queueBackend() },
+        queue: { status: 'not_checked', backend:queueBackend(), note:'Inspect cron heartbeat and queue jobs to verify processing' },
         smtp: { status: smtpConfigured ? "configured" : "not_configured", note: process.env.MAIL_HOST || "Not set" },
       },
     };

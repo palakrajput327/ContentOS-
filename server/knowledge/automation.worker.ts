@@ -1,8 +1,10 @@
+import { queueBackend } from '../queue-backend.js';
 import { Queue, Worker } from "bullmq";
 import { pool } from "../db.js";
 import { redis } from "../queues.js";
 import { KnowledgeAutomationService } from "./automation.service.js";
 
+if (queueBackend()==='postgres') throw new Error('Use cron-worker in PostgreSQL mode');
 export const knowledgeAutomationQueue = new Queue("knowledge-automation", {
   connection: redis,
 });

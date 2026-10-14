@@ -377,7 +377,7 @@ export class FestivalController {
           "Reconnect this account before retrying.",
         );
       const { publishingQueue } = await import("../queues.js");
-      const queued = await publishingQueue.getJob(jobId);
+      const queued = await publishingQueue.getJob(jobId, req.workspace!.id, db);
       if (queued) {
         const state = await queued.getState();
         if (!["failed", "completed"].includes(state))
