@@ -8,6 +8,7 @@ import { socialProvider, ProviderError } from "./providers/social.js";
 import {
   publishYouTubeRecord,
   pollYouTubeProcessing,
+  refreshExpiringYouTubeTokens,
 } from "./youtube.service.js";
 import { createPublishPlan } from "./publish-planner.js";
 import { PLATFORM_CAPABILITIES, type Platform } from "./platform-capabilities.js";
@@ -246,6 +247,19 @@ export async function executePublishRecord(
         null,
         { code: e.code, platform: account.platform },
       );
+      if (!retry) {
+        await db.query(
+          `INSERT INTO notifications(id, workspace_id, type, title, message, data)
+           VALUES($1, $2, 'publish_failed', $3, $4, $5)`,
+          [
+            randomUUID(),
+            record.workspace_id,
+            `Publishing Failed on ${account.platform}`,
+            `Post "${content.title.slice(0, 50)}" failed to publish on ${account.platform}: ${e.code}`,
+            JSON.stringify({ contentId: content.id, platform: account.platform, error: e.code }),
+          ],
+        );
+      }
     });
     return {
       success: false,
@@ -283,6 +297,17 @@ export async function executePublishRecord(
       content.title,
       null,
       { platform: account.platform, providerPostId: providerId },
+    );
+    await db.query(
+      `INSERT INTO notifications(id, workspace_id, type, title, message, data)
+       VALUES($1, $2, 'published', $3, $4, $5)`,
+      [
+        randomUUID(),
+        record.workspace_id,
+        `Post Published on ${account.platform}`,
+        `Your post "${content.title.slice(0, 50)}" was successfully published on ${account.platform}.`,
+        JSON.stringify({ contentId: content.id, platform: account.platform, providerPostId: providerId }),
+      ],
     );
   });
   return { success: true, state: "PUBLISHED", providerPostId: providerId };
@@ -326,6 +351,52 @@ const maintenance = new Worker(
   "scheduler-maintenance",
   async () => {
     await pollYouTubeProcessing();
+    try {
+      await refreshExpiringYouTubeTokens(pool);
+    } catch (err: any) {
+      console.warn("[Worker Maintenance] YouTube token refresh failed:", err?.message);
+    }
+    try {
+      const expiringAccounts = (
+        await pool.query(
+          `SELECT a.id, a.workspace_id, a.name, a.platform, t.expires_at 
+           FROM social_accounts a 
+           JOIN social_account_tokens t ON t.account_id = a.id 
+           WHERE lower(a.state) = 'connected' 
+             AND lower(a.platform) IN ('facebook', 'instagram', 'linkedin')
+             AND t.expires_at IS NOT NULL
+             AND t.expires_at < now() + interval '7 days'
+           LIMIT 20`
+        )
+      ).rows;
+      for (const acc of expiringAccounts) {
+        const daysLeft = Math.max(0, Math.ceil((new Date(acc.expires_at).getTime() - Date.now()) / 86400000));
+        const notificationType = daysLeft === 0 ? "publish_failed" : "approval_requested";
+        const title = `${acc.platform} Token Expiring Soon`;
+        const message = `Connection for ${acc.name} (${acc.platform}) will expire in ${daysLeft} day(s). Please reconnect the channel in Settings.`;
+        const existing = await pool.query(
+          `SELECT 1 FROM notifications 
+           WHERE workspace_id=$1 AND title=$2 AND created_at > now() - interval '24 hours'`,
+          [acc.workspace_id, title],
+        );
+        if (!existing.rowCount) {
+          await pool.query(
+            `INSERT INTO notifications (id, workspace_id, type, title, message, data) 
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              randomUUID(),
+              acc.workspace_id,
+              notificationType,
+              title,
+              message,
+              JSON.stringify({ accountId: acc.id, platform: acc.platform, expiresAt: acc.expires_at }),
+            ],
+          );
+        }
+      }
+    } catch (err: any) {
+      console.warn("[Worker Maintenance] Token expiry monitor warning:", err?.message);
+    }
     try {
       await FestivalAutoSchedulerService.runFestivalAutoScheduler(pool);
     } catch (err: any) {

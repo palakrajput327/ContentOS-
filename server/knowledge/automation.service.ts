@@ -4,6 +4,7 @@ import { pool, audit, type DB } from "../db.js";
 import { AutoSchedulerService } from "../calendar/auto-scheduler.js";
 import { getDailyCapacity } from "../calendar/daily-posting.js";
 import {validVisualKnowledgeRows} from '../documents/visual-evidence.js';
+import { validateContentSafety } from './content-safety.js';
 
 const approvedStates = ["CONFIRMED", "LOCKED"];
 function canonical(value: any): any {
@@ -305,6 +306,8 @@ export class KnowledgeAutomationService {
           brand,
           actorId: settings.actor_id,
           timezone: ws.timezone,
+          proposedAt: at,
+          requireApproval: ws.require_approval !== false,
         };
       });
       if (!reservation) break;
@@ -398,10 +401,14 @@ export class KnowledgeAutomationService {
             )
           )
             throw new Error("AI output exceeds platform text limits.");
+          const docName = reservation.topic.sources[0]?.documentName || "document";
+          const safety = validateContentSafety(result.title, result.variants, evidence);
+
           Object.assign(variants, {
             metadata: {
               content_source: "KNOWLEDGE_AUTOMATION",
               planId: reservation.id,
+              safetyCheck: { safe: safety.safe, warnings: safety.warnings, reason: safety.reason },
             },
           });
           const snapshot = {
@@ -448,10 +455,26 @@ export class KnowledgeAutomationService {
             id,
             result.title,
             null,
-            { planId: reservation.id, sourceEvidence: evidence },
+            { planId: reservation.id, sourceEvidence: evidence, safetyCheck: safety },
           );
           generated++;
         });
+
+        // Safe notification delivery outside of transaction block
+        try {
+          const docName = reservation.topic.sources[0]?.documentName || "document";
+          await this.database.query(
+            `INSERT INTO notifications(id, workspace_id, type, title, message, data)
+             VALUES($1, $2, 'approval_requested', $3, $4, $5)`,
+            [
+              randomUUID(),
+              workspaceId,
+              `New Proposal Ready: ${result.title.slice(0, 35)}`,
+              `AI proposal generated from ${docName} is ready for review.`,
+              JSON.stringify({ planId: reservation.id }),
+            ],
+          );
+        } catch {}
       } catch (error: any) {
         await this.database.query(
           "UPDATE knowledge_content_plans SET state='FAILED',error_message=$3,lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND lease_token=$4",

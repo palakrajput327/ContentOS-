@@ -127,14 +127,13 @@ export class LinkedInProvider implements SocialProvider {
     return true;
   }
   async publishText(c: Connection, text: string) {
-    if (!process.env.LINKEDIN_API_VERSION)
-      throw new ProviderError("PROVIDER_NOT_CONFIGURED");
+    const apiVersion = process.env.LINKEDIN_API_VERSION || "202609";
     const r = await safeFetch("https://api.linkedin.com/rest/posts", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${c.token}`,
         "Content-Type": "application/json",
-        "LinkedIn-Version": process.env.LINKEDIN_API_VERSION,
+        "LinkedIn-Version": apiVersion,
         "X-Restli-Protocol-Version": "2.0.0",
       },
       body: JSON.stringify({
@@ -164,6 +163,14 @@ export class LinkedInProvider implements SocialProvider {
     return id;
   }
   async publishMedia(c: Connection, url: string): Promise<string> {
+    try {
+      const { SocialProviderRegistry } = await import("../social.provider.js");
+      const res = await SocialProviderRegistry.getProvider("linkedin").publishText(
+        { token: c.token, author: c.providerId },
+        { destination: c.providerId, text: "Shared media", mediaUrl: url, mediaType: "image" },
+      );
+      if (res.success && res.providerPostId) return res.providerPostId;
+    } catch {}
     return this.publishText(c, `Attachment: ${url}`);
   }
   async publishVideo(c: Connection, url: string): Promise<string> {
@@ -226,20 +233,44 @@ export class InstagramSocialProvider implements SocialProvider {
   async refreshToken(c: Connection) {
     return c;
   }
-  async validateConnection(_c: Connection) {
-    return true;
+  async validateConnection(c: Connection) {
+    try {
+      const { SocialProviderRegistry } = await import("../social.provider.js");
+      const res = await SocialProviderRegistry.getProvider("instagram").validateConnection({ token: c.token, accountId: c.providerId });
+      return res.valid;
+    } catch {
+      return true;
+    }
   }
   async getProfile(c: Connection) {
     return { id: c.providerId || "ig_account", name: "Instagram Business" };
   }
-  async publishText(_c: Connection, _text: string) {
-    return `ig_${Date.now()}`;
+  async publishText(c: Connection, text: string) {
+    const { SocialProviderRegistry } = await import("../social.provider.js");
+    const res = await SocialProviderRegistry.getProvider("instagram").publishText(
+      { token: c.token, author: c.providerId },
+      { destination: c.providerId, text },
+    );
+    if (!res.success || !res.providerPostId) throw new ProviderError(res.error || "INSTAGRAM_PUBLISH_FAILED");
+    return res.providerPostId;
   }
-  async publishMedia(_c: Connection, _url: string) {
-    return `ig_media_${Date.now()}`;
+  async publishMedia(c: Connection, url: string) {
+    const { SocialProviderRegistry } = await import("../social.provider.js");
+    const res = await SocialProviderRegistry.getProvider("instagram").publishText(
+      { token: c.token, author: c.providerId },
+      { destination: c.providerId, text: "", mediaUrl: url, mediaType: "image" },
+    );
+    if (!res.success || !res.providerPostId) throw new ProviderError(res.error || "INSTAGRAM_PUBLISH_FAILED");
+    return res.providerPostId;
   }
-  async publishVideo(_c: Connection, _url: string) {
-    return `ig_video_${Date.now()}`;
+  async publishVideo(c: Connection, url: string) {
+    const { SocialProviderRegistry } = await import("../social.provider.js");
+    const res = await SocialProviderRegistry.getProvider("instagram").publishText(
+      { token: c.token, author: c.providerId },
+      { destination: c.providerId, text: "", mediaUrl: url, mediaType: "video" },
+    );
+    if (!res.success || !res.providerPostId) throw new ProviderError(res.error || "INSTAGRAM_PUBLISH_FAILED");
+    return res.providerPostId;
   }
   async getPublishStatus(_c: Connection, _id: string) {
     return "PUBLISHED";
@@ -254,20 +285,26 @@ export class YouTubeSocialProvider implements SocialProvider {
   async refreshToken(c: Connection) {
     return c;
   }
-  async validateConnection(_c: Connection) {
-    return true;
+  async validateConnection(c: Connection) {
+    try {
+      const { SocialProviderRegistry } = await import("../social.provider.js");
+      const res = await SocialProviderRegistry.getProvider("youtube").validateConnection({ token: c.token });
+      return res.valid;
+    } catch {
+      return true;
+    }
   }
   async getProfile(c: Connection) {
     return { id: c.providerId || "yt_channel", name: "YouTube Channel" };
   }
-  async publishText(_c: Connection, _text: string) {
-    return `yt_community_${Date.now()}`;
+  async publishText(_c: Connection, _text: string): Promise<string> {
+    throw new ProviderError("YOUTUBE_TEXT_NOT_SUPPORTED");
   }
-  async publishMedia(_c: Connection, _url: string) {
-    return `yt_media_${Date.now()}`;
+  async publishMedia(_c: Connection, _url: string): Promise<string> {
+    throw new ProviderError("YOUTUBE_IMAGE_NOT_SUPPORTED");
   }
-  async publishVideo(_c: Connection, _url: string) {
-    return `yt_video_${Date.now()}`;
+  async publishVideo(_c: Connection, _url: string): Promise<string> {
+    throw new ProviderError("YOUTUBE_VIDEO_REQUIRES_RESUMABLE_UPLOAD");
   }
   async getPublishStatus(_c: Connection, _id: string) {
     return "PUBLISHED";

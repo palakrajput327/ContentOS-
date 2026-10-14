@@ -128,8 +128,8 @@ export function validatePlatformVariant(
   const title = variant.title || "";
   const mediaType = variant.mediaType || (variant.mediaAssetId || variant.mediaUrl ? "image" : "text");
 
-  // Caption validation: Require non-empty caption
-  if (!caption || !caption.trim()) {
+  // Caption validation: Require non-empty caption (except YouTube where description is optional)
+  if (platform !== "YouTube" && (!caption || !caption.trim())) {
     errors.push("Caption cannot be empty.");
   } else if (caption.length > cap.maxCaptionLength) {
     errors.push(

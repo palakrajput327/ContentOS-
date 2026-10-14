@@ -378,6 +378,7 @@ test("scheduler preserves workspace, selected account, version and execution tim
           rows: [
             {
               id: assetId,
+              workspace_id: wid,
               title: "Scheduled Short",
               status: "APPROVED",
               version: 3,
@@ -390,16 +391,18 @@ test("scheduler preserves workspace, selected account, version and execution tim
         };
       if (sql.startsWith("SELECT require_approval"))
         return { rows: [{ require_approval: true }] };
-      if (sql.startsWith("SELECT * FROM media_assets")) {
-        assert.equal(args[1], wid);
+      if (sql.includes("media_assets") && !sql.includes("document_source_media")) {
+        if (args && args.length > 1) assert.equal(args[1], wid);
         return {
           rows: [
             {
+              id: args ? args[0] : assetId,
               type: "VIDEO",
               status: "COMPLETED",
               size_bytes: size,
               bucket: "test",
               object_key: "test.mp4",
+              mime_type: "video/mp4",
             },
           ],
         };

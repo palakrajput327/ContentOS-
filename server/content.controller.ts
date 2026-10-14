@@ -614,7 +614,7 @@ export class ContentController {
             throw new BadRequestException(
               `${platform} publishing is not available in this MVP.`,
             );
-          await createPublishPlan(db,p,platform as Platform);
+          await createPublishPlan(db, { ...p, workspace_id: p.workspace_id || r.workspace.id }, platform as Platform);
           if (platform === "YouTube")
             await validateYouTubeInput(db, r.workspace.id, p.youtube);
           const account = (
