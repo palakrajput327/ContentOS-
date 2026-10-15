@@ -53,6 +53,7 @@ scratch/
 .deploy-backup-*/
 .deploy-stage-*/
 .deploy-lock/
+.deploy-artifact/
 *.rdb
 *.sql.gz
 scripts/update-telegram-token.mjs

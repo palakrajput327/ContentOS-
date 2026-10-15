@@ -1,3 +1,10 @@
+# Current cPanel deployment workflow
+
+Use [deploy/PREBUILT.md](deploy/PREBUILT.md) for the current deployment procedure.
+The cPanel script now requires commit-matched prebuilt artifacts and installs only
+production dependencies. Older instructions below describing server builds are
+historical and must not be used for this deployment path.
+
 # Hindustan Social Network — cPanel Deployment Guide
 
 ## Overview

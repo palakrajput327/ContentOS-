@@ -1,0 +1,55 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { spawnSync, execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { assertLockfileBytes, committedLockfile } from './release-contract.mjs';
+const directory = await mkdtemp(join(tmpdir(), 'contentos-artifact-'));
+const hash = value => createHash('sha256').update(value).digest('hex');
+const root = fileURLToPath(new URL('../', import.meta.url));
+const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true }).trim();
+const lockfile = execFileSync('git', ['show', `${revision}:package-lock.json`], { cwd: root, windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+const script = join(directory, 'scripts', 'deployment-artifact.mjs');
+const artifact = join(directory, '.deploy-artifact');
+const verify = sha => spawnSync(process.execPath, [script, 'verify', artifact, sha], { encoding: 'utf8', windowsHide: true });
+try {
+  assert.equal(await committedLockfile(root, revision).then(() => true, () => false), (await readFile(join(root, 'package-lock.json'))).equals(lockfile));
+  assert.deepEqual(assertLockfileBytes(lockfile, lockfile), lockfile);
+  assert.throws(() => assertLockfileBytes(Buffer.from(lockfile.toString().replaceAll('\n', '\r\n')), lockfile), /exactly match committed LF/);
+  assert.throws(() => assertLockfileBytes(Buffer.from('tampered'), lockfile), /exactly match committed LF/);
+  await mkdir(join(directory, 'scripts'));
+  for (const name of ['deployment-artifact.mjs', 'release-contract.mjs']) await writeFile(join(directory, 'scripts', name), await readFile(new URL(name, import.meta.url)));
+  await writeFile(join(directory, 'package-lock.json'), lockfile);
+  const files = {};
+  for (const path of ['dist/index.html', 'dist-api/cron-worker.js', 'dist-api/phase-main.js'].sort()) {
+    await mkdir(join(artifact, path.split('/')[0]), { recursive: true });
+    await writeFile(join(artifact, path), 'output');
+    files[path] = hash('output');
+  }
+  const manifest = { version: 2, revision, nodeMajor: 22, apiBase: 'https://api.hidustansocialnetwork.in', apiEnabled: true, lockSha256: hash(lockfile), files };
+  const save = () => writeFile(join(artifact, 'manifest.json'), JSON.stringify(manifest));
+  await save();
+  assert.equal(verify(revision).status, 0);
+  assert.notEqual(verify('0'.repeat(40)).status, 0);
+  assert.notEqual(verify('invalid-sha').status, 0);
+  manifest.apiEnabled = false; await save();
+  assert.notEqual(verify(revision).status, 0);
+  manifest.apiEnabled = true; await save();
+  await writeFile(join(directory, 'package-lock.json'), lockfile.toString().replaceAll('\n', '\r\n'));
+  assert.notEqual(verify(revision).status, 0);
+  await writeFile(join(directory, 'package-lock.json'), lockfile);
+  await writeFile(join(artifact, 'dist/index.html'), 'corrupt');
+  assert.notEqual(verify(revision).status, 0);
+  await writeFile(join(artifact, 'dist/index.html'), 'output');
+  manifest.lockSha256 = 'wrong'; await save();
+  assert.notEqual(verify(revision).status, 0);
+  manifest.lockSha256 = hash(lockfile); await save();
+  await writeFile(join(artifact, 'dist/.env'), 'secret');
+  assert.notEqual(verify(revision).status, 0);
+  await rm(join(artifact, 'dist/.env'));
+  await rm(join(artifact, 'dist-api/cron-worker.js'));
+  assert.notEqual(verify(revision).status, 0);
+  console.log(`PASS: exact committed LF lockfile and SHA ${revision}; CRLF/tampered lock, disabled auth, stale/invalid SHA, corrupt output, protected file and missing worker rejected.`);
+} finally { await rm(directory, { recursive: true, force: true }); }

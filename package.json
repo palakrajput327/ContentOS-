@@ -23,7 +23,9 @@
     "test:runtime": "npm run build:api && node --experimental-test-module-mocks --test scripts/test-queue-runtime.mjs scripts/test-mail-runtime.mjs scripts/test-pdf-runtime.mjs",
     "test:postgres-queue": "npm run build:api && node --experimental-test-module-mocks --test scripts/test-postgres-queue.mjs",
     "queue:reconcile": "node --env-file=.env dist-api/queue-reconcile.js",
-    "queue:export:bullmq": "node --env-file=.env dist-api/bullmq-export.js"
+    "queue:export:bullmq": "node --env-file=.env dist-api/bullmq-export.js",
+    "build:deploy": "node scripts/deployment-artifact.mjs build",
+    "test:deploy": "node scripts/test-deployment-artifact.mjs && node scripts/test-production-frontend.mjs && node scripts/test-cpanel-deploy.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1141.0",

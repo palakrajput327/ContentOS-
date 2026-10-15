@@ -12,4 +12,6 @@ deployment:
     # This runs only when an operator invokes cPanel Git deployment.
     # It never migrates/imports data, selects a queue backend or installs cron jobs.
     # Preparation updates files/dependencies only; it never restarts the API.
+    # Upload the matching prebuilt .deploy-artifact directory into the checkout first.
+    # Missing, stale or corrupt artifacts fail closed; cPanel never compiles code.
     - /bin/bash /home/hindust1/repositories/ContentOS-/deploy/cpanel-deploy.sh

@@ -87,10 +87,11 @@ printf '%s\n' "$REVISION" > "$BACKUP/source-commit"
 # Snapshot only committed runtime source, never .env, uploads, .git or data files.
 git -C "$SOURCE_ROOT" archive "$REVISION" -- "${CODE_PATHS[@]}" | tar -x -C "$STAGE"
 cd "$STAGE"
-npm ci --include=dev --ignore-scripts --no-audit --no-fund
-VITE_API_BASE=https://api.hidustansocialnetwork.in node scripts/build.mjs
+cp -a "$SOURCE_ROOT/.deploy-artifact" "$STAGE/.deploy-artifact"
+node scripts/deployment-artifact.mjs verify "$STAGE/.deploy-artifact" "$REVISION"
+mv "$STAGE/.deploy-artifact/dist" "$STAGE/.deploy-artifact/dist-api" "$STAGE/"
 [[ -f dist-api/phase-main.js && -f dist-api/cron-worker.js && -f dist/index.html ]] || error "Required build outputs are missing."
-npm prune --omit=dev --ignore-scripts
+npm ci --omit=dev --ignore-scripts --no-audit --no-fund --maxsockets=2
 npm rebuild ffmpeg-static --ignore-scripts=false
 npm ls --omit=dev --depth=0
 node scripts/verify-ffmpeg.mjs

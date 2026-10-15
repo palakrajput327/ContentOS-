@@ -1,9 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwind from "@tailwindcss/vite";
+import { productionFrontendGuard } from "./scripts/release-contract.mjs";
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), tailwind()],
+  plugins: [react(), tailwind(), productionFrontendGuard()],
   server: {
     port: 5173,
     strictPort: true,
