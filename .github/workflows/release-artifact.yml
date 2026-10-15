@@ -1,0 +1,103 @@
+name: ContentOS release artifact
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-artifact-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-verify:
+    name: Build and verify (Node.js 22)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash --noprofile --norc -euo pipefail {0}
+    env:
+      RELEASE_SHA: ${{ github.sha }}
+    steps:
+      - name: Use LF checkout bytes
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Check out the exact event commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up the verified Node.js 22 runtime
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '22.23.3'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Verify source SHA and exact committed LF lockfile
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -z "$(git status --porcelain)"
+          node --input-type=module -e 'import { committedLockfile } from "./scripts/release-contract.mjs"; if (process.versions.node.split(".")[0] !== "22") throw Error("Node.js 22 required"); await committedLockfile(process.cwd(), process.env.RELEASE_SHA);'
+
+      - name: Install build and test dependencies without lifecycle scripts
+        run: npm ci --include=dev --ignore-scripts --no-audit --no-fund
+
+      - name: Test integrity, generated production authentication and rollback
+        run: npm run test:deploy
+
+      - name: Build the commit-bound production release
+        run: npm run build:deploy
+
+      - name: Verify, package and re-verify the extracted artifact
+        run: |
+          node scripts/deployment-artifact.mjs verify .deploy-artifact "$RELEASE_SHA"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          mkdir "$RUNNER_TEMP/contentos-release"
+          archive="contentos-$RELEASE_SHA.tar.gz"
+          tar -czf "$RUNNER_TEMP/contentos-release/$archive" .deploy-artifact
+          cp .deploy-artifact/manifest.json "$RUNNER_TEMP/contentos-release/manifest.json"
+          (
+            cd "$RUNNER_TEMP/contentos-release"
+            sha256sum "$archive" > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          extracted=$(mktemp -d "$RUNNER_TEMP/contentos-roundtrip.XXXXXX")
+          tar -xzf "$RUNNER_TEMP/contentos-release/$archive" -C "$extracted"
+          node scripts/deployment-artifact.mjs verify "$extracted/.deploy-artifact" "$RELEASE_SHA"
+          cmp .deploy-artifact/manifest.json "$extracted/.deploy-artifact/manifest.json"
+
+      # Upload only after every check succeeds. The tar preserves hidden files
+      # (.deploy-artifact and .htaccess) without uploading the source or .env.
+      - name: Make the verified release downloadable
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: contentos-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/contentos-release/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Show release identity and download link
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        run: |
+          {
+            printf '### Verified ContentOS release\n\n'
+            printf -- '- Commit: `%s`\n' "$RELEASE_SHA"
+            printf -- '- Runtime: Node.js `%s` / npm `%s`\n' "$(node --version)" "$(npm --version)"
+            printf -- '- [Download verified release](%s)\n' "$ARTIFACT_URL"
+            printf -- '- GitHub artifact digest: `%s`\n' "$ARTIFACT_DIGEST"
+            printf '\nArchive SHA-256 (verify after unzipping the download):\n\n```text\n'
+            cat "$RUNNER_TEMP/contentos-release/SHA256SUMS"
+            printf '```\n\nBuild only. cPanel delivery, deployment and restart require separate approval.\n'
+          } >> "$GITHUB_STEP_SUMMARY"

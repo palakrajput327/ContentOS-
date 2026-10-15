@@ -5,6 +5,60 @@ cPanel no longer runs TypeScript or Vite. It requires `.deploy-artifact/` in
 Artifacts contain only build outputs and a checksum manifest, never dependencies or secrets.
 Checksums detect corruption; upload artifacts only from a trusted build machine.
 
+## GitHub Actions builds (preferred)
+
+`.github/workflows/release-artifact.yml` builds automatically on pushes to `main`
+and supports manual **Actions -> ContentOS release artifact -> Run workflow**.
+It uses an Ubuntu 24.04 runner, a clean LF checkout of the exact event SHA and
+Node.js 22.23.3, matching the locally tested runtime. Official actions are pinned
+to commit SHAs. The workflow has read-only repository permissions, persists no
+checkout credentials and requires no cPanel credentials or production secrets.
+
+Each run installs locked build dependencies without lifecycle scripts, runs
+`npm run test:deploy` (including authentication and rollback tests), runs the
+existing strict `build:deploy`, and verifies the resulting manifest, exact SHA,
+committed LF lockfile and all file checksums. It creates a tar archive, checks its
+SHA-256, extracts it into a separate temporary directory and verifies it again.
+Only a successful run publishes a downloadable Actions artifact, retained for
+30 days (subject to repository policy). No upload-to-hosting, deployment,
+service restart, migration, queue cutover or cron activation occurs.
+
+After an approved push, open a successful run and download
+`contentos-<FULL_SHA>-<RUN_ID>-<ATTEMPT>` from **Artifacts** or the run summary link.
+Private repository downloads require an authorized signed-in GitHub account.
+The downloaded ZIP contains:
+
+- `contentos-<FULL_SHA>.tar.gz` — the complete `.deploy-artifact` directory,
+  including hidden files such as `dist/.htaccess`;
+- `SHA256SUMS` — checksum of the inner tar archive;
+- `manifest.json` — a review copy of the manifest also inside the archive.
+
+Unzip the GitHub download locally; verify the **inner tar archive**, then extract
+to a new directory and verify against the matching source checkout:
+
+```bash
+# Run in the unzipped download directory.
+RELEASE_SHA='<FULL_SHA>'
+sha256sum -c SHA256SUMS
+mkdir extracted
+tar -xzf "contentos-$RELEASE_SHA.tar.gz" -C extracted
+# Run with the exact SHA's clean LF source checkout and Node.js 22.
+node /absolute/path/to/checkout/scripts/deployment-artifact.mjs verify \
+  "$PWD/extracted/.deploy-artifact" "$RELEASE_SHA"
+```
+
+Compare the full SHA and archive checksum with the successful run summary.
+The GitHub artifact digest describes the outer download; it is different from
+the tar checksum in SHA256SUMS. Never substitute a newer cPanel HEAD for the
+artifact's exact SHA. Deliver the inner tar archive to cPanel only after approval
+and continue with steps 3–5 below. Git pull alone does not fetch this artifact.
+
+The first hosted run remains pending until these workflow changes are approved,
+committed and pushed, and Actions are enabled for the private repository. Account
+Actions quotas, retention limits and allowed-action policies still apply.
+
+## Local release builds and manual deployment
+
 1. Use Node.js 22. Only after explicit commit approval, commit the reviewed
    deployment changes. Never include unrelated staged scratch files.
 2. Create the official release in a **fresh LF checkout** of that exact commit.
