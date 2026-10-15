@@ -546,3 +546,35 @@ export async function pollYouTubeProcessing() {
   ).rows;
   for (const row of rows) await checkYouTubeRecord(row);
 }
+
+export async function refreshExpiringYouTubeTokens(db: DB = pool): Promise<{ checked: number; refreshed: number }> {
+  try {
+    const rows = (
+      await db.query(
+        `SELECT a.id, a.workspace_id, t.expires_at, t.refresh_ciphertext 
+         FROM social_accounts a 
+         JOIN social_account_tokens t ON t.account_id = a.id 
+         WHERE lower(a.platform) = 'youtube' 
+           AND lower(a.state) = 'connected' 
+           AND t.refresh_ciphertext IS NOT NULL
+           AND (t.expires_at IS NULL OR t.expires_at < now() + interval '20 minutes')
+         LIMIT 20`
+      )
+    ).rows;
+
+    let refreshed = 0;
+    for (const row of rows) {
+      try {
+        await youtubeToken(row.workspace_id, row.id, true);
+        refreshed++;
+      } catch (err: any) {
+        console.warn(`[YouTube Token Proactive Refresh] Account ${row.id}:`, err?.message || err);
+      }
+    }
+    return { checked: rows.length, refreshed };
+  } catch (err: any) {
+    console.error("[YouTube Token Refresh Loop Error]:", err?.message || err);
+    return { checked: 0, refreshed: 0 };
+  }
+}
+

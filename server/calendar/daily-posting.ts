@@ -30,13 +30,19 @@ export async function getDailyCapacity(
       "SELECT timezone, daily_posting_target, festival_automation_enabled, festival_region FROM workspaces WHERE id=$1",
       [workspaceId],
     )
-  ).rows[0];
+  ).rows[0] || {
+    timezone: "Asia/Kolkata",
+    daily_posting_target: 10,
+    festival_automation_enabled: false,
+    festival_region: "National",
+  };
+  const timezone = ws.timezone || "Asia/Kolkata";
   const rows = (
     await db.query(
       `SELECT DISTINCT c.id, c.variants FROM content c JOIN scheduled_posts s ON s.content_id=c.id AND s.workspace_id=c.workspace_id
     WHERE c.workspace_id=$1 AND (s.execute_at AT TIME ZONE $2)::date=$3::date
     AND s.state <> 'CANCELLED' AND ($4::uuid IS NULL OR c.id<>$4)`,
-      [workspaceId, ws.timezone, date, excludeId || null],
+      [workspaceId, timezone, date, excludeId || null],
     )
   ).rows;
   const festivals = ws.festival_automation_enabled
@@ -45,7 +51,7 @@ export async function getDailyCapacity(
       }).filter((f) => f.dateForYear === date).length
     : 0;
   return dailyCapacity(
-    ws.daily_posting_target,
+    ws.daily_posting_target || 10,
     rows.length,
     festivals,
     rows.filter(
@@ -67,8 +73,9 @@ export async function assertDailySlot(
       workspaceId,
     ])
   ).rows[0];
+  const timezone = ws?.timezone || "Asia/Kolkata";
   const date = new Intl.DateTimeFormat("en-CA", {
-    timeZone: ws.timezone,
+    timeZone: timezone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

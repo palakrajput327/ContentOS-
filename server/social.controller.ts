@@ -67,7 +67,25 @@ export class SocialController {
     res.setHeader('Referrer-Policy','no-referrer');
     if (format === 'jpeg' && asset.mime_type.startsWith('image/') && !['image/jpeg','image/jpg'].includes(asset.mime_type)) {
       const executable = ffmpeg as unknown as string | null;
-      if (!executable) {stream.destroy();throw new BadRequestException('Instagram JPEG conversion is unavailable on this server. Upload a JPG image.');}
+      if (!executable) {
+        try {
+          const chunks: Buffer[] = [];
+          for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          const { createCanvas, loadImage } = await import('@napi-rs/canvas');
+          const img = await loadImage(Buffer.concat(chunks));
+          const canvas = createCanvas(img.width, img.height);
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          const jpegBuf = await canvas.encode('jpeg');
+          res.setHeader('Content-Type','image/jpeg');
+          res.setHeader('Content-Length',String(jpegBuf.length));
+          res.send(jpegBuf);
+          return;
+        } catch {
+          stream.destroy();
+          throw new BadRequestException('Instagram JPEG conversion is unavailable on this server. Upload a JPG image.');
+        }
+      }
       res.setHeader('Content-Type','image/jpeg');
       const conversion=spawn(executable,['-hide_banner','-loglevel','error','-i','pipe:0','-frames:v','1','-f','image2pipe','-vcodec','mjpeg','-q:v','2','pipe:1'],{windowsHide:true,stdio:['pipe','pipe','pipe']});
       const timeout=setTimeout(()=>{conversion.kill();res.destroy();},30000);
@@ -153,9 +171,23 @@ export class SocialController {
       conversion.stdout.pipe(res);
       return;
     }
-    res.status(400).json({
-      error: "Instagram auto-poster generation failed: JPEG image conversion unavailable on server. Upload a JPG or PNG image.",
-    });
+    try {
+      const { createCanvas, loadImage } = await import('@napi-rs/canvas');
+      const img = await loadImage(Buffer.from(svg));
+      const canvas = createCanvas(1080, 1080);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, 1080, 1080);
+      const jpegBuf = await canvas.encode('jpeg');
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.setHeader('Content-Length', String(jpegBuf.length));
+      res.send(jpegBuf);
+      return;
+    } catch {
+      res.status(400).json({
+        error: "Instagram auto-poster generation failed: JPEG image conversion unavailable on server. Upload a JPG or PNG image.",
+      });
+    }
   }
   @WorkspaceRequired()
   @Get("social/accounts")

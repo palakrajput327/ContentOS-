@@ -55,20 +55,38 @@ export function renderTextCardSvg(text: string, titleStr?: string): string {
     </svg>`;
 }
 
+async function renderSvgToJpegCanvas(
+  svg: string,
+  width = 1080,
+  height = 1080,
+): Promise<Buffer | null> {
+  try {
+    const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+    const img = await loadImage(Buffer.from(svg));
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, width, height);
+    return await canvas.encode("jpeg");
+  } catch {
+    return null;
+  }
+}
+
 export async function generateTextCardJpegBuffer(
   text: string,
   title?: string,
 ): Promise<Buffer> {
+  const svg = renderTextCardSvg(text, title);
   const executable = (typeof ffmpeg === "string" ? ffmpeg : (ffmpeg as any)?.default) as string | null;
   if (!executable) {
+    const fallback = await renderSvgToJpegCanvas(svg, 1080, 1080);
+    if (fallback) return fallback;
     throw new Error(
-      "Instagram auto-poster generation failed: JPEG image conversion unavailable on server (FFmpeg not installed).",
+      "Instagram auto-poster generation failed: JPEG image conversion unavailable on server.",
     );
   }
 
-  const svg = renderTextCardSvg(text, title);
-
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     const conversion = spawn(
       executable,
       [
@@ -94,28 +112,36 @@ export async function generateTextCardJpegBuffer(
 
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
       conversion.kill();
-      reject(new Error("JPEG text card generation timed out."));
+      const fallback = await renderSvgToJpegCanvas(svg, 1080, 1080);
+      if (fallback) resolve(fallback);
+      else reject(new Error("JPEG text card generation timed out."));
     }, 15000);
 
     conversion.stdout.on("data", (chunk) => chunks.push(chunk));
     conversion.stderr.on("data", (chunk) => errChunks.push(chunk));
 
-    conversion.on("error", (err) => {
+    conversion.on("error", async (err) => {
       clearTimeout(timeout);
-      reject(err);
+      const fallback = await renderSvgToJpegCanvas(svg, 1080, 1080);
+      if (fallback) resolve(fallback);
+      else reject(err);
     });
 
-    conversion.on("close", (code) => {
+    conversion.on("close", async (code) => {
       clearTimeout(timeout);
       if (code === 0 && chunks.length > 0) {
         resolve(Buffer.concat(chunks));
       } else {
-        const errStr = Buffer.concat(errChunks).toString().trim();
-        reject(
-          new Error(`JPEG text card generation failed (exit code ${code}): ${errStr || "Unknown FFmpeg error"}`),
-        );
+        const fallback = await renderSvgToJpegCanvas(svg, 1080, 1080);
+        if (fallback) resolve(fallback);
+        else {
+          const errStr = Buffer.concat(errChunks).toString().trim();
+          reject(
+            new Error(`JPEG text card generation failed (exit code ${code}): ${errStr || "Unknown FFmpeg error"}`),
+          );
+        }
       }
     });
 
@@ -301,11 +327,11 @@ export async function generateFestivalPosterJpegBuffer(
   const svg = renderFestivalPosterSvg(options);
 
   if (!executable) {
-    // If FFmpeg is unavailable, return raw SVG converted to Buffer as fallback
-    return Buffer.from(svg);
+    const fallback = await renderSvgToJpegCanvas(svg, 1080, 1080);
+    return fallback || Buffer.from(svg);
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     const conversion = spawn(
       executable,
       [
@@ -331,25 +357,28 @@ export async function generateFestivalPosterJpegBuffer(
 
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
       conversion.kill();
-      resolve(Buffer.from(svg)); // Fallback on timeout
+      const fallback = await renderSvgToJpegCanvas(svg, 1080, 1080);
+      resolve(fallback || Buffer.from(svg));
     }, 15000);
 
     conversion.stdout.on("data", (chunk) => chunks.push(chunk));
     conversion.stderr.on("data", (chunk) => errChunks.push(chunk));
 
-    conversion.on("error", () => {
+    conversion.on("error", async () => {
       clearTimeout(timeout);
-      resolve(Buffer.from(svg));
+      const fallback = await renderSvgToJpegCanvas(svg, 1080, 1080);
+      resolve(fallback || Buffer.from(svg));
     });
 
-    conversion.on("close", (code) => {
+    conversion.on("close", async (code) => {
       clearTimeout(timeout);
       if (code === 0 && chunks.length > 0) {
         resolve(Buffer.concat(chunks));
       } else {
-        resolve(Buffer.from(svg));
+        const fallback = await renderSvgToJpegCanvas(svg, 1080, 1080);
+        resolve(fallback || Buffer.from(svg));
       }
     });
 

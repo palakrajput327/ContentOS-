@@ -241,6 +241,20 @@ export async function executePublishRecord(
         null,
         { code: e.code, platform: account.platform },
       );
+      // Notify only on confirmed terminal failure — not on retries or uncertain states.
+      if (!retry && !e.uncertain) {
+        await db.query(
+          `INSERT INTO notifications(id, workspace_id, type, title, message, data)
+           VALUES($1, $2, 'publish_failed', $3, $4, $5)`,
+          [
+            randomUUID(),
+            record.workspace_id,
+            `Publishing Failed on ${account.platform}`,
+            `Post "${content.title.slice(0, 50)}" failed to publish on ${account.platform}: ${e.code}`,
+            JSON.stringify({ contentId: content.id, platform: account.platform, error: e.code }),
+          ],
+        );
+      }
     });
     return {
       success: false,
@@ -278,6 +292,18 @@ export async function executePublishRecord(
       content.title,
       null,
       { platform: account.platform, providerPostId: providerId },
+    );
+    // Notify only after the published_posts row is durably committed.
+    await db.query(
+      `INSERT INTO notifications(id, workspace_id, type, title, message, data)
+       VALUES($1, $2, 'published', $3, $4, $5)`,
+      [
+        randomUUID(),
+        record.workspace_id,
+        `Post Published on ${account.platform}`,
+        `Your post "${content.title.slice(0, 50)}" was successfully published on ${account.platform}.`,
+        JSON.stringify({ contentId: content.id, platform: account.platform, providerPostId: providerId }),
+      ],
     );
   });
   return { success: true, state: "PUBLISHED", providerPostId: providerId };

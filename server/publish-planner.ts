@@ -75,8 +75,8 @@ export async function createPublishPlan(
     if (!variantObj.title && content.youtube.title) {
       variantObj.title = content.youtube.title;
     }
-    if (!variantObj.caption && content.youtube.description) {
-      variantObj.caption = content.youtube.description;
+    if (!variantObj.caption) {
+      variantObj.caption = content.youtube.description || "";
     }
     if (!variantObj.mediaAssetId && content.youtube.assetId) {
       variantObj.mediaAssetId = content.youtube.assetId;
