@@ -99,7 +99,8 @@ export class LocalStorageProvider implements ObjectStorageProvider {
 
   async getSignedUploadUrl(input: SignedUploadInput): Promise<SignedUrlResult> {
     const expiresIn = input.expiresInSeconds || 900;
-    const uploadUrl = `/api/v1/storage/local/upload?bucket=${encodeURIComponent(
+    const base = process.env.PUBLIC_URL || process.env.VITE_API_BASE || process.env.APP_ORIGIN || "";
+    const uploadUrl = `${base}/api/v1/storage/local/upload?bucket=${encodeURIComponent(
       input.bucket,
     )}&key=${encodeURIComponent(input.objectKey)}`;
 
@@ -117,7 +118,8 @@ export class LocalStorageProvider implements ObjectStorageProvider {
     objectKey: string,
     _expiresInSeconds: number = 900,
   ): Promise<string> {
-    return `/api/v1/storage/local/download?bucket=${encodeURIComponent(
+    const base = process.env.PUBLIC_URL || process.env.VITE_API_BASE || process.env.APP_ORIGIN || "";
+    return `${base}/api/v1/storage/local/download?bucket=${encodeURIComponent(
       bucket,
     )}&key=${encodeURIComponent(objectKey)}`;
   }

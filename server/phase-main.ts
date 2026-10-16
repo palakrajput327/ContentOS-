@@ -218,6 +218,9 @@ export async function bootstrap() {
   app.setGlobalPrefix("api/v1");
   const allowedOrigins = [
     new URL(config.APP_URL).origin,
+    "https://hidustansocialnetwork.in",
+    "http://hidustansocialnetwork.in",
+    "https://api.hidustansocialnetwork.in",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:3001",
@@ -336,13 +339,18 @@ export async function bootstrap() {
   await app.init();
 
   // Respect cPanel/Passenger PORT when provided; otherwise use app config.
-  const port = Number(process.env.PORT || config.PORT || 3001);
-  await app.listen(port, "0.0.0.0");
+  const rawPort = process.env.PORT || config.PORT || 3001;
+  const isNamedPipeOrSocket = typeof rawPort === "string" && isNaN(Number(rawPort));
+  if (isNamedPipeOrSocket) {
+    await app.listen(rawPort);
+  } else {
+    await app.listen(Number(rawPort), "0.0.0.0");
+  }
 
   console.log(
     JSON.stringify({
       event: "auth_api_ready",
-      port,
+      port: rawPort,
     }),
   );
 

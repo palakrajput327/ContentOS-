@@ -133,9 +133,13 @@ export default function YouTubeComposer({
         mimeType: file.type,
         sizeBytes: file.size,
       });
-      const response = await fetch(presign.uploadUrl, {
+      const apiBase = import.meta.env.VITE_API_BASE ?? "";
+      const targetUpload = presign.uploadUrl.startsWith("/")
+        ? `${apiBase}${presign.uploadUrl}`
+        : presign.uploadUrl;
+      const response = await fetch(targetUpload, {
         method: "PUT",
-        credentials: presign.uploadUrl.startsWith("/") ? "include" : "omit",
+        credentials: "include",
         headers: { "Content-Type": file.type, ...presign.headers },
         body: file,
       });

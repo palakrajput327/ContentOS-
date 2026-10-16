@@ -1,7 +1,11 @@
 import { loadMetaMedia } from './meta.media.js';
 import { getStorageProvider } from './storage/storage.factory.js';
 import { spawn } from 'node:child_process';
-import ffmpeg from 'ffmpeg-static';
+let ffmpeg: string | null = null;
+try {
+  const mod = await import("ffmpeg-static" as any);
+  ffmpeg = ((mod as any).default || mod) as any;
+} catch {}
 import {
   Body,
   Controller,

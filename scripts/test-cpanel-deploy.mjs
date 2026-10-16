@@ -17,6 +17,7 @@ try {
   const app=join(temp,'app'),front=join(temp,'front'),repo=join(temp,'repo'),bin=join(temp,'bin'),envdir=join(temp,'env');
   for(const p of [app,front,repo,bin,join(envdir,'lib','node_modules'),join(envdir,'bin'),join(app,'uploads'),join(app,'deploy'),join(front,'uploads')])await mkdir(p,{recursive:true});
   await writeFile(join(app,'app.mjs'),'OLD APPLICATION');await writeFile(join(app,'.env'),'PRODUCTION CONFIG PRESERVED');
+  await writeFile(join(app,'.npmrc'),'ignore-scripts=false\n');
   await writeFile(join(app,'uploads','keep.txt'),'UPLOAD PRESERVED');await writeFile(join(app,'dump.rdb'),'DATA PRESERVED');
   await writeFile(join(app,'deploy','cpanel-deploy.sh'),'#!/bin/bash\necho STALE_SCRIPT_EXECUTED\nexit 77\n');
   await writeFile(join(front,'index.html'),'OLD FRONTEND');await writeFile(join(front,'.env'),'FRONT CONFIG PRESERVED');
@@ -44,7 +45,7 @@ if [[ "$1" == scripts/verify-ffmpeg.mjs && "\${FAIL_FINAL:-}" == 1 && "$PWD" == 
     .replace('FRONTEND_TARGET=/home/hindust1/public_html',`FRONTEND_TARGET=${quote(posix+'/front')}`)
     .replace('ACTIVATE=/home/hindust1/nodevenv/api.hidustansocialnetwork.in/22/bin/activate',`ACTIVATE=${quote(posix+'/env/bin/activate')}`);
   for(const dir of ['server','src','public','scripts','deploy'])await mkdir(join(repo,dir));
-  for(const [path,data]of [['app.mjs','LATEST COMMITTED APPLICATION'],['package.json','{}'],['package-lock.json','{}'],['tsconfig.json','{}'],['vite.config.ts','fixture'],['index.html','fixture'],['server/new.ts','latest source'],['src/new.ts','latest source'],['public/favicon.svg','fixture'],['scripts/build.mjs','fixture'],['scripts/verify-ffmpeg.mjs','fixture'],['deploy/cpanel-deploy.sh',fixture],['deploy/.env.production.example','IGNORED SAMPLE']])await writeFile(join(repo,path),data);
+  for(const [path,data]of [['.npmrc','ignore-scripts=true\n'],['app.mjs','LATEST COMMITTED APPLICATION'],['package.json','{}'],['package-lock.json','{}'],['tsconfig.json','{}'],['vite.config.ts','fixture'],['index.html','fixture'],['server/new.ts','latest source'],['src/new.ts','latest source'],['public/favicon.svg','fixture'],['scripts/build.mjs','fixture'],['scripts/verify-ffmpeg.mjs','fixture'],['deploy/cpanel-deploy.sh',fixture],['deploy/.env.production.example','IGNORED SAMPLE']])await writeFile(join(repo,path),data);
   const git=(...args)=>exec('git',['-C',repo,...args],{windowsHide:true});
   await git('init');await git('add','.');await git('-c','user.name=Fixture','-c','user.email=fixture@example.test','-c','commit.gpgsign=false','-c','core.hooksPath=disabled-hooks','commit','-m','fixture');
   await mkdir(join(repo,'.deploy-artifact','dist','assets'),{recursive:true});
@@ -65,14 +66,18 @@ if [[ "$1" == scripts/verify-ffmpeg.mjs && "\${FAIL_FINAL:-}" == 1 && "$PWD" == 
   const result=await run();assert.doesNotMatch(result.stdout,/STALE_SCRIPT_EXECUTED/);
   const backup=result.stdout.match(/\[DEPLOY\] Backup: (.+)/)[1].trim();
   assert.equal(await readFile(join(app,'app.mjs'),'utf8'),'LATEST COMMITTED APPLICATION');
+  assert.equal((await readFile(join(app,'.npmrc'),'utf8')).trim(),'ignore-scripts=true');
   assert.equal((await readFile(join(envdir,'lib','node_modules','marker'),'utf8')).trim(),'NEW_DEPENDENCIES');
   assert.equal((await readFile(join(front,'index.html'),'utf8')).trim(),'NEW_FRONTEND');
   assert.equal((await readFile(join(app,'dist','index.html'),'utf8')).trim(),'NEW_FRONTEND');await preserved();
   assert.equal(await readFile(join(app,basename(backup),'node_modules','marker'),'utf8'),'OLD DEPENDENCIES');
   await run(['--rollback',backup]);assert.equal(await readFile(join(app,'app.mjs'),'utf8'),'OLD APPLICATION');
+  assert.equal(await readFile(join(app,'.npmrc'),'utf8'),'ignore-scripts=false\n');
   assert.equal(await readFile(join(front,'index.html'),'utf8'),'OLD FRONTEND');
   assert.equal(await readFile(join(envdir,'lib','node_modules','marker'),'utf8'),'OLD DEPENDENCIES');await preserved();
+  await rm(join(app,'.npmrc'));
   await assert.rejects(run([],{FAIL_FINAL:'1'}));
+  assert.ok(await absent(join(app,'.npmrc')));
   assert.equal(await readFile(join(app,'app.mjs'),'utf8'),'OLD APPLICATION');
   assert.equal(await readFile(join(envdir,'lib','node_modules','marker'),'utf8'),'OLD DEPENDENCIES');await preserved();
   const commands=await readFile(join(temp,'commands.txt'),'utf8');

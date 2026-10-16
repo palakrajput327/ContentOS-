@@ -605,11 +605,14 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
       const filename='branded_poster.png';
       const upload=await request<{assetId:string;uploadUrl:string;headers?:Record<string,string>}>('/storage/uploads/presign','POST',{type:'IMAGE',originalFilename:filename,mimeType:'image/png',sizeBytes:blob.size});
       const workspaceId=useSession.getState().workspaceId;
-      const response=await fetch(upload.uploadUrl,{method:'PUT',credentials:'include',headers:{'Content-Type':'image/png',...(workspaceId?{'X-Workspace-Id':workspaceId}:{}),...upload.headers},body:blob});
+      const apiBase = import.meta.env.VITE_API_BASE ?? "";
+      const targetUpload = upload.uploadUrl.startsWith("/") ? `${apiBase}${upload.uploadUrl}` : upload.uploadUrl;
+      const response=await fetch(targetUpload,{method:'PUT',credentials:'include',headers:{'Content-Type':'image/png',...(workspaceId?{'X-Workspace-Id':workspaceId}:{}),...upload.headers},body:blob});
       if(!response.ok)throw new Error('Branded image upload failed. Your original image is preserved.');
       await request(`/storage/uploads/${upload.assetId}/complete`,'POST',{});
       const media=await request<{downloadUrl:string}>(`/storage/media/${upload.assetId}/download`);
-      const asset={assetId:upload.assetId,url:media.downloadUrl,filename};
+      const resolvedMediaUrl = media.downloadUrl.startsWith("/") ? `${apiBase}${media.downloadUrl}` : media.downloadUrl;
+      const asset={assetId:upload.assetId,url:resolvedMediaUrl,filename};
       setRenderedAsset({signature,asset});
       return asset;
     } finally {setIsPreparingVisual(false);}

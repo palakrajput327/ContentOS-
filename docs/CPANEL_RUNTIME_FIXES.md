@@ -16,7 +16,9 @@ node scripts/verify-ffmpeg.mjs
 
 The selective rebuild runs FFmpeg's installer without invoking an application TypeScript postinstall. It downloads the binary for the server's platform. The verification checks executable access and actually runs `-version`, with a timeout. Download restrictions or host execution restrictions stop deployment; package import success alone is insufficient. A host-supplied executable can instead be selected with the package's `FFMPEG_BIN` environment variable.
 
-For a source build, the deployment scripts explicitly install development dependencies with lifecycle scripts disabled, build, prune with scripts disabled, and then install and verify FFmpeg. `npm install` preserves CloudLinux's dependency layout; use `npm ci` for clean CI build environments instead of replacing cPanel's managed symlink. Review manifest/lockfile changes from an installation before accepting them.
+Current releases build only in GitHub Actions or locally on Node.js 22. The cPanel script verifies prebuilt artifacts, installs production dependencies in an isolated stage with scripts disabled, then selectively installs and verifies FFmpeg. The project `.npmrc` defaults to `ignore-scripts=true`; the explicit FFmpeg rebuild overrides this for that package only. Deployment preserves the managed application symlink and snapshots the previous dependency directory and npm policy for rollback. Do not run an extra npm installation in the live application directory.
+
+The reported cPanel `tsc: command not found` failure was traced to the actual deployed package.json, which still contained `postinstall: npm run build:api`. The repository removed this hook in commit `25fd073`, but the application folder retained the old manifest. See [the current prebuilt guide](../deploy/PREBUILT.md) for the evidence, install-policy regression and exact future operator steps. No TypeScript or Vite dependency is added to production to compensate for stale deployment state.
 
 ## Redis remains required
 

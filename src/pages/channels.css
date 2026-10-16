@@ -1,0 +1,67 @@
+.channel-welcome.panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 26px;
+  margin-bottom: 16px;
+  background: radial-gradient(ellipse at top left, color-mix(in srgb, var(--accent) 12%, transparent), transparent 65%), var(--surface);
+}
+.channel-welcome-copy { display: flex; align-items: center; gap: 18px; }
+.channel-spark { display: grid; place-items: center; width: 52px; height: 52px; flex-shrink: 0; border-radius: 17px; color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, var(--surface)); transform: rotate(-7deg); }
+.channel-welcome h2 { margin: 6px 0; font-size: 1.2rem; letter-spacing: -.025em; }
+.channel-welcome p { margin: 0; color: var(--muted); font-size: .85rem; line-height: 1.6; }
+.channel-progress { display: grid; gap: 10px; min-width: 230px; font-size: .8rem; }
+.channel-progress strong { font-size: 1.35rem; color: var(--accent); }
+.channel-progress small { color: var(--muted); font-size: .73rem; line-height: 1.5; }
+.channel-progress progress { appearance: none; width: 100%; height: 6px; border: 0; border-radius: 20px; background: var(--surface3); overflow: hidden; }
+.channel-progress progress::-webkit-progress-bar { background: var(--surface3); }
+.channel-progress progress::-webkit-progress-value { border-radius: 20px; background: var(--accent); transition: width .3s ease; }
+.channel-progress progress::-moz-progress-bar { border-radius: 20px; background: var(--accent); }
+.channel-guide { margin-bottom: 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.channel-guide summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 15px 18px; cursor: pointer; list-style: none; font-size: .8rem; color: var(--muted); }
+.channel-guide summary::-webkit-details-marker { display: none; }
+.channel-guide summary > span { display: flex; gap: 8px; align-items: center; }
+.channel-guide summary > svg { transition: transform .2s ease; }
+.channel-guide[open] summary > svg { transform: rotate(180deg); }
+.channel-guide ol { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; list-style: none; padding: 2px 18px 20px; margin: 0; }
+.channel-guide li { display: flex; gap: 10px; font-size: .8rem; }
+.channel-guide li > span { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); font-size: .75rem; }
+.channel-guide li p { color: var(--muted); font-size: .75rem; line-height: 1.6; margin: 5px 0 0; }
+.channel-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.channel-filters { display: flex; padding: 4px; gap: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.channel-filters button { display: flex; align-items: center; gap: 8px; background: transparent; border: 1px solid transparent; border-radius: 8px; color: var(--muted); padding: 8px 12px; font: inherit; font-size: .78rem; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.channel-filters button[aria-pressed="true"] { color: var(--ink); background: var(--surface2); border-color: var(--border); }
+.channel-filters button span { font-size: .7rem; color: var(--accent); }
+.channel-toolbar > small { display: flex; align-items: center; gap: 6px; font-size: .75rem; color: var(--muted); }
+.channel-connections .channel-card { transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
+.channel-connections .channel-card:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); box-shadow: 0 8px 24px #00000008; transform: translateY(-3px); }
+.channel-connections .channel-card:focus-within { border-color: var(--accent); }
+.channel-connections .channel-card-heading { flex-wrap: wrap; }
+.channel-connections .channel-card-heading h2 { min-width: 72px; }
+.channel-state { display: inline-flex; align-items: center; gap: 5px; }
+.channel-state-dot { width: 5px; height: 5px; background: currentColor; border-radius: 50%; }
+.channel-connections .channel-state-ready { color: var(--success); background: color-mix(in srgb, var(--success) 9%, var(--surface)); border-color: color-mix(in srgb, var(--success) 25%, var(--border)); }
+.channel-connections .channel-state-warning { color: var(--warning); background: color-mix(in srgb, var(--warning) 9%, var(--surface)); }
+.channel-connect-note { display: block; text-align: center; font-size: .7rem; color: var(--muted); margin-top: 9px; line-height: 1.6; }
+.channel-empty { text-align: center; padding: 38px 20px; margin-bottom: 20px; }
+.channel-empty > svg { color: var(--accent); }
+.channel-empty h2 { font-size: 1.05rem; margin: 12px 0 8px; }
+.channel-empty p { font-size: .85rem; color: var(--muted); }
+.channel-secret-field { display: flex; position: relative; }
+.channel-secret-field input { width: 100%; padding-right: 48px; min-width: 0; }
+.channel-secret-field button { position: absolute; top: 0; right: 2px; bottom: 0; width: 42px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); cursor: pointer; border-radius: 8px; }
+.channel-filters button:focus-visible, .channel-guide summary:focus-visible, .channel-secret-field button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.channel-spinner { animation: channel-spin 1s linear infinite; }
+@keyframes channel-spin { to { transform: rotate(360deg); } }
+@media (max-width: 760px) {
+  .channel-welcome.panel { align-items: stretch; flex-direction: column; gap: 20px; padding: 20px; }
+  .channel-progress { min-width: 0; }
+  .channel-guide ol { grid-template-columns: 1fr; gap: 15px; }
+  .channel-connections .account-row { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .channel-connections .channel-card, .channel-guide summary > svg, .channel-filters button, .channel-progress progress::-webkit-progress-value { transition: none; }
+  .channel-connections .channel-card:hover { transform: none; }
+  .channel-spinner { animation: none; }
+}

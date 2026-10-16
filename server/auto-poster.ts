@@ -1,6 +1,10 @@
-import ffmpeg from "ffmpeg-static";
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
+let ffmpeg: string | null = null;
+try {
+  const mod = await import("ffmpeg-static" as any);
+  ffmpeg = ((mod as any).default || mod) as any;
+} catch {}
 import { randomUUID } from "node:crypto";
 import { getStorageProvider } from "./storage/storage.factory.js";
 import {uploadManagedMedia} from './storage/managed-media.js';

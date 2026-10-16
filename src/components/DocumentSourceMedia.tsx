@@ -87,8 +87,9 @@ export function DocumentSourceMedia({
     setError("");
     try {
       const workspaceId = useSession.getState().workspaceId;
+      const apiBase = import.meta.env.VITE_API_BASE ?? "";
       const response = await fetch(
-        `/api/v1/documents/${documentId}/source-media/${sourceId}/original`,
+        `${apiBase}/api/v1/documents/${documentId}/source-media/${sourceId}/original`,
         {
           credentials: "include",
           headers: workspaceId ? { "X-Workspace-Id": workspaceId } : {},

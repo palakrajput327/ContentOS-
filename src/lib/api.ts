@@ -175,7 +175,10 @@ export const documentsApi = {
     );
 
     const wid = useSession.getState().workspaceId;
-    const uploadRes = await fetch(presign.uploadUrl, {
+    const targetUpload = presign.uploadUrl.startsWith("/")
+      ? `${apiBase}${presign.uploadUrl}`
+      : presign.uploadUrl;
+    const uploadRes = await fetch(targetUpload, {
       method: "PUT",
       credentials: "include",
       headers: {

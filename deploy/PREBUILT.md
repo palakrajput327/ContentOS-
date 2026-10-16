@@ -5,6 +5,66 @@ cPanel no longer runs TypeScript or Vite. It requires `.deploy-artifact/` in
 Artifacts contain only build outputs and a checksum manifest, never dependencies or secrets.
 Checksums detect corruption; upload artifacts only from a trusted build machine.
 
+## cPanel Run NPM Install: confirmed stale manifest
+
+The inspected production app-folder scripts still contained
+`"postinstall": "npm run build:api"`. That hook makes the npm install button run
+`tsc`, which is deliberately unavailable in a production-only dependency install.
+The repository already removed this hook in commit `25fd073`; updating the Git
+checkout does not update `/home/hindust1/api.hidustansocialnetwork.in/package.json`.
+This is a stale deployed manifest, not a requirement to install TypeScript.
+
+The project `.npmrc` now defaults to `ignore-scripts=true`. Deployment stages this
+committed file and includes it in managed-file snapshots and rollback. Install
+hooks are prohibited by a regression test. Explicit CI build commands still run;
+`npm rebuild ffmpeg-static --ignore-scripts=false` remains the selective installer
+exception, followed by dependency-tree and executable validation. GitHub Actions
+uses the same existing build/authentication/integrity/rollback checks plus this
+new offline npm-policy regression. Never enable all install scripts as a workaround.
+
+Exact operator steps, **only after separate publication/deployment approval**:
+
+1. Stop retrying **Run NPM Install** against the stale app folder. Do not select
+   `build`, `build:api`, `build:backend`, `build:frontend` or build-containing test
+   scripts under **Run JS Script**. That button explicitly executes a script and
+   is not blocked by npm's `ignore-scripts` policy.
+2. Verify Setup Node.js App targets `api.hidustansocialnetwork.in` under this
+   account, uses Node.js 22 / Production mode, and startup file `app.mjs`. Do not
+   change/save/restart these settings as part of this local fix. A different root
+   requires investigation before proceeding. Do not change environment/database
+   settings or queue configuration.
+3. After an approved commit/push, download its successful Actions artifact. In
+   Git Version Control choose the configured ContentOS- repo -> **Update from
+   Remote**; confirm the exact artifact SHA. The application root is separate.
+4. After hosting-write approval, deliver and verify the matching archive as below.
+   Review any existing application `.npmrc` before adopting the managed policy
+   so registry/authentication settings are not accidentally discarded. Its prior
+   contents are backed up by deployment and restored by rollback.
+5. After deployment approval, use **Deploy HEAD Commit** once. The existing script
+   installs production dependencies in staging with scripts disabled, selectively
+   installs FFmpeg, verifies dependencies/binaries and promotes with rollback.
+   Do not perform a second UI npm installation: it bypasses deployment snapshots
+   and may mutate the active managed dependencies directly.
+6. Before any separately approved restart, verify read-only from cPanel Terminal:
+
+   ```bash
+   cd /home/hindust1/api.hidustansocialnetwork.in
+   # Activate the exact Node.js 22 environment shown by cPanel first.
+   node --version
+   node -e 'const p=require("./package.json"); for(const k of ["preinstall","install","postinstall","prepublish","preprepare","prepare","postprepare"]) if(p.scripts?.[k]) throw Error("Unexpected install hook: "+k); console.log("No application install-time hooks");'
+   npm config get ignore-scripts
+   npm ls --omit=dev --depth=0
+   node scripts/verify-ffmpeg.mjs
+   ```
+
+   Expected: Node 22, no application install hooks, `true`, valid production
+   dependencies and a successful FFmpeg version check. If results differ, stop;
+   do not add build tools, run migrations or restart. Nothing here activates queues.
+
+The local patch does not remove the existing production postinstall until an
+approved release replaces that deployed package.json. The live error is not
+resolved merely by changing this Git checkout or rerunning the install button.
+
 ## GitHub Actions builds (preferred)
 
 `.github/workflows/release-artifact.yml` builds automatically on pushes to `main`

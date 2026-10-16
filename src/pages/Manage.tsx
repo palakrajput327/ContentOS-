@@ -23,7 +23,11 @@ import {
   Activity as ActivityIcon,
   Bot,
   Loader2,
+  Eye,
+  EyeOff,
+  ChevronDown,
 } from "lucide-react";
+import "./channels.css";
 import {
   Button,
   PlatformIcon,
@@ -50,6 +54,8 @@ export function Channels() {
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+  const [channelFilter, setChannelFilter] = useState<"all" | "connected">("all");
   const [connectingPlatform, setConnectingPlatform] = useState<Platform | null>(null);
   const [metaPages, setMetaPages] = useState<{id:string;name:string;instagram:string|null}[]>([]);
   const [metaPage, setMetaPage] = useState('');
@@ -60,6 +66,9 @@ export function Channels() {
   }, [metaPending]);
   const [remove, setRemove] = useState<string | null>(null);
   const canManage = ["Owner", "Admin"].includes(s.workspace.role);
+  const connectedPlatforms = platforms.filter(p => s.accounts.some(a =>
+    a.platform.toLowerCase() === p.toLowerCase() && a.state === "CONNECTED"));
+  const visiblePlatforms = channelFilter === "connected" ? connectedPlatforms : platforms;
 
   useEffect(() => {
     const connectedParam = searchParams.get("connected");
@@ -81,6 +90,7 @@ export function Channels() {
       setConnectTelegram(true);
       setChannel("");
       setToken("");
+      setShowToken(false);
       setError("");
       return;
     }
@@ -96,8 +106,7 @@ export function Channels() {
         window.location.href = res.url;
       } else {
         toast.error(
-          res.message ||
-            `Please add your real ${p.toUpperCase()}_CLIENT_ID and ${p.toUpperCase()}_CLIENT_SECRET in .env`,
+          `${p} isn't ready to connect yet. Ask your workspace administrator to finish setup.`,
         );
       }
     } catch (err) {
@@ -153,6 +162,39 @@ export function Channels() {
         </span>
       </div>
 
+      <section className="channel-welcome panel" aria-label="Your connection guide">
+        <div className="channel-welcome-copy">
+          <span className="channel-spark" aria-hidden="true"><Sparkles size={22} /></span>
+          <div>
+            <span className="overline">YOUR LITTLE LAUNCHPAD</span>
+            <h2>{connectedPlatforms.length ? "Your audience is coming together." : "Big ideas. Meet your people."}</h2>
+            <p>{canManage ? "Pick a platform, sign in, and let your ideas travel." : "Explore your channels. An owner or admin can connect accounts."}</p>
+          </div>
+        </div>
+        <div className="channel-progress">
+          <span><strong>{connectedPlatforms.length}</strong> of {platforms.length} platforms {demo ? "in this preview" : "connected"}</span>
+          <progress aria-label={demo ? "Sample connected platforms" : "Connected platforms"} value={connectedPlatforms.length} max={platforms.length} />
+          <small>{demo ? "Sample accounts · no live connection" : connectedPlatforms.length ? "A little more connected, a lot more possible." : "Start with one. Grow at your pace."}</small>
+        </div>
+      </section>
+
+      <details className="channel-guide">
+        <summary><span><Sparkles size={15} aria-hidden="true" /> First time here? Three tiny steps.</span><ChevronDown size={16} aria-hidden="true" /></summary>
+        <ol>
+          <li><span>1</span><div><strong>Pick your people</strong><p>Choose the platform you want to connect.</p></div></li>
+          <li><span>2</span><div><strong>Make it yours</strong><p>Sign in and allow access. For Telegram, add your bot token and channel.</p></div></li>
+          <li><span>3</span><div><strong>You're connected</strong><p>Check your connection, then head to your content when you're ready.</p></div></li>
+        </ol>
+      </details>
+
+      <div className="channel-toolbar">
+        <div className="channel-filters" role="group" aria-label="Filter platforms">
+          <button type="button" aria-pressed={channelFilter === "all"} onClick={() => setChannelFilter("all")}>All platforms <span>{platforms.length}</span></button>
+          <button type="button" aria-pressed={channelFilter === "connected"} onClick={() => setChannelFilter("connected")}>Connected <span>{connectedPlatforms.length}</span></button>
+        </div>
+        <small><ShieldCheck size={14} aria-hidden="true" /> {demo ? "You're exploring sample accounts" : "Choose what to connect. You're in control."}</small>
+      </div>
+
       {!metaPending && error && <p role="alert">{error}</p>}
       {metaPending && <div className="panel" style={{padding:24,marginBottom:20}}>
         <h2>Select your Facebook Page</h2><p>Connect this Page and its linked Instagram Business account.</p>
@@ -162,25 +204,25 @@ export function Channels() {
         </select>
         <Button disabled={busy || !metaPage} onClick={async()=>{try {setBusy(true);setError('');await request('/social/meta/pages/'+metaPending+'/select','POST',{pageId:metaPage});setSearchParams({connected:'Meta'},{replace:true});}catch(err){setError((err as Error).message);}finally{setBusy(false);}}}>Connect Page + Instagram</Button>
       </div>}
-      <div className="channel-grid">
-        {platforms.map((p) => {
+      {!visiblePlatforms.length && <div className="panel channel-empty"><Link2 size={26} aria-hidden="true" /><h2>Your first connection is waiting.</h2><p>Explore the platforms and pick your favorite to get started.</p><Button onClick={() => setChannelFilter("all")}>Explore platforms <ArrowUpRight size={14} /></Button></div>}
+      <div className="channel-grid channel-connections">
+        {visiblePlatforms.map((p) => {
           const accounts = s.accounts.filter(
             (a) => String(a.platform).toLowerCase() === p.toLowerCase(),
           );
           const supported = true;
           const isConnecting = connectingPlatform === p;
+          const isConnected = connectedPlatforms.includes(p);
+          const needsAttention = !demo && accounts.some(a => a.state !== "CONNECTED" && a.state !== "DISCONNECTED");
 
           return (
-            <article key={p} className="panel channel-card">
+            <article key={p} className={`panel channel-card ${isConnected ? "channel-is-connected" : ""}`} aria-busy={isConnecting}>
               <div className="channel-card-heading">
                 <PlatformIcon platform={p} />
                 <h2>{p}</h2>
-                <span className="badge">
-                  {accounts.length
-                    ? "Connected"
-                    : supported
-                      ? "Not connected"
-                      : "Planned"}
+                <span className={`badge channel-state ${needsAttention ? "channel-state-warning" : isConnected ? "channel-state-ready" : ""}`}>
+                  {needsAttention ? <AlertCircle size={12} aria-hidden="true" /> : isConnected ? <CheckCircle2 size={12} aria-hidden="true" /> : <span className="channel-state-dot" />}
+                  {demo && accounts.length ? "Sample account" : needsAttention ? "Needs attention" : isConnected ? "Connected" : "Ready to connect"}
                 </span>
               </div>
               <p>
@@ -252,18 +294,21 @@ export function Channels() {
                 </div>
               ))}
               {canManage && (
+                <>
                 <Button
                   onClick={() => handleStartConnect(p)}
-                  disabled={!supported || isConnecting}
+                  disabled={!supported || connectingPlatform !== null || busy}
                 >
-                  <Link2 size={15} />
+                  {isConnecting ? <Loader2 className="channel-spinner" size={15} aria-hidden="true" /> : <Link2 size={15} aria-hidden="true" />}
                   {isConnecting
                     ? "Connecting…"
                     : supported
-                      ? (["Instagram", "Facebook"].includes(p) ? "Connect Meta" : accounts.length ? "Add another channel" : "Connect account")
+                      ? (["Instagram", "Facebook"].includes(p) ? "Connect Meta" : accounts.length ? "Reconnect account" : "Connect account")
                       : "Coming Later"}
                   {supported && !isConnecting && <ArrowUpRight size={14} />}
                 </Button>
+                <small className="channel-connect-note">{p === "Telegram" ? "Your bot token + channel ID" : ["Instagram", "Facebook"].includes(p) ? "Connect a Facebook Page + linked Instagram" : `Continue securely with ${p}`}</small>
+                </>
               )}
             </article>
           );
@@ -276,6 +321,7 @@ export function Channels() {
           if (!o) {
             setConnectTelegram(false);
             setToken("");
+            setShowToken(false);
             setChannel("");
             setError("");
           }
@@ -295,16 +341,21 @@ export function Channels() {
             autoComplete="off"
           />
         </label>
-        <label style={{ marginTop: "12px" }}>
+        <label htmlFor="channel-bot-token" style={{ marginTop: "12px" }}>
           Bot token (from @BotFather)
+        </label>
+          <span className="channel-secret-field">
           <input
-            type="password"
+            id="channel-bot-token"
+            type={showToken ? "text" : "password"}
             value={token}
             onChange={(e) => setToken(e.target.value)}
             autoComplete="off"
             placeholder="e.g. 8818622380:AAFIE6T9Cns..."
           />
-        </label>
+          <button type="button" aria-label={showToken ? "Hide bot token" : "Show bot token"} aria-pressed={showToken} onClick={() => setShowToken(value => !value)}>{showToken ? <EyeOff size={17} /> : <Eye size={17} />}</button>
+          </span>
+        <p className="form-note"><ShieldCheck size={13} aria-hidden="true" /> Your token stays hidden until you choose to show it.</p>
 
         {error && (
           <p className="error-box" role="alert" style={{ marginTop: "12px" }}>
@@ -318,6 +369,7 @@ export function Channels() {
           disabled={busy}
           style={{ marginTop: "16px", width: "100%", justifyContent: "center" }}
         >
+          {busy && <Loader2 className="channel-spinner" size={15} aria-hidden="true" />}
           {busy ? "Connecting…" : "Connect Telegram"}
           <ArrowUpRight size={15} />
         </Button>

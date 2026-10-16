@@ -76,7 +76,7 @@ fi
 SOURCE_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 [[ "$SOURCE_ROOT" == "$REPO_TARGET" && "$SOURCE_ROOT" != "$APP_TARGET" ]] || error "Invoke the latest script in the configured Git checkout."
 git -C "$SOURCE_ROOT" rev-parse --is-inside-work-tree >/dev/null
-CODE_PATHS=(app.mjs package.json package-lock.json tsconfig.json vite.config.ts index.html server src public scripts deploy)
+CODE_PATHS=(.npmrc app.mjs package.json package-lock.json tsconfig.json vite.config.ts index.html server src public scripts deploy)
 git -C "$SOURCE_ROOT" diff --quiet HEAD -- "${CODE_PATHS[@]}" || error "Commit runtime changes before deploying."
 REVISION=$(git -C "$SOURCE_ROOT" rev-parse HEAD)
 ID="$(date +%Y%m%d-%H%M%S)-$$"
@@ -98,7 +98,7 @@ node scripts/verify-ffmpeg.mjs
 
 # Build a precise replacement manifest; do not mirror/delete whole directories.
 : > "$BACKUP/backend-files"
-for file in app.mjs package.json package-lock.json tsconfig.json vite.config.ts index.html; do
+for file in .npmrc app.mjs package.json package-lock.json tsconfig.json vite.config.ts index.html; do
   printf '%s\n' "$file" >> "$BACKUP/backend-files"
 done
 for directory in server src public scripts deploy dist-api; do

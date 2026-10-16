@@ -25,7 +25,7 @@
     "queue:reconcile": "node --env-file=.env dist-api/queue-reconcile.js",
     "queue:export:bullmq": "node --env-file=.env dist-api/bullmq-export.js",
     "build:deploy": "node scripts/deployment-artifact.mjs build",
-    "test:deploy": "node scripts/test-deployment-artifact.mjs && node scripts/test-production-frontend.mjs && node scripts/test-cpanel-deploy.mjs"
+    "test:deploy": "node scripts/test-npm-install-policy.mjs && node scripts/test-deployment-artifact.mjs && node scripts/test-production-frontend.mjs && node scripts/test-cpanel-deploy.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1141.0",

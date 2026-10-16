@@ -148,7 +148,11 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       });
 
       const wid = useSession.getState().workspaceId;
-      const res = await fetch(presign.uploadUrl, {
+      const apiBase = import.meta.env.VITE_API_BASE ?? "";
+      const targetUploadUrl = presign.uploadUrl.startsWith("/")
+        ? `${apiBase}${presign.uploadUrl}`
+        : presign.uploadUrl;
+      const res = await fetch(targetUploadUrl, {
         method: "PUT",
         credentials: "include",
         headers: {
@@ -168,7 +172,10 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       );
 
       const detectedType = isVideo ? "video" : "image";
-      setMediaUrl(download.downloadUrl);
+      const resolvedDownloadUrl = download.downloadUrl.startsWith("/")
+        ? `${apiBase}${download.downloadUrl}`
+        : download.downloadUrl;
+      setMediaUrl(resolvedDownloadUrl);
       setMediaAssetId(presign.assetId);
       setPostType(detectedType);
 
@@ -183,7 +190,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
           if (p === "YouTube") {
             cur.metadata = {
               ...(cur.metadata || {}),
-              youtubeKind: isVideo && file.name.toLowerCase().includes("short") ? "Short" : "Video",
+              youtubeKind: cur.metadata?.youtubeKind || "Video",
               visibility: cur.metadata?.visibility || "public",
             };
           }
@@ -251,13 +258,32 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         }
       });
 
+      let ytPayload = post?.youtube;
+      if (!ytPayload && selected.includes("YouTube")) {
+        const ytVar = cleanVariants["YouTube"];
+        const mAssetId = (typeof ytVar === "object" ? ytVar.mediaAssetId : null) || mediaAssetId;
+        if (mAssetId) {
+          const ytTitle = ((typeof ytVar === "object" ? ytVar.title : "") || title || "Untitled Video").replace(/[<>]/g, "").trim().slice(0, 100);
+          const ytDesc = ((typeof ytVar === "object" ? ytVar.caption : "") || body || "").trim().slice(0, 5000);
+          const ytKind = (typeof ytVar === "object" && ytVar.metadata?.youtubeKind === "Short") ? "Short" : "Video";
+          const ytVis = (typeof ytVar === "object" && ytVar.metadata?.visibility) || "public";
+          ytPayload = {
+            kind: ytKind,
+            assetId: mAssetId,
+            title: ytTitle || "Untitled Video",
+            description: ytDesc,
+            visibility: ytVis,
+          };
+        }
+      }
+
       const saved = await data.save({
         ...post,
         title: title.trim(),
         body: body.trim(),
         platforms: selected,
         variants: cleanVariants,
-        youtube: post?.youtube || undefined,
+        youtube: ytPayload || undefined,
       });
 
       if (review) await data.transition(saved.id, "review");
@@ -378,13 +404,32 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       });
 
       // 1. Save draft first
+      let ytPayload = post?.youtube;
+      if (!ytPayload && selected.includes("YouTube")) {
+        const ytVar = cleanVariants["YouTube"];
+        const mAssetId = (typeof ytVar === "object" ? ytVar.mediaAssetId : null) || mediaAssetId;
+        if (mAssetId) {
+          const ytTitle = ((typeof ytVar === "object" ? ytVar.title : "") || title || "Untitled Video").replace(/[<>]/g, "").trim().slice(0, 100);
+          const ytDesc = ((typeof ytVar === "object" ? ytVar.caption : "") || body || "").trim().slice(0, 5000);
+          const ytKind = (typeof ytVar === "object" && ytVar.metadata?.youtubeKind === "Short") ? "Short" : "Video";
+          const ytVis = (typeof ytVar === "object" && ytVar.metadata?.visibility) || "public";
+          ytPayload = {
+            kind: ytKind,
+            assetId: mAssetId,
+            title: ytTitle || "Untitled Video",
+            description: ytDesc,
+            visibility: ytVis,
+          };
+        }
+      }
+
       const saved = await data.save({
         ...post,
         title: title.trim(),
         body: body.trim(),
         platforms: selected,
         variants: cleanVariants,
-        youtube: post?.youtube || undefined,
+        youtube: ytPayload || undefined,
       });
 
       // 2. Identify target connected accounts for each selected platform
@@ -392,9 +437,17 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       setPublishResults([]);
 
       for (const p of selected) {
-        if (p === 'YouTube' && cleanVariants[p]?.mediaType === 'image' && !saved.youtube) {
-          publishResults.push({platform:p,accountName:p,success:false,status:'skipped',error:'YouTube does not support image-only posts. Attach a video or Short.'});
-          continue;
+        if (p === 'YouTube') {
+          const ytVar = cleanVariants[p];
+          if (ytVar?.mediaType === 'image') {
+            publishResults.push({platform:p,accountName:p,success:false,status:'skipped',error:'YouTube does not support image-only posts. Attach a video or Short.'});
+            continue;
+          }
+          const hasVideo = !!(ytVar?.mediaAssetId || mediaAssetId || saved.youtube);
+          if (!hasVideo) {
+            publishResults.push({platform:p,accountName:p,success:false,status:'skipped',error:'YouTube requires a video attachment. Please upload a video or Short first.'});
+            continue;
+          }
         }
         const acc = s.accounts.find(
           (a) =>

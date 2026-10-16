@@ -92,12 +92,13 @@ async function getMediaBuffer(
         }
         const buffer = Buffer.concat(chunks);
         const ext = path.extname(key).toLowerCase();
-        const mimeType =
-          ext === ".jpg" || ext === ".jpeg"
-            ? "image/jpeg"
-            : ext === ".webp"
-            ? "image/webp"
-            : "image/png";
+        let mimeType = "image/png";
+        if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
+        else if (ext === ".webp") mimeType = "image/webp";
+        else if (ext === ".gif") mimeType = "image/gif";
+        else if (ext === ".mp4" || ext === ".m4v") mimeType = "video/mp4";
+        else if (ext === ".mov") mimeType = "video/quicktime";
+        else if (ext === ".webm") mimeType = "video/webm";
         return { buffer, mimeType };
       }
     } catch (e) {
@@ -259,50 +260,53 @@ export class TelegramProvider implements SocialProvider {
     try {
       if (request.mediaUrl) {
         const mediaInfo = await getMediaBuffer(request.mediaUrl);
-        if (!mediaInfo) return {success:false,publishedAt:new Date(),error:'Telegram attached image could not be read. Re-upload the image and retry.'};
-        if (!mediaInfo.mimeType.startsWith('image/')) return {success:false,publishedAt:new Date(),error:'Telegram photo publishing requires an image attachment.'};
-        if (request.text.length > 1024) return {success:false,publishedAt:new Date(),error:'Telegram image caption exceeds 1024 characters. Shorten the Telegram caption.'};
-        if (mediaInfo) {
-          const formData = new FormData();
-          formData.append("chat_id", chatId);
-          const blob = new Blob([new Uint8Array(mediaInfo.buffer)], {
-            type: mediaInfo.mimeType,
-          });
-          formData.append("photo", blob, "visual.png");
-          formData.append("caption", request.text);
+        if (!mediaInfo) return {success:false,publishedAt:new Date(),error:'Telegram attached media could not be read. Re-upload the media and retry.'};
+        if (request.text.length > 1024) return {success:false,publishedAt:new Date(),error:'Telegram media caption exceeds 1024 characters. Shorten the Telegram caption.'};
 
-          const res = await fetch(
-            `https://api.telegram.org/bot${botToken}/sendPhoto`,
-            {
-              method: "POST",
-              body: formData,
-            },
-          );
-          const data = await res.json();
-          if (!res.ok || !data.ok || !data.result?.message_id) {
-            const desc = data.description || "";
-            const isTokenError =
-              res.status === 401 ||
-              res.status === 403 ||
-              desc.toLowerCase().includes("unauthorized") ||
-              desc.toLowerCase().includes("token");
+        const isVideo = mediaInfo.mimeType.startsWith('video/') || request.mediaType === 'video' || request.mediaUrl.toLowerCase().includes('.mp4');
+        const endpoint = isVideo ? 'sendVideo' : 'sendPhoto';
+        const paramName = isVideo ? 'video' : 'photo';
+        const filename = isVideo ? 'video.mp4' : (mediaInfo.mimeType === 'image/jpeg' ? 'photo.jpg' : 'photo.png');
 
-            return {
-              success: false,
-              publishedAt: new Date(),
-              uncertain: res.ok && data.ok === true,
-              error: isTokenError
-                ? "Telegram Bot Token has expired or is invalid. Please reconnect your Telegram channel with a valid Bot Token."
-                : "Telegram photo rejected (HTTP " + res.status + "). Check bot posting rights, chat ID, image format and size.",
-            };
-          }
+        const formData = new FormData();
+        formData.append("chat_id", chatId);
+        const blob = new Blob([new Uint8Array(mediaInfo.buffer)], {
+          type: mediaInfo.mimeType,
+        });
+        formData.append(paramName, blob, filename);
+        formData.append("caption", request.text);
+
+        const res = await fetch(
+          `https://api.telegram.org/bot${botToken}/${endpoint}`,
+          {
+            method: "POST",
+            body: formData,
+          },
+        );
+        const data = await res.json();
+        if (!res.ok || !data.ok || !data.result?.message_id) {
+          const desc = data.description || "";
+          const isTokenError =
+            res.status === 401 ||
+            res.status === 403 ||
+            desc.toLowerCase().includes("unauthorized") ||
+            desc.toLowerCase().includes("token");
 
           return {
-            success: true,
-            providerPostId: String(data.result.message_id),
-            publishedAt: new Date(data.result.date * 1000),
+            success: false,
+            publishedAt: new Date(),
+            uncertain: res.ok && data.ok === true,
+            error: isTokenError
+              ? "Telegram Bot Token has expired or is invalid. Please reconnect your Telegram channel with a valid Bot Token."
+              : `Telegram rejected ${endpoint}: ${desc || "HTTP " + res.status}.`,
           };
         }
+
+        return {
+          success: true,
+          providerPostId: String(data.result.message_id),
+          publishedAt: new Date(data.result.date * 1000),
+        };
       }
 
       const res = await fetch(

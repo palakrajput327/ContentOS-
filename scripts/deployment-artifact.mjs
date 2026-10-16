@@ -50,7 +50,7 @@ if (mode === 'verify') {
   if (process.versions.node.split('.')[0] !== '22') throw new Error('Build artifacts with Node.js 22');
   const revision = git('rev-parse', 'HEAD');
   // dist is tracked in this repository; generated output is deliberately excluded.
-  const sourcePaths = ['.gitattributes', '.gitignore', '.cpanel.yml', 'app.mjs', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'server', 'src', 'public', 'scripts', 'deploy'];
+  const sourcePaths = ['.gitattributes', '.gitignore', '.npmrc', '.cpanel.yml', 'app.mjs', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'server', 'src', 'public', 'scripts', 'deploy'];
   if (git('status', '--porcelain', '--untracked-files=all', '--', ...sourcePaths)) throw new Error('Commit runtime source changes before building a release artifact');
   const lockfile = await committedLockfile(root, revision);
   await rm(directory, { recursive: true, force: true });

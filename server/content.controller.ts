@@ -30,6 +30,7 @@ import {
   publishYouTubeNow,
   validateYouTubeInput,
   checkYouTubeRecord,
+  resolveYouTubeInput,
 } from "./youtube.service.js";
 import { youtubeSchema } from "./youtube.schema.js";
 import { pool } from "./db.js";
@@ -174,7 +175,7 @@ export class ContentController {
         const variants = typeof post.variants === 'string' ? JSON.parse(post.variants) : post.variants;
         const key = Object.keys(variants || {}).find(k=>k.toLowerCase()==='youtube');
         const variant = key ? variants[key] : null;
-        if (variant?.mediaType === 'image' || (variant?.mediaType !== 'video' && (variant?.mediaAssetId || variant?.mediaUrl || post.media_asset_id)))
+        if (variant?.mediaType === 'image')
           return {success:false,status:'skipped',platform:'youtube',error:'YouTube does not support image-only posts. Attach a video or Short to publish to YouTube.'};
       }
       return publishYouTubeNow(w, r.user.id, contentId, v.socialAccountId);
@@ -413,6 +414,18 @@ export class ContentController {
   @Post() async create(@Req() r: AuthedRequest, @Body() input: unknown) {
     assertPermission(r.workspace.role, "edit");
     const v = inputSchema.parse(input);
+    if (v.platforms.includes("YouTube") && !v.youtube) {
+      const rawYt = (v.variants as any)?.YouTube || (v.variants as any)?.youtube;
+      if (typeof rawYt === "object" && rawYt?.mediaAssetId) {
+        v.youtube = {
+          kind: rawYt.metadata?.youtubeKind === "Short" ? "Short" : "Video",
+          assetId: rawYt.mediaAssetId,
+          title: (rawYt.title || v.title || "Untitled Video").replace(/[<>]/g, "").trim().slice(0, 100) || "Untitled Video",
+          description: (rawYt.caption || v.body || "").slice(0, 5000),
+          visibility: rawYt.metadata?.visibility || "public",
+        };
+      }
+    }
     if (v.platforms.includes("YouTube") && v.youtube)
       await validateYouTubeInput(pool, r.workspace.id, v.youtube);
     else if (!v.body) throw new BadRequestException("Post text is required.");
@@ -462,6 +475,18 @@ export class ContentController {
       .parse(input);
     return transaction(async (db) => {
       const old = await locked(db, id, r.workspace.id);
+      if (v.platforms.includes("YouTube") && !v.youtube) {
+        const rawYt = (v.variants as any)?.YouTube || (v.variants as any)?.youtube;
+        if (typeof rawYt === "object" && rawYt?.mediaAssetId) {
+          v.youtube = {
+            kind: rawYt.metadata?.youtubeKind === "Short" ? "Short" : "Video",
+            assetId: rawYt.mediaAssetId,
+            title: (rawYt.title || v.title || "Untitled Video").replace(/[<>]/g, "").trim().slice(0, 100) || "Untitled Video",
+            description: (rawYt.caption || v.body || "").slice(0, 5000),
+            visibility: rawYt.metadata?.visibility || "public",
+          };
+        }
+      }
       if (v.platforms.includes("YouTube") && v.youtube)
         await validateYouTubeInput(db, r.workspace.id, v.youtube);
       else if (!v.body) throw new BadRequestException("Post text is required.");
@@ -615,8 +640,10 @@ export class ContentController {
               `${platform} publishing is not available in this MVP.`,
             );
           await createPublishPlan(db, { ...p, workspace_id: p.workspace_id || r.workspace.id }, platform as Platform);
-          if (platform === "YouTube")
-            await validateYouTubeInput(db, r.workspace.id, p.youtube);
+          if (platform === "YouTube") {
+            const validYt = await resolveYouTubeInput(db, r.workspace.id, p);
+            await validateYouTubeInput(db, r.workspace.id, validYt, false);
+          }
           const account = (
             await db.query(
               "SELECT a.id FROM social_accounts a JOIN social_account_tokens t ON t.account_id=a.id WHERE a.workspace_id=$1 AND lower(a.platform)=lower($2) AND lower(a.state)='connected' AND (t.expires_at IS NULL OR t.expires_at>now() OR (lower(a.platform)='youtube' AND t.refresh_ciphertext IS NOT NULL)) FOR SHARE OF a",

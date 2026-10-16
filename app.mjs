@@ -40,13 +40,22 @@ dns.lookup = function (hostname, options, callback) {
   });
 };
 
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 try {
-  loadEnvFile(".env");
+  loadEnvFile(path.join(__dirname, ".env"));
 } catch (error) {
-  console.error("Could not load .env:", error);
+  try {
+    loadEnvFile(".env");
+  } catch (err) {
+    console.error("Could not load .env:", err.message);
+  }
 }
 
-// 2. Automatically ensure local Redis is running
+// 2. Automatically ensure local Redis is running (Windows dev only)
 async function ensureRedis() {
   return new Promise((resolve) => {
     const socket = net.connect({ host: "127.0.0.1", port: 6379 }, () => {
@@ -71,7 +80,9 @@ async function ensureRedis() {
   });
 }
 
-if ((process.env.QUEUE_BACKEND || 'bullmq') === 'bullmq') await ensureRedis();
+if (process.platform === "win32" && (process.env.QUEUE_BACKEND || "bullmq") === "bullmq") {
+  await ensureRedis();
+}
 
 // 3. Process-level safety nets to prevent cloud timeouts from crashing the server
 process.on("unhandledRejection", (reason) => {
@@ -82,9 +93,11 @@ process.on("uncaughtException", (error) => {
   console.warn("[ContentOS] Handled uncaught exception (server online):", error?.message || error);
 });
 
+if (!process.env.QUEUE_BACKEND) process.env.QUEUE_BACKEND = "postgres";
+
 const { bootstrap } = await import("./dist-api/phase-main.js");
 
 bootstrap().catch((error) => {
-  console.error("ContentOS startup failed:", error);
+  console.error("ContentOS startup failed:", error?.stack || error);
   process.exit(1);
 });

@@ -20,8 +20,5 @@ export function socialCredentialConfigured(value: string | undefined): boolean {
 }
 
 export function metaFrontendUrl(): string {
-  const callback = new URL(socialRedirectUri('facebook'));
-  return ['localhost','127.0.0.1'].includes(callback.hostname)
-    ? (process.env.APP_URL || 'http://localhost:5173').replace(/\/+$/, '')
-    : callback.origin;
+  return (process.env.APP_URL || 'http://localhost:5173').replace(/\/+$/, '');
 }

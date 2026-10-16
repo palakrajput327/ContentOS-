@@ -12,10 +12,11 @@ export class ApiError extends Error {
     super(message);
   }
 }
+const apiBase = import.meta.env.VITE_API_BASE ?? "";
 let refreshPromise: Promise<void> | null = null;
 export async function refresh() {
   if (!refreshPromise)
-    refreshPromise = fetch("/api/v1/auth/refresh", {
+    refreshPromise = fetch(`${apiBase}/api/v1/auth/refresh`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -36,7 +37,7 @@ export async function authRequest<T>(
 ): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`/api/v1/auth${path}`, {
+    response = await fetch(`${apiBase}/api/v1/auth${path}`, {
       method: body === undefined ? "GET" : "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },

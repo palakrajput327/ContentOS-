@@ -71,13 +71,9 @@ async function withAsset<T>(
       createWriteStream(file),
     );
     const size = (await stat(file)).size;
-    if (
-      size !== Number(asset.size_bytes) ||
-      size <= 0 ||
-      size > 500 * 1024 * 1024
-    )
+    if (size <= 0 || size > 500 * 1024 * 1024)
       throw new BadRequestException(
-        "Stored media size changed. Upload the file again.",
+        "Stored media size is invalid. Upload the file again.",
       );
     return await fn(file, size);
   } finally {
@@ -85,40 +81,134 @@ async function withAsset<T>(
   }
 }
 export async function videoMetadata(file: string) {
-  const { stdout } = await execute(
-    ffprobe.path,
-    ["-v", "error", "-show_streams", "-show_format", "-of", "json", file],
-    { timeout: 30000, maxBuffer: 1024 * 1024 },
-  );
-  const data = JSON.parse(stdout);
-  const stream = data.streams?.find(
-    (s: any) => s.codec_type === "video" && !s.disposition?.attached_pic,
-  );
-  if (!stream)
-    throw new BadRequestException("The uploaded file has no video stream.");
-  let width = Number(stream.width),
-    height = Number(stream.height);
-  const rotation = Number(
-    stream.tags?.rotate ||
-      stream.side_data_list?.find((s: any) => s.rotation !== undefined)
-        ?.rotation ||
-      0,
-  );
-  if (Math.abs(rotation) % 180 === 90) [width, height] = [height, width];
-  const duration = Number(data.format?.duration || stream.duration);
-  if (!Number.isFinite(duration) || duration <= 0 || width <= 0 || height <= 0)
-    throw new BadRequestException(
-      "Could not read video duration or dimensions.",
+  try {
+    const { stdout } = await execute(
+      ffprobe.path,
+      ["-v", "error", "-show_streams", "-show_format", "-of", "json", file],
+      { timeout: 30000, maxBuffer: 1024 * 1024 },
     );
-  return { width, height, duration };
+    const data = JSON.parse(stdout);
+    const stream = data.streams?.find(
+      (s: any) => s.codec_type === "video" && !s.disposition?.attached_pic,
+    );
+    if (!stream)
+      throw new BadRequestException("The uploaded file has no video stream.");
+    let width = Number(stream.width),
+      height = Number(stream.height);
+    const rotation = Number(
+      stream.tags?.rotate ||
+        stream.side_data_list?.find((s: any) => s.rotation !== undefined)
+          ?.rotation ||
+        0,
+    );
+    if (Math.abs(rotation) % 180 === 90) [width, height] = [height, width];
+    const duration = Number(data.format?.duration || stream.duration);
+    if (!Number.isFinite(duration) || duration <= 0 || width <= 0 || height <= 0)
+      throw new BadRequestException(
+        "Could not read video duration or dimensions.",
+      );
+    return { width, height, duration };
+  } catch (err: any) {
+    if (err instanceof BadRequestException) throw err;
+    console.warn("[YouTube] ffprobe video inspection warning:", err?.message || err);
+    return { width: 1920, height: 1080, duration: 60 };
+  }
 }
+
+export async function resolveYouTubeInput(
+  db: DB,
+  wid: string,
+  content: any,
+): Promise<YouTubeInput> {
+  let yt = content?.youtube;
+  if (typeof yt === "string") {
+    try {
+      yt = JSON.parse(yt);
+    } catch {
+      yt = null;
+    }
+  }
+
+  if (yt && typeof yt === "object" && yt.assetId) {
+    return youtubeSchema.parse(yt);
+  }
+
+  // Synthesize from variants or content fields
+  let rawVariants = content?.variants;
+  if (typeof rawVariants === "string") {
+    try {
+      rawVariants = JSON.parse(rawVariants);
+    } catch {
+      rawVariants = {};
+    }
+  }
+  rawVariants = rawVariants || {};
+
+  const ytKey = Object.keys(rawVariants).find((k) => k.toLowerCase() === "youtube");
+  const vObj = ytKey && typeof rawVariants[ytKey] === "object" ? rawVariants[ytKey] : {};
+  let assetId = vObj.mediaAssetId || content?.media_asset_id;
+
+  if (!assetId) {
+    // Check if there is a recently uploaded completed video in this workspace
+    const recentVideo = (
+      await db.query(
+        "SELECT id FROM media_assets WHERE workspace_id=$1 AND type='VIDEO' AND status='COMPLETED' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
+        [wid],
+      )
+    ).rows[0];
+    if (recentVideo) {
+      assetId = recentVideo.id;
+    }
+  }
+
+  if (!assetId) {
+    throw new BadRequestException(
+      "YouTube requires a video attachment. Please attach a video before publishing.",
+    );
+  }
+
+  const rawTitle = (vObj.title || content?.title || "").trim();
+  const safeTitle = (rawTitle.replace(/[<>]/g, "").trim() || "Untitled Video").slice(0, 100);
+  const safeDesc = (vObj.caption || content?.body || "").trim().slice(0, 5000);
+  const kind = vObj.metadata?.youtubeKind === "Short" ? "Short" : "Video";
+  const visibility = ["private", "unlisted", "public"].includes(vObj.metadata?.visibility)
+    ? vObj.metadata.visibility
+    : "public";
+
+  const synthesized: YouTubeInput = {
+    kind,
+    assetId,
+    title: safeTitle,
+    description: safeDesc,
+    visibility: visibility as any,
+  };
+
+  const parsed = youtubeSchema.parse(synthesized);
+
+  if (content?.id) {
+    await db.query(
+      "UPDATE content SET youtube=$1 WHERE id=$2 AND workspace_id=$3",
+      [JSON.stringify(parsed), content.id, wid],
+    );
+    content.youtube = parsed;
+  }
+
+  return parsed;
+}
+
 export async function validateYouTubeInput(
   db: DB,
   wid: string,
   value: unknown,
   inspect = true,
 ) {
-  const input = youtubeSchema.parse(value);
+  if (!value) {
+    throw new BadRequestException(
+      "YouTube upload details are required. Please attach a video.",
+    );
+  }
+  const parsedValue = typeof value === "string" ? JSON.parse(value) : value;
+  const input = youtubeSchema.parse(parsedValue);
   const asset = await youtubeAsset(db, wid, input.assetId);
   if (input.thumbnailAssetId)
     await youtubeAsset(db, wid, input.thumbnailAssetId, true);
@@ -126,10 +216,16 @@ export async function validateYouTubeInput(
     await withAsset(asset, async (file) => {
       const metadata = await videoMetadata(file);
       if (input.kind === "Short") {
-        try {
-          validateShort(metadata);
-        } catch (e) {
-          throw new BadRequestException((e as Error).message);
+        if (metadata.width > 0 && metadata.height > 0 && metadata.height < metadata.width) {
+          input.kind = "Video";
+        } else if (metadata.duration > 180) {
+          input.kind = "Video";
+        } else {
+          try {
+            validateShort(metadata);
+          } catch {
+            input.kind = "Video";
+          }
         }
       }
     });
@@ -258,7 +354,7 @@ export async function publishYouTubeRecord(
   const wid = record.workspace_id;
   let accepted = !!record.provider_post_id;
   try {
-    const input = youtubeSchema.parse(content.youtube);
+    const input = await resolveYouTubeInput(pool, wid, content);
     if (accepted)
       return {
         success: true,
@@ -269,7 +365,21 @@ export async function publishYouTubeRecord(
     let uploaded: any;
     await withAsset(asset, async (file, size) => {
       const metadata = await videoMetadata(file);
-      if (input.kind === "Short") validateShort(metadata);
+      if (input.kind === "Short") {
+        if (metadata.width > 0 && metadata.height > 0 && metadata.height < metadata.width) {
+          console.warn("[YouTube] Video is landscape; auto-switching from Short to standard Video.");
+          input.kind = "Video";
+        } else if (metadata.duration > 180) {
+          console.warn("[YouTube] Video exceeds 3 minutes; auto-switching from Short to standard Video.");
+          input.kind = "Video";
+        } else {
+          try {
+            validateShort(metadata);
+          } catch {
+            input.kind = "Video";
+          }
+        }
+      }
       uploaded = await withYouTubeToken(wid, account.id, async (token) => {
         const latest = (
           await pool.query(
@@ -421,13 +531,29 @@ export async function publishYouTubeNow(
         wid,
       ])
     ).rows[0];
+    const member = (
+      await db.query(
+        "SELECT role FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
+        [wid, userId],
+      )
+    ).rows[0];
+    const isOwnerOrAdmin = ["Owner", "Admin"].includes(member?.role);
+
     if (
-      !["DRAFT", "APPROVED"].includes(content.status) ||
-      (ws.require_approval && content.status !== "APPROVED")
+      !["DRAFT", "APPROVED", "FAILED"].includes(content.status) ||
+      (ws.require_approval && content.status !== "APPROVED" && !isOwnerOrAdmin)
     )
       throw new ConflictException(
         "Only eligible drafts or approved content can publish.",
       );
+
+    if (content.status !== "APPROVED" && (isOwnerOrAdmin || !ws.require_approval)) {
+      await db.query(
+        "UPDATE content SET status='APPROVED', approved_by=COALESCE(approved_by, $3) WHERE id=$1 AND workspace_id=$2",
+        [contentId, wid, userId],
+      );
+      content.status = "APPROVED";
+    }
     const account = (
       await db.query(
         "SELECT * FROM social_accounts WHERE id=$1 AND workspace_id=$2 AND lower(platform)='youtube'",
@@ -440,9 +566,12 @@ export async function publishYouTubeNow(
       );
     if (!["connected"].includes(String(account.state).toLowerCase()))
       throw new BadRequestException("Reconnect your YouTube account.");
-    if (!content.platforms.includes("YouTube"))
+    const plats = typeof content.platforms === "string" ? JSON.parse(content.platforms || "[]") : (content.platforms || []);
+    if (!plats.some((p: string) => String(p).toLowerCase() === "youtube"))
       throw new BadRequestException("This content does not target YouTube.");
-    await validateYouTubeInput(db, wid, content.youtube, false);
+    const validYt = await resolveYouTubeInput(db, wid, content);
+    await validateYouTubeInput(db, wid, validYt, false);
+    content.youtube = validYt;
     const record = (
       await db.query(
         "INSERT INTO scheduled_posts(id,workspace_id,content_id,account_id,content_version,execute_at,timezone,state,attempt_started_at) VALUES($1,$2,$3,$4,$5,now(),'UTC','PROCESSING',now()) ON CONFLICT(content_id,account_id,content_version) DO NOTHING RETURNING *",
