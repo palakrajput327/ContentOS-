@@ -140,98 +140,99 @@ export default function Library({
   }
 
   return (
-    <>
-      <div className="page-heading">
-        <div>
-          <span className="overline">
-            {approvals ? "A FRESH PAIR OF EYES" : "YOUR CONTENT, CONNECTED"}
-          </span>
-          <h1>
-            {approvals
-              ? "Great work is a team effort."
-              : "A home for every idea."}
-          </h1>
-          <p>
-            {approvals
-              ? "Review the details. Keep the quality. Move the good work forward."
-              : "From the first draft to the final word, everything lives here."}
-          </p>
-        </div>
-        {canEdit && (
-          <Button asChild variant="primary">
-            <Link to="/app/compose">
-              <Plus size={17} />
-              Create post
-            </Link>
-          </Button>
-        )}
-      </div>
-
-      {/* Active Batch Progress Bar */}
-      {activeBatchId && (
-        <BatchProgressIndicator
-          batchId={activeBatchId}
-          onComplete={() => {
-            query.invalidateQueries({ queryKey: ["workspace"] });
-          }}
-        />
-      )}
-
-      <div className="library-toolbar">
-        <div className="tabs">
-          {!approvals &&
-            [
-              ["ALL", "All content"],
-              ["DRAFT", "Drafts"],
-              ["NEEDS_REVIEW", "In review"],
-              ["APPROVED", "Approved"],
-              ["SCHEDULED", "Scheduled"],
-              ["PUBLISHED", "Published"],
-              ["FAILED", "Failed"],
-              ["UNCERTAIN", "Check status"],
-            ].map(([v, l]) => (
-              <button
-                className={filter === v ? "active" : ""}
-                key={v}
-                onClick={() => {
-                  setParams(v === "ALL" ? {} : { status: v });
-                  setSelectedIds([]);
-                }}
-              >
-                {l}
-              </button>
-            ))}
-        </div>
-        <div className="search-input">
-          <Search size={17} />
-          <input
-            aria-label="Search content"
-            placeholder="Find your content…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-      </div>
-
-      {/* Multi-select Header Controls */}
-      {posts.length > 0 && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px", padding: "10px 14px", background: "var(--border)", borderRadius: "8px", border: "1px solid var(--border)" }}>
-          <button
-            type="button"
-            className="text-button"
-            onClick={toggleSelectAll}
-            style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.85rem", cursor: "pointer", background: "none", border: "none", color: "var(--ink)" }}
-          >
-            {selectedIds.length === posts.length ? <CheckSquare size={18} style={{ color: "var(--success)" }} /> : <Square size={18} />}
-            Select All ({posts.length} posts)
-          </button>
-          {selectedIds.length > 0 && (
-            <span style={{ fontSize: "0.85rem", color: "var(--accent)", fontWeight: 600 }}>
-              {selectedIds.length} item{selectedIds.length > 1 ? "s" : ""} selected for bulk action
-            </span>
+    <div className="library-view-container">
+      {/* Pinned Top Controls: Title, Tabs, Search, and Bulk Actions */}
+      <div className="library-pinned-header">
+        <div className="page-heading">
+          <div>
+            <h1>
+              {approvals
+                ? "Great work is a team effort."
+                : "A home for every idea."}
+            </h1>
+            <p>
+              {approvals
+                ? "Review the details. Keep the quality. Move the good work forward."
+                : "From the first draft to the final word, everything lives here."}
+            </p>
+          </div>
+          {canEdit && (
+            <Button asChild variant="primary">
+              <Link to="/app/compose">
+                <Plus size={17} />
+                Create post
+              </Link>
+            </Button>
           )}
         </div>
-      )}
+
+        {/* Active Batch Progress Bar */}
+        {activeBatchId && (
+          <BatchProgressIndicator
+            batchId={activeBatchId}
+            onComplete={() => {
+              query.invalidateQueries({ queryKey: ["workspace"] });
+            }}
+          />
+        )}
+
+        <div className="library-toolbar">
+          <div className="tabs">
+            {!approvals &&
+              [
+                ["ALL", "All content"],
+                ["DRAFT", "Drafts"],
+                ["NEEDS_REVIEW", "In review"],
+                ["APPROVED", "Approved"],
+                ["SCHEDULED", "Scheduled"],
+                ["PUBLISHED", "Published"],
+                ["FAILED", "Failed"],
+                ["UNCERTAIN", "Check status"],
+              ].map(([v, l]) => (
+                <button
+                  className={filter === v ? "active" : ""}
+                  key={v}
+                  onClick={() => {
+                    setParams(v === "ALL" ? {} : { status: v });
+                    setSelectedIds([]);
+                  }}
+                >
+                  {l}
+                </button>
+              ))}
+          </div>
+          <div className="search-input">
+            <Search size={17} />
+            <input
+              className="library-search-input"
+              aria-label="Search content"
+              placeholder="Find your content…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Multi-select Header Controls */}
+        {posts.length > 0 && (
+          <div className="library-select-all-bar">
+            <button
+              type="button"
+              className="text-button"
+              onClick={toggleSelectAll}
+              style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.85rem", cursor: "pointer", background: "none", border: "none", color: "var(--ink)" }}
+            >
+              {selectedIds.length === posts.length ? <CheckSquare size={16} style={{ color: "var(--success)" }} /> : <Square size={16} style={{ color: "#64748b" }} />}
+              Select All ({posts.length} posts)
+            </button>
+            {selectedIds.length > 0 && (
+              <span style={{ fontSize: "0.85rem", color: "var(--accent)", fontWeight: 600 }}>
+                {selectedIds.length} item{selectedIds.length > 1 ? "s" : ""} selected for bulk action
+              </span>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Floating Bulk Operations Bar */}
       {selectedIds.length > 0 && (
@@ -311,7 +312,9 @@ export default function Library({
         </div>
       )}
 
-      <div className="content-grid">
+      {/* Scrollable Cards Box Container */}
+      <div className="library-cards-scroll-box">
+        <div className="content-grid">
         {posts.map((p) => {
           const isSelected = selectedIds.includes(p.id);
           return (
@@ -328,9 +331,9 @@ export default function Library({
                   <button
                     type="button"
                     onClick={() => toggleSelect(p.id)}
-                    style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: isSelected ? "var(--success)" : "var(--color-text-muted)" }}
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", color: isSelected ? "var(--success)" : "#64748b" }}
                   >
-                    {isSelected ? <CheckSquare size={18} /> : <Square size={18} />}
+                    {isSelected ? <CheckSquare size={15} /> : <Square size={15} />}
                   </button>
                   {p.platforms.map((pl) => (
                     <PlatformIcon platform={pl} key={pl} />
@@ -431,18 +434,19 @@ export default function Library({
           );
         })}
       </div>
-      {!posts.length && (
-        <Empty
-          icon={approvals ? <Check size={30} /> : <FileText size={30} />}
-          title={approvals ? "You’re all caught up." : "No content here yet."}
-        >
-          <p>
-            {approvals
-              ? "Posts submitted for review will appear here."
-              : "Try another filter, or bring your next idea to life."}
-          </p>
-        </Empty>
-      )}
+        {!posts.length && (
+          <Empty
+            icon={approvals ? <Check size={30} /> : <FileText size={30} />}
+            title={approvals ? "You’re all caught up." : "No content here yet."}
+          >
+            <p>
+              {approvals
+                ? "Posts submitted for review will appear here."
+                : "Try another filter, or bring your next idea to life."}
+            </p>
+          </Empty>
+        )}
+      </div>
 
       {/* Bulk Schedule Modal */}
       <Modal
@@ -543,7 +547,7 @@ export default function Library({
         post={discussionPost}
         members={s.members}
       />
-    </>
+    </div>
   );
 }
 

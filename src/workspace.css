@@ -238,7 +238,10 @@
 .main-column {
   flex: 1;
   min-width: 0;
-  margin-left: 238px;
+  margin-left: 240px;
+  max-width: calc(100vw - 240px);
+  width: calc(100% - 240px);
+  overflow-x: hidden;
 }
 .app-topbar {
   height: 66px;

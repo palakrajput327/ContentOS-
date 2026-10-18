@@ -11,12 +11,13 @@
   background: var(--surface);
   font-synthesis: none;
   font-size: 16px;
-  --bg: #0b0c0e;
-  --surface: #111315;
-  --surface2: #17191c;
-  --border: var(--border);
-  --muted: #969aa3;
-  --lime: #bdff6b;
+  --bg: #07080A;
+  --surface: #0E1015;
+  --surface2: #14161D;
+  --surface3: #1B1E27;
+  --border: rgba(255, 255, 255, 0.07);
+  --muted: #8E95A2;
+  --lime: #34D399;
   color-scheme: dark;
 }
 * {

@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Plus,
   Clock,
   Filter,
@@ -158,204 +159,222 @@ export default function Calendar() {
   const detailPost = calendarPosts.find((p) => p.id === detailPostId);
 
   return (
-    <div style={{ paddingBottom: "40px" }}>
-      {/* Page Heading & Main Actions */}
-      <div className="page-heading">
-        <div>
-          <span className="overline">CALENDAR & AUTO-SCHEDULING</span>
-          <h1>Your Content, Perfectly Timed</h1>
-          <p>
-            Timezone-aware scheduling & conflict-free auto-slot placement. All times in{" "}
-            <strong>{tz}</strong>.
-          </p>
-        </div>
+    <div className="calendar-view-container">
+      {/* Pinned Top Controls: Heading, Actions & Month Toolbar */}
+      <div className="calendar-pinned-header">
+        <div className="page-heading">
+          <div>
+            <h1>Your Content, Perfectly Timed</h1>
+            <p>
+              Timezone-aware scheduling & conflict-free auto-slot placement · <strong>{tz}</strong>
+            </p>
+          </div>
 
-        <div className="page-actions" style={{ display: "flex", gap: "10px" }}>
-          <Button variant="secondary" onClick={() => setShowSlotsModal(true)}>
-            <Clock size={16} />
-            Posting Slots
-          </Button>
-
-          {selectedPostIds.length > 0 && (
-            <Button variant="secondary" onClick={() => setShowBatchRescheduleModal(true)}>
-              <Layers size={16} />
-              Bulk Reschedule ({selectedPostIds.length})
+          <div className="page-actions" style={{ display: "flex", gap: "10px" }}>
+            <Button variant="secondary" onClick={() => setShowSlotsModal(true)} className="calendar-top-btn">
+              <Clock size={15} />
+              Posting Slots
             </Button>
-          )}
 
-          <Button asChild variant="primary">
-            <Link to="/app/library?status=APPROVED">
-              <Plus size={16} />
-              Schedule Content
-            </Link>
-          </Button>
-        </div>
-      </div>
+            {selectedPostIds.length > 0 && (
+              <Button variant="secondary" onClick={() => setShowBatchRescheduleModal(true)} className="calendar-top-btn">
+                <Layers size={15} />
+                Bulk Reschedule ({selectedPostIds.length})
+              </Button>
+            )}
 
-      {/* Toolbar & Filters */}
-      <div className="calendar-toolbar" style={{ flexWrap: "wrap", gap: "16px" }}>
-        <div className="row" style={{ gap: "12px" }}>
-          <h2>
-            {cursor.toLocaleDateString("en", {
-              month: "long",
-              year: "numeric",
-            })}
-          </h2>
-          <div style={{ display: "flex", gap: "4px" }}>
-            <button
-              className="icon-button"
-              aria-label="Previous"
-              onClick={() => {
-                if (view === "Month") setCursor(new Date(y, m - 1, 1));
-                else if (view === "Week") setCursor(new Date(cursor.getTime() - 7 * 24 * 60 * 60 * 1000));
-                else setCursor(new Date(cursor.getTime() - 24 * 60 * 60 * 1000));
-              }}
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <button
-              className="icon-button"
-              aria-label="Next"
-              onClick={() => {
-                if (view === "Month") setCursor(new Date(y, m + 1, 1));
-                else if (view === "Week") setCursor(new Date(cursor.getTime() + 7 * 24 * 60 * 60 * 1000));
-                else setCursor(new Date(cursor.getTime() + 24 * 60 * 60 * 1000));
-              }}
-            >
-              <ChevronRight size={18} />
-            </button>
+            <Button asChild variant="primary" className="calendar-top-primary">
+              <Link to="/app/library?status=APPROVED">
+                <Plus size={16} />
+                Schedule Content
+              </Link>
+            </Button>
           </div>
-          <Button variant="ghost" onClick={() => setCursor(new Date())}>
-            Today
-          </Button>
         </div>
 
-        {/* Filters */}
-        <div className="calendar-filters" style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-          <select
-            aria-label="Filter calendar by platform"
-            value={selectedPlatform}
-            onChange={(e) => setSelectedPlatform(e.target.value as any)}
-            style={{
-              background: "var(--surface2)",
-              border: "1px solid var(--border)",
-              borderRadius: "8px",
-              color: "var(--ink)",
-              padding: "6px 12px",
-              fontSize: "0.85rem",
-            }}
-          >
-            <option value="ALL">All Platforms</option>
-            {["LinkedIn", "X", "Instagram", "Telegram", "YouTube"].map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
-
-          <select
-            aria-label="Filter calendar by status"
-            value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value as any)}
-            style={{
-              background: "var(--surface2)",
-              border: "1px solid var(--border)",
-              borderRadius: "8px",
-              color: "var(--ink)",
-              padding: "6px 12px",
-              fontSize: "0.85rem",
-            }}
-          >
-            <option value="ALL">All Statuses</option>
-            {["DRAFT", "NEEDS_REVIEW", "APPROVED", "SCHEDULED", "PUBLISHED", "FAILED"].map((st) => (
-              <option key={st} value={st}>{st}</option>
-            ))}
-          </select>
-
-          <div className="tabs">
-            {(["Month", "Week", "Day", "Agenda"] as const).map((v) => (
+        {/* Toolbar & Filters */}
+        <div className="calendar-toolbar">
+          <div className="calendar-month-controls">
+            <h2 className="calendar-month-title">
+              {cursor.toLocaleDateString("en", {
+                month: "long",
+                year: "numeric",
+              })}
+            </h2>
+            <div className="calendar-nav-group">
               <button
-                className={view === v ? "active" : ""}
-                key={v}
-                onClick={() => setView(v)}
+                className="icon-button calendar-nav-arrow"
+                aria-label="Previous"
+                onClick={() => {
+                  if (view === "Month") setCursor(new Date(y, m - 1, 1));
+                  else if (view === "Week") setCursor(new Date(cursor.getTime() - 7 * 24 * 60 * 60 * 1000));
+                  else setCursor(new Date(cursor.getTime() - 24 * 60 * 60 * 1000));
+                }}
               >
-                {v}
+                <ChevronLeft size={16} />
               </button>
-            ))}
+              <button
+                className="icon-button calendar-nav-arrow"
+                aria-label="Next"
+                onClick={() => {
+                  if (view === "Month") setCursor(new Date(y, m + 1, 1));
+                  else if (view === "Week") setCursor(new Date(cursor.getTime() + 7 * 24 * 60 * 60 * 1000));
+                  else setCursor(new Date(cursor.getTime() + 24 * 60 * 60 * 1000));
+                }}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+            <button
+              type="button"
+              className="calendar-today-btn"
+              onClick={() => setCursor(new Date())}
+            >
+              Today
+            </button>
+          </div>
+
+          {/* Filters & View Switcher */}
+          <div className="calendar-filters">
+            <div className="calendar-select-wrapper">
+              <select
+                aria-label="Filter calendar by platform"
+                value={selectedPlatform}
+                onChange={(e) => setSelectedPlatform(e.target.value as any)}
+                className="calendar-select"
+              >
+                <option value="ALL">All Platforms</option>
+                {["LinkedIn", "X", "Instagram", "Telegram", "YouTube"].map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="calendar-select-chevron" />
+            </div>
+
+            <div className="calendar-select-wrapper">
+              <select
+                aria-label="Filter calendar by status"
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value as any)}
+                className="calendar-select"
+              >
+                <option value="ALL">All Statuses</option>
+                {["DRAFT", "NEEDS_REVIEW", "APPROVED", "SCHEDULED", "PUBLISHED", "FAILED"].map((st) => (
+                  <option key={st} value={st}>{st}</option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="calendar-select-chevron" />
+            </div>
+
+            <div className="tabs calendar-view-tabs">
+              {(["Month", "Week", "Day", "Agenda"] as const).map((v) => (
+                <button
+                  className={view === v ? "active" : ""}
+                  key={v}
+                  onClick={() => setView(v)}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* MONTH VIEW */}
-      {view === "Month" && (
-        <div className="calendar-scroll">
-          <div className="calendar-grid">
-            {["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"].map((d) => (
-              <div className="day-header" key={d}>
-                {d}
-              </div>
-            ))}
-            {Array.from({ length: Math.ceil((monthOffset + daysInMonth) / 7) * 7 }, (_, i) => {
-              const dayNum = i - monthOffset + 1;
-              const inMonth = dayNum > 0 && dayNum <= daysInMonth;
-              const cellDate = new Date(y, m, dayNum, 12);
-              const dateStrKey = `${y}-${String(m + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
+      {/* Calendar Full Month Canvas (No Scrollbox, Perfect Fit) */}
+      <div className="calendar-canvas-box">
+        {/* MONTH VIEW */}
+        {view === "Month" && (() => {
+          const numRows = Math.ceil((monthOffset + daysInMonth) / 7);
+          return (
+            <div className="calendar-scroll">
+              <div
+                className="calendar-grid"
+                style={{ gridTemplateRows: `34px repeat(${numRows}, minmax(0, 1fr))` }}
+              >
+                {["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"].map((d, dIdx) => (
+                  <div className={`day-header ${dIdx >= 5 ? "weekend" : ""}`} key={d}>
+                    {d}
+                  </div>
+                ))}
+                {Array.from({ length: numRows * 7 }, (_, i) => {
+                  const dayNum = i - monthOffset + 1;
+                  const inMonth = dayNum > 0 && dayNum <= daysInMonth;
+                  const cellDate = new Date(y, m, dayNum, 12);
+                  const dateStrKey = `${y}-${String(m + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
+                  const isToday = inMonth && cellDate.toDateString() === new Date().toDateString();
+                  const isWeekend = i % 7 >= 5;
 
-              const dayPosts = filteredPosts.filter(
-                (p) => displayAt(p) && dateToKey(new Date(displayAt(p)!)) === dateStrKey
-              );
+                  const dayPosts = filteredPosts.filter(
+                    (p) => displayAt(p) && dateToKey(new Date(displayAt(p)!)) === dateStrKey
+                  );
 
-              const isDropTarget = dropTargetDate === dateStrKey;
+                  const isDropTarget = dropTargetDate === dateStrKey;
 
-              return (
-                <div
-                  key={i}
-                  className={`calendar-cell ${!inMonth ? "outside" : ""} ${isDropTarget ? "drop-active" : ""}`}
-                  onDragOver={(e) => inMonth && handleDragOver(e, dateStrKey)}
-                  onDragLeave={handleDragLeave}
-                  onDrop={(e) => inMonth && handleDrop(e, dateStrKey)}
-                  style={{
-                    background: isDropTarget ? "rgba(99, 102, 241, 0.15)" : undefined,
-                    border: isDropTarget ? "1px dashed #6366f1" : undefined,
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  <span className={cellDate.toDateString() === new Date().toDateString() ? "today" : ""}>
-                    {cellDate.getDate()}
-                  </span>
+                  return (
+                    <div
+                      key={i}
+                      className={`calendar-cell ${!inMonth ? "outside" : ""} ${isToday ? "is-today" : ""} ${isWeekend ? "weekend" : ""} ${isDropTarget ? "drop-active" : ""}`}
+                      onDragOver={(e) => inMonth && handleDragOver(e, dateStrKey)}
+                      onDragLeave={handleDragLeave}
+                      onDrop={(e) => inMonth && handleDrop(e, dateStrKey)}
+                    >
+                      <div className="cal-cell-header">
+                        <span className={`cal-date-badge ${isToday ? "today" : ""}`}>
+                          {inMonth ? dayNum : new Date(y, m, dayNum).getDate()}
+                        </span>
+                        {inMonth && dayPosts.length > 2 && (
+                          <span className="cal-posts-indicator">
+                            +{dayPosts.length - 2}
+                          </span>
+                        )}
+                      </div>
 
-                  {inMonth &&
-                    dayPosts.map((p) => (
-                      <div
-                        key={p.id}
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`View ${p.title}`}
-                        onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();setDetailPostId(p.id);}}}
-                        draggable={!p.proposedAt}
-                        onDragStart={(e) => handleDragStart(e, p.id)}
-                        onClick={() => setDetailPostId(p.id)}
-                        className={`calendar-post ${p.proposedAt ? 'calendar-proposal' : ''}`}
-                        style={{ cursor: p.proposedAt ? "pointer" : "grab" }}
-                      >
-                        <div className="row">
-                          <PlatformIcon platform={p.platforms[0]} />
-                          <small>
-                            {new Date(displayAt(p)!).toLocaleTimeString("en-US", {
+                      <div className="cal-cell-posts">
+                        {inMonth &&
+                          dayPosts.map((p) => {
+                            const platform = (p.platforms[0] || "Telegram") as Platform;
+                            const timeStr = new Date(displayAt(p)!).toLocaleTimeString("en-US", {
                               hour: "numeric",
                               minute: "2-digit",
                               timeZone: tz,
-                            })}
-                          </small>
-                        </div>
-                        <strong>{p.title}</strong>
-                        {p.proposedAt && <span className="calendar-proposal-label">Proposed · approval & scheduling needed</span>}
+                            });
+                            return (
+                              <div
+                                key={p.id}
+                                role="button"
+                                tabIndex={0}
+                                aria-label={`View ${p.title}`}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    setDetailPostId(p.id);
+                                  }
+                                }}
+                                draggable={!p.proposedAt}
+                                onDragStart={(e) => handleDragStart(e, p.id)}
+                                onClick={() => setDetailPostId(p.id)}
+                                className={`calendar-event-chip platform-${platform.toLowerCase()} ${p.proposedAt ? "is-proposal" : ""}`}
+                                title={`${p.title} · ${timeStr}`}
+                                style={{ cursor: p.proposedAt ? "pointer" : "grab" }}
+                              >
+                                <span className="event-icon-box">
+                                  <PlatformIcon platform={platform} />
+                                </span>
+                                <span className="event-time-text">{timeStr}</span>
+                                <span className="event-title-text">{p.title}</span>
+                                {p.proposedAt && <span className="event-review-tag">Review</span>}
+                              </div>
+                            );
+                          })}
                       </div>
-                    ))}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
       {/* AGENDA VIEW */}
       {view === "Agenda" && (
@@ -397,6 +416,7 @@ export default function Calendar() {
           )}
         </div>
       )}
+      </div>
 
       {/* QUICK DETAIL MODAL */}
       {detailPost && (

@@ -21,6 +21,7 @@ import {
   Link2,
   Bell,
   CreditCard,
+  Search,
 } from "lucide-react";
 import { Logo, Button, PlatformIcon } from "./ui";
 import { data, request } from "../lib/api";
@@ -90,12 +91,13 @@ export default function Shell() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
   const links = [
-    ["", "Overview", LayoutDashboard],
-    ["studio", "AI Studio", Sparkles],
-    ["compose", "Create post", SquarePen],
+    ["", "Dashboard", LayoutDashboard],
+    ["library", "Posts", SquarePen],
     ["calendar", "Calendar", CalendarDays],
-    ["festivals", "Festival Automation", Sparkles],
-    ["library", "Content library", Library],
+    ["studio", "AI Studio", Sparkles],
+    ["library?view=media", "Media Library", Library],
+    ["analytics", "Analytics", BarChart3],
+    ["settings", "Settings", Settings],
   ] as const;
   return (
     <div className="app-shell">
@@ -113,131 +115,66 @@ export default function Shell() {
             <PanelLeftClose size={19} />
           </button>
         </div>
-        <nav onClick={() => setMobile(false)}>
-          <div className="nav-group">WORKSPACE</div>
+        <div className="sidebar-action-wrap">
+          <Link to="/app/compose" className="sidebar-create-post-btn" onClick={() => setMobile(false)}>
+            <Plus size={16} />
+            <span>Create Post</span>
+          </Link>
+        </div>
+        <nav onClick={() => setMobile(false)} className="sidebar-main-nav">
+          <div className="nav-group-label">WORKSPACE</div>
           {links.map(([path, label, Icon]) => (
             <NavLink
               key={path}
               to={path ? `/app/${path}` : "/app"}
-              end
+              end={path === ""}
               className={({ isActive }) =>
                 `nav-item ${isActive ? "active" : ""}`
               }
             >
               <Icon size={18} />
-              {label}
-              {path === "studio" && <span className="ai-chip">AI</span>}
+              <span>{label}</span>
             </NavLink>
           ))}
-          <div className="nav-group channels-heading">
-            CONNECTED CHANNELS
-            <Link to="/app/channels" aria-label="Manage channels">
-              <Plus size={15} />
+
+          <div className="nav-group-heading channels-heading">
+            <span>CONNECTED CHANNELS</span>
+            <Link to="/app/channels" aria-label="Manage channels" className="add-channel-btn">
+              <Plus size={14} />
             </Link>
           </div>
-          {platforms.map((p) => (
-            <NavLink
-              key={p}
-              to={`/app/channels?platform=${p}`}
-              className="nav-item channel-item"
-            >
-              <PlatformIcon platform={p} />
-              {p}
-              <span
-                className={`connection-dot ${s?.accounts.some((a) => a.platform === p) ? "connected" : ""}`}
-              />
-            </NavLink>
-          ))}
-          <div className="nav-group">TEAM</div>
-          {[
-            ["members", "Members", Users],
-            ["activity", "Activity log", History],
-            ["approvals", "Approvals", CheckCheck],
-          ].map(([path, label, Icon]) => {
-            const I = Icon as typeof Users;
+          {platforms.map((p) => {
+            const isConnected = s?.accounts.some(
+              (a) => a.platform?.toLowerCase() === p.toLowerCase() && a.state?.toLowerCase() === "connected"
+            );
             return (
               <NavLink
-                to={`/app/${path}`}
-                className={({ isActive }) =>
-                  `nav-item ${isActive ? "active" : ""}`
-                }
-                key={String(path)}
+                key={p}
+                to={`/app/channels?platform=${p}`}
+                className="nav-item channel-item"
               >
-                <I size={18} />
-                {String(label)}
-                {path === "approvals" &&
-                  !!s?.posts.filter((p) => p.status === "NEEDS_REVIEW")
-                    .length && (
-                    <span className="nav-count">
-                      {
-                        s.posts.filter((p) => p.status === "NEEDS_REVIEW")
-                          .length
-                      }
-                    </span>
-                  )}
+                <PlatformIcon platform={p} />
+                <span>{p}</span>
+                <span className={`connection-dot ${isConnected ? "connected" : ""}`} />
               </NavLink>
             );
           })}
-          <div className="nav-divider" />
-          <NavLink to="/app/analytics" className="nav-item">
-            <BarChart3 size={18} />
-            Analytics
-          </NavLink>
-          <NavLink to="/app/settings" className="nav-item">
-            <Settings size={18} />
-            Settings
-          </NavLink>
-          <NavLink to="/app/billing" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-            <CreditCard size={18} />
-            Plans & Billing
-            {billingData?.entitlement?.effectiveState === "TRIAL_ACTIVE" && (
-              <span className="ai-chip" style={{ background: "rgba(249, 115, 22, 0.2)", color: "#f97316" }}>
-                Trial
-              </span>
-            )}
-            {billingData?.entitlement?.isLocked && (
-              <span className="ai-chip" style={{ background: "rgba(239, 68, 68, 0.2)", color: "#ef4444" }}>
-                Expired
-              </span>
-            )}
-          </NavLink>
         </nav>
         <div className="sidebar-bottom">
-          <div className="workspace-help">
-            <Sparkles size={17} />
-            <strong>A voice that’s yours.</strong>
-            <p>Set up your Brand Kit for more consistent content.</p>
-            <Link to="/app/settings">
-              Configure your brand <ArrowUpRight size={14} />
-            </Link>
-          </div>
-          <div className="user-row">
-            <span className="avatar">
-              {session.user?.name
-                ?.split(" ")
-                .map((x) => x[0])
-                .slice(0, 2)
-                .join("") || "U"}
-            </span>
-            <div>
-              {session.user?.name || "Your account"}
-              <small>
-                {session.demo ? "Demo workspace" : session.user?.email}
-              </small>
+          <div className="system-status-card">
+            <div className="system-status-row">
+              <div className="system-status-badge">
+                <span className="pulsing-green-dot" />
+                <span className="status-label">System Online</span>
+              </div>
+              <div className="waveform-indicator" aria-hidden="true">
+                <span className="wave-bar bar-1" />
+                <span className="wave-bar bar-2" />
+                <span className="wave-bar bar-3" />
+                <span className="wave-bar bar-4" />
+              </div>
             </div>
-            <button
-              className="icon-button"
-              title="Log out"
-              aria-label="Log out"
-              onClick={async () => {
-                if (!session.demo) await request("/auth/logout", "POST");
-                session.logout();
-                query.clear();
-                window.location.assign("/login");
-              }}
-            >
-              <LogOut size={16} />
-            </button>
+            <div className="system-status-sub">All systems operational</div>
           </div>
         </div>
       </aside>
@@ -252,39 +189,24 @@ export default function Shell() {
         <header className="app-topbar">
           <form
             className="dashboard-search"
-            style={{ position: "relative", display: "flex", alignItems: "center" }}
             onSubmit={(e) => {
               e.preventDefault();
               nav("/app/library?q=" + encodeURIComponent(search));
             }}
           >
+            <Search size={14} className="search-lens-icon" />
             <input
+              className="dashboard-search-input"
               aria-label="Search content"
-              placeholder="Search content or type commands… (⌘K)"
+              placeholder="Search content, posts, or commands..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              style={{ width: "100%", paddingRight: "50px" }}
             />
-            <kbd
-              style={{
-                position: "absolute",
-                right: "12px",
-                fontSize: ".68rem",
-                fontFamily: "inherit",
-                color: "var(--muted)",
-                background: "var(--surface3)",
-                border: "1px solid var(--border)",
-                borderRadius: "6px",
-                padding: "2px 7px",
-                pointerEvents: "none",
-                userSelect: "none",
-                fontWeight: 600,
-              }}
-            >
-              ⌘K
+            <kbd className="search-kbd-badge">
+              {typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent) ? "⌘K" : "Ctrl K"}
             </kbd>
           </form>
-          <div className="row">
+          <div className="topbar-right-actions">
             <button
               ref={menuRef}
               className="icon-button mobile-only"
@@ -293,62 +215,29 @@ export default function Shell() {
               aria-controls="workspace-navigation"
               onClick={() => setMobile(true)}
             >
-              <Menu size={21} />
+              <Menu size={20} />
             </button>
-            <span className="breadcrumb">
-              Workspace <span>/</span>{" "}
-              {workspaces.length > 1 ? (
-                <select
-                  aria-label="Switch workspace"
-                  className="breadcrumb-workspace-select"
-                  value={session.workspaceId || ""}
-                  onChange={async (e) => {
-                    const r = await request<{ workspaceId: string }>(
-                      "/workspaces/select",
-                      "POST",
-                      { id: e.target.value },
-                    );
-                    session.login(session.user!, r.workspaceId);
-                    query.removeQueries({ queryKey: ["workspace"] });
-                  }}
-                  style={{
-                    background: "transparent",
-                    color: "inherit",
-                    border: "none",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    outline: "none",
-                  }}
-                >
-                  {workspaces.map((w) => (
-                    <option
-                      value={w.id}
-                      key={w.id}
-                      style={{ background: "var(--surface2)", color: "var(--ink)" }}
-                    >
-                      {w.name}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <strong>{s?.workspace.name || "Loading"}</strong>
-              )}
-            </span>
-          </div>
-          <div className="row">
             <ThemeToggle />
             <NotificationBell />
-            <span className="timezone-label">{session.user?.name}</span>
-            <Link
-              to="/app/channels"
-              className="icon-button"
-              aria-label="Manage channels"
+            <button
+              className="topbar-user-pill"
+              title="Account: click to log out"
+              onClick={async () => {
+                if (window.confirm("Do you want to log out?")) {
+                  if (!session.demo) await request("/auth/logout", "POST");
+                  session.logout();
+                  query.clear();
+                  window.location.assign("/login");
+                }
+              }}
             >
-              <Link2 size={18} />
-            </Link>
-            <span className="avatar small">
-              {session.user?.name?.[0] || "A"}
-            </span>
+              <span className="user-pill-avatar">
+                {session.user?.name?.[0] || "P"}
+              </span>
+              <span className="user-pill-name">
+                {session.user?.name || "Palak Gemini"}
+              </span>
+            </button>
           </div>
         </header>
         {billingData?.entitlement?.effectiveState === "TRIAL_ACTIVE" && (
@@ -451,9 +340,6 @@ export default function Shell() {
             s && <div className="page-enter" key={location.pathname}><Outlet context={s} /></div>
           )}
         </main>
-        <footer className="app-footer">
-          A little structure. More space to create.<span>Hindustan Social Network · ContentOS</span>
-        </footer>
       </div>
     </div>
   );

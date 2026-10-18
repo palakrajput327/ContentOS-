@@ -8,6 +8,7 @@ import "./styles.css";
 import "./workspace.css";
 import "./design-system.css";
 import "./marketing.css";
+import "./dashboard.css";
 import { AppearanceProvider, useAppearance } from './lib/appearance';
 function Notifications() { const {theme}=useAppearance(); return <Toaster theme={theme} position="bottom-right" richColors />; }
 const client = new QueryClient({
