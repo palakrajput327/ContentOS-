@@ -21,11 +21,14 @@ import {
 } from "lucide-react";
 import { Logo, Button, PlatformIcon } from "../components/ui";
 
-import { platforms, PRODUCT } from "../lib/model";
+import { platforms, PRODUCT, type Platform } from "../lib/model";
+import { useSession } from "../lib/session";
 export default function Landing() {
   const nav = useNavigate();
+  const session = useSession();
   const landingRef = useRef<HTMLDivElement>(null);
   const [menuOpen,setMenuOpen] = useState(false);
+  const [activePlatform, setActivePlatform] = useState<Platform>("LinkedIn");
   useEffect(()=>{
     if(!menuOpen)return;
     const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setMenuOpen(false);};
@@ -34,6 +37,10 @@ export default function Landing() {
   },[menuOpen]);
   useScrollReveal(landingRef);
   const demo = () => nav("/signup");
+  const enterInteractiveDemo = () => {
+    session.enterDemo();
+    nav("/app");
+  };
   return (
     <div className="landing" ref={landingRef}>
       <a className="skip-link" href="#marketing-main">Skip to content</a>
@@ -124,8 +131,10 @@ export default function Landing() {
                 <i />
                 <i />
               </div>
-              <span>Workspace / Overview</span>
-              <span className="preview-tag">PRODUCT PREVIEW</span>
+              <span onClick={enterInteractiveDemo} style={{ cursor: "pointer" }}>Workspace / Overview</span>
+              <span className="preview-tag" onClick={enterInteractiveDemo} style={{ cursor: "pointer" }} title="Click to test interactive demo">
+                TRY LIVE DEMO ↗
+              </span>
             </div>
             <div className="mini-app">
               <aside>
@@ -146,6 +155,12 @@ export default function Landing() {
                   <div
                     className={i === 0 ? "mini-nav selected" : "mini-nav"}
                     key={x}
+                    onClick={() => {
+                      session.enterDemo();
+                      const path = i === 0 ? "/app" : i === 1 ? "/app/studio" : i === 2 ? "/app/compose" : i === 3 ? "/app/calendar" : "/app/library";
+                      nav(path);
+                    }}
+                    style={{ cursor: "pointer" }}
                   >
                     {
                       [
@@ -159,10 +174,20 @@ export default function Landing() {
                     {x}
                   </div>
                 ))}
-                <small className="mini-label">CONNECTED CHANNELS</small>
-                <div className="row">
-                  {platforms.map((p) => (
-                    <PlatformIcon key={p} platform={p} />
+                <small className="mini-label">ACTIVE PLATFORM (CLICK TO TEST)</small>
+                <div className="mini-channel-buttons" style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
+                  {platforms.filter(p => p !== 'X').map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      className={`mini-nav ${activePlatform === p ? "selected" : ""}`}
+                      onClick={() => setActivePlatform(p)}
+                      style={{ cursor: 'pointer', textAlign: 'left', border: '1px solid transparent', padding: '7px 10px' }}
+                    >
+                      <PlatformIcon platform={p} />
+                      <span style={{ marginLeft: '6px', fontSize: '.76rem' }}>{p}</span>
+                      {activePlatform === p && <span style={{ marginLeft: 'auto', fontSize: '.6rem', color: 'var(--success)' }}>● Live</span>}
+                    </button>
                   ))}
                 </div>
               </aside>
@@ -170,9 +195,9 @@ export default function Landing() {
                 <div className="mini-heading">
                   <div>
                     <span className="muted">Your workspace, in focus.</span>
-                    <h2>Make room for great content.</h2>
+                    <h2>Multi-Channel Publishing Studio</h2>
                   </div>
-                  <button onClick={demo} className="mini-create">
+                  <button onClick={() => { session.enterDemo(); nav("/app/compose"); }} className="mini-create">
                     + Create post
                   </button>
                 </div>
@@ -214,22 +239,35 @@ export default function Landing() {
                   </div>
                   <div>
                     <div className="panel-heading">
-                      Up next <span>View calendar ↗</span>
+                      <span>Live Preview · {activePlatform}</span>
+                      <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => { session.enterDemo(); nav("/app/compose"); }}>Open composer ↗</span>
                     </div>
-                    {[
-                      "Ideas worth sharing.",
-                      "Inside our creative process.",
-                      "A smarter way to work.",
-                    ].map((t, i) => (
-                      <div className="mini-post" key={t}>
-                        <PlatformIcon platform={platforms[i]} />
-                        <span>
-                          {t}
-                          <small>Tomorrow · {9 + i}:00 AM</small>
-                        </span>
-                        <span className="mini-pill">Scheduled</span>
+                    <div key={activePlatform} className="mini-post preview-card-morph" style={{ border: '1px solid var(--border-strong)', padding: '14px', borderRadius: '12px', background: 'var(--surface2)', transition: 'all .25s ease' }}>
+                      <PlatformIcon platform={activePlatform} />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', flex: 1, minWidth: 0 }}>
+                        <strong style={{ fontSize: '.84rem', color: 'var(--ink)', lineHeight: 1.35 }}>
+                          {activePlatform === "LinkedIn" && "How high-performing creator teams build a 30-day content pipeline."}
+                          {activePlatform === "Instagram" && "Design principles for peaceful dark mode interfaces & visual carousels."}
+                          {activePlatform === "YouTube" && "ContentOS Architecture: Proactive Token Refresh & 4K Resumable Uploads."}
+                          {activePlatform === "Facebook" && "Product Release: Multi-Tenant Workspaces, Festival Automation & RBAC."}
+                          {activePlatform === "Telegram" && "Production Update: All social publishing queues operational at 99.98%."}
+                        </strong>
+                        <small style={{ color: 'var(--muted)', fontSize: '.72rem' }}>
+                          {activePlatform === "LinkedIn" && "Tomorrow · 9:00 AM · Carousel + PDF"}
+                          {activePlatform === "Instagram" && "Tomorrow · 11:30 AM · In-Memory HD JPEG"}
+                          {activePlatform === "YouTube" && "Tomorrow · 2:00 PM · YouTube Shorts (4K)"}
+                          {activePlatform === "Facebook" && "Tomorrow · 4:15 PM · Photo + Link (Graph API)"}
+                          {activePlatform === "Telegram" && "Tomorrow · 6:00 PM · Instant Markdown Broadcast"}
+                        </small>
                       </div>
-                    ))}
+                      <span className="mini-pill" style={{ flexShrink: 0, padding: '4px 8px', borderRadius: '6px', fontSize: '.68rem' }}>
+                        Scheduled
+                      </span>
+                    </div>
+                    <div style={{ marginTop: '10px', fontSize: '.72rem', color: 'var(--subtle)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--success)', display: 'inline-block' }}></span>
+                      OAuth Token Active & Health Verified
+                    </div>
                   </div>
                 </div>
               </section>

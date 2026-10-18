@@ -118,7 +118,7 @@ export async function deliverEmails(options: {limit?:number;budgetMs?:number} = 
         subject: mail.subject,
         text: body,
         html: emailHtml(mail.subject, body),
-        messageId: `<${mail.id}@contentos.local>`,
+        messageId: `<${mail.id}@hidustansocialnetwork.in>`,
       });
       if (!receipt.accepted?.length) throw new Error("Recipient not accepted");
       await pool.query(

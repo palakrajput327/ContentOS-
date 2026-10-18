@@ -25,18 +25,27 @@ export async function getDailyCapacity(
   date: string,
   excludeId?: string,
 ) {
-  const ws = (
+  const limitRow = (
     await db.query(
-      "SELECT timezone, daily_posting_target, festival_automation_enabled, festival_region FROM workspaces WHERE id=$1",
+      `SELECT
+         COALESCE(ws.custom_daily_limit, p.daily_post_limit, wt.daily_post_limit, w.daily_posting_target, 3) AS daily_limit,
+         w.timezone,
+         w.festival_automation_enabled,
+         w.festival_region
+       FROM workspaces w
+       LEFT JOIN workspace_subscriptions ws ON ws.workspace_id = w.id
+       LEFT JOIN subscription_plans p ON p.id = ws.plan_id
+       LEFT JOIN workspace_trials wt ON wt.workspace_id = w.id
+       WHERE w.id = $1`,
       [workspaceId],
     )
   ).rows[0] || {
+    daily_limit: 3,
     timezone: "Asia/Kolkata",
-    daily_posting_target: 10,
     festival_automation_enabled: false,
     festival_region: "National",
   };
-  const timezone = ws.timezone || "Asia/Kolkata";
+  const timezone = limitRow.timezone || "Asia/Kolkata";
   const rows = (
     await db.query(
       `SELECT DISTINCT c.id, c.variants FROM content c JOIN scheduled_posts s ON s.content_id=c.id AND s.workspace_id=c.workspace_id
@@ -45,13 +54,13 @@ export async function getDailyCapacity(
       [workspaceId, timezone, date, excludeId || null],
     )
   ).rows;
-  const festivals = ws.festival_automation_enabled
+  const festivals = limitRow.festival_automation_enabled
     ? listFestivalsForYear(Number(date.slice(0, 4)), {
-        region: ws.festival_region,
+        region: limitRow.festival_region,
       }).filter((f) => f.dateForYear === date).length
     : 0;
   return dailyCapacity(
-    ws.daily_posting_target || 10,
+    Number(limitRow.daily_limit) || 3,
     rows.length,
     festivals,
     rows.filter(

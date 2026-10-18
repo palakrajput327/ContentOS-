@@ -34,6 +34,7 @@ import { queueBackend } from './queue-backend.js';
 import { ZodError } from "zod";
 import { map } from "rxjs";
 import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { pool } from "./db.js";
 import { loadConfig } from "./config.js";
 import { hash, Public, type AuthedRequest } from "./security.js";
@@ -178,6 +179,7 @@ import { NotificationsController } from "./notifications/notifications.controlle
 import { CommentsController } from "./comments/comments.controller.js";
 import { ClipdropController } from "./clipdrop/clipdrop.controller.js";
 import { ClipdropService } from "./clipdrop/clipdrop.service.js";
+import { BillingController } from "./billing/billing.controller.js";
 @Module({
   controllers: [
     PhaseAuthController,
@@ -187,6 +189,7 @@ import { ClipdropService } from "./clipdrop/clipdrop.service.js";
     ContentController,
     DashboardController,
     AdminController,
+    BillingController,
     SocialController,
     StorageController,
     DocumentsController,
@@ -392,7 +395,7 @@ export async function bootstrap() {
 //     );
 //     process.exit(1);
 //   });
-if (process.argv[1] && fileURLToPath(import.meta.url).toLowerCase() === process.argv[1].toLowerCase()) {
+if (process.argv[1] && resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase()) {
   bootstrap().catch((error) => {
     console.error("Authentication API startup failed:", error);
     process.exit(1);

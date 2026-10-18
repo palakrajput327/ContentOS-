@@ -25,15 +25,25 @@ import {
 import { authEvent, queueTokenEmail } from "./mail.js";
 import { consumeCode, requireMail } from "./codes.js";
 import { workspaceForUser } from "./workspace-session.js";
+import { purgeUser } from "./admin-users.js";
 const email = z.string().trim().toLowerCase().email().max(254);
 const password = z.string().min(12, "Use at least 12 characters").max(128);
+const phoneSchema = z.string().trim().regex(/^\+[1-9]\d{6,14}$/, "Enter a valid international phone number with country code (e.g. +919876543210)").optional().or(z.literal(""));
 const registration = z
   .object({
     name: z.string().trim().min(1).max(100),
     email,
     password,
     passwordConfirmation: z.string().optional(),
+    phone: phoneSchema,
+    phone_number: phoneSchema,
+    phoneCountryCode: z.string().trim().max(10).optional(),
+    phone_country_code: z.string().trim().max(10).optional(),
     termsAccepted: z.boolean().optional(),
+    terms_accepted: z.boolean().optional(),
+    privacy_policy_accepted: z.boolean().optional(),
+    termsVersion: z.string().default("v1.0"),
+    privacyVersion: z.string().default("v1.0"),
   })
   .passthrough();
 const pair = z
@@ -105,23 +115,33 @@ export class PhaseAuthController {
   ) {
     const v = registration.parse(input);
     const existing = await pool.query(
-      "SELECT id FROM users WHERE email=$1",
+      "SELECT id, account_status FROM users WHERE email=$1",
       [v.email],
     );
     if (existing.rowCount) {
-      throw new ConflictException(
-        "An account with this email already exists. Please log in instead.",
-      );
+      if (existing.rows[0].account_status === "DELETED") {
+        await transaction(async (db) => {
+          await purgeUser(db, existing.rows[0].id);
+        });
+      } else {
+        throw new ConflictException(
+          "An account with this email already exists. Please log in instead.",
+        );
+      }
     }
     requireMail();
     const passwordHash = await hashPassword(v.password);
     await transaction(async (db) => {
       const id = randomUUID();
       const inserted = await db.query(
-        "INSERT INTO users(id,email,name,password_hash,terms_accepted_at) VALUES($1,$2,$3,$4,now()) ON CONFLICT(email) DO NOTHING RETURNING id,email",
-        [id, v.email, v.name, passwordHash],
+        "INSERT INTO users(id,email,name,password_hash,phone_number,phone_country_code,terms_accepted_at,terms_version) VALUES($1,$2,$3,$4,$5,$6,now(),$7) ON CONFLICT(email) DO NOTHING RETURNING id,email",
+        [id, v.email, v.name, passwordHash, v.phone || v.phone_number || null, v.phoneCountryCode || v.phone_country_code || null, v.termsVersion || "v1.0"],
       );
       if (inserted.rowCount) {
+        await db.query(
+          "INSERT INTO user_consents(id, user_id, terms_version, privacy_version, ip_address, source) VALUES($1, $2, $3, $4, $5, 'signup')",
+          [randomUUID(), id, v.termsVersion || "v1.0", v.privacyVersion || "v1.0", req.ip || null],
+        );
         await queueTokenEmail(db, inserted.rows[0], "verify");
         await authEvent(db, id, "USER_REGISTERED", req.requestId);
       }

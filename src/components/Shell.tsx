@@ -20,6 +20,7 @@ import {
   Plus,
   Link2,
   Bell,
+  CreditCard,
 } from "lucide-react";
 import { Logo, Button, PlatformIcon } from "./ui";
 import { data, request } from "../lib/api";
@@ -69,8 +70,25 @@ export default function Shell() {
     queryKey: ["workspaces"],
     queryFn: () => request<{ id: string; name: string }[]>("/workspaces"),
   });
+  const { data: billingData } = useQuery({
+    queryKey: ["billing-current"],
+    queryFn: () => request<any>("/billing/current"),
+    staleTime: 20000,
+  });
   const nav = useNavigate();
   const query = useQueryClient();
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        const input = document.querySelector<HTMLInputElement>(".dashboard-search input");
+        input?.focus();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
   const links = [
     ["", "Overview", LayoutDashboard],
     ["studio", "AI Studio", Sparkles],
@@ -169,6 +187,20 @@ export default function Shell() {
             <Settings size={18} />
             Settings
           </NavLink>
+          <NavLink to="/app/billing" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
+            <CreditCard size={18} />
+            Plans & Billing
+            {billingData?.entitlement?.effectiveState === "TRIAL_ACTIVE" && (
+              <span className="ai-chip" style={{ background: "rgba(249, 115, 22, 0.2)", color: "#f97316" }}>
+                Trial
+              </span>
+            )}
+            {billingData?.entitlement?.isLocked && (
+              <span className="ai-chip" style={{ background: "rgba(239, 68, 68, 0.2)", color: "#ef4444" }}>
+                Expired
+              </span>
+            )}
+          </NavLink>
         </nav>
         <div className="sidebar-bottom">
           <div className="workspace-help">
@@ -220,6 +252,7 @@ export default function Shell() {
         <header className="app-topbar">
           <form
             className="dashboard-search"
+            style={{ position: "relative", display: "flex", alignItems: "center" }}
             onSubmit={(e) => {
               e.preventDefault();
               nav("/app/library?q=" + encodeURIComponent(search));
@@ -227,10 +260,29 @@ export default function Shell() {
           >
             <input
               aria-label="Search content"
-              placeholder="Search your content…"
+              placeholder="Search content or type commands… (⌘K)"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              style={{ width: "100%", paddingRight: "50px" }}
             />
+            <kbd
+              style={{
+                position: "absolute",
+                right: "12px",
+                fontSize: ".68rem",
+                fontFamily: "inherit",
+                color: "var(--muted)",
+                background: "var(--surface3)",
+                border: "1px solid var(--border)",
+                borderRadius: "6px",
+                padding: "2px 7px",
+                pointerEvents: "none",
+                userSelect: "none",
+                fontWeight: 600,
+              }}
+            >
+              ⌘K
+            </kbd>
           </form>
           <div className="row">
             <button
@@ -299,6 +351,76 @@ export default function Shell() {
             </span>
           </div>
         </header>
+        {billingData?.entitlement?.effectiveState === "TRIAL_ACTIVE" && (
+          <div
+            className="trial-top-banner"
+            style={{
+              background: "linear-gradient(90deg, rgba(249, 115, 22, 0.12) 0%, rgba(168, 85, 247, 0.1) 100%)",
+              borderBottom: "1px solid rgba(249, 115, 22, 0.22)",
+              padding: "8px 24px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              fontSize: "0.85rem",
+              color: "var(--ink)",
+              gap: "12px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Sparkles size={15} style={{ color: "var(--accent)" }} />
+              <span>
+                <strong>Your free trial is active:</strong> Explore ContentOS with {billingData.usage?.dailyLimit || 3} posts/day. {billingData.entitlement.trial.daysRemaining} days remaining in your trial.
+              </span>
+            </div>
+            <Link
+              to="/app/billing"
+              style={{
+                fontSize: "0.82rem",
+                fontWeight: 600,
+                color: "var(--accent)",
+                textDecoration: "underline",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Upgrade anytime →
+            </Link>
+          </div>
+        )}
+        {billingData?.entitlement?.isLocked && (
+          <div
+            className="locked-top-banner"
+            style={{
+              background: "rgba(239, 68, 68, 0.12)",
+              borderBottom: "1px solid rgba(239, 68, 68, 0.25)",
+              padding: "10px 24px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              fontSize: "0.85rem",
+              color: "var(--ink)",
+              gap: "12px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ color: "#ef4444", fontWeight: "bold" }}>●</span>
+              <span>
+                <strong>Subscription Required:</strong> Your free trial has ended. Post publishing and AI Studio are paused. Your content and connected channels are safe.
+              </span>
+            </div>
+            <Link
+              to="/app/billing"
+              style={{
+                fontSize: "0.82rem",
+                fontWeight: 600,
+                color: "#ef4444",
+                textDecoration: "underline",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Select a Plan →
+            </Link>
+          </div>
+        )}
         {session.demo && (
           <div className="demo-banner">
             <span>

@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 import { WorkspaceRequired, assertPermission, type AuthedRequest } from "../security.js";
 import { ClipdropService } from "./clipdrop.service.js";
+import { assertWorkspaceActive } from "../billing/entitlement.service.js";
 
 const suggestPromptSchema = z.object({
   contentText: z.string().min(1).max(10000),
@@ -71,6 +72,7 @@ export class ClipdropController {
   @Post("generate-image")
   async generateImage(@Req() r: AuthedRequest, @Body() input: unknown) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "AI visual generation");
     const v = generateImageSchema.parse(input);
 
     return this.clipdropService.generateImage({
@@ -94,6 +96,7 @@ export class ClipdropController {
   @Post("remove-background")
   async removeBackground(@Req() r: AuthedRequest, @Body() input: unknown) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "AI image processing");
     const v = removeBgSchema.parse(input);
 
     return this.clipdropService.removeBackground({

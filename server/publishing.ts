@@ -61,6 +61,22 @@ export async function claim(id: string, now: Date = new Date()) {
     ).rows[0];
     if (["CANCELLED", "PUBLISHED", "FAILED", "UNCERTAIN"].includes(job.state))
       return null;
+    const sub = (
+      await db.query(
+        "SELECT status, current_period_end FROM workspace_subscriptions WHERE workspace_id = $1",
+        [raw.workspace_id],
+      )
+    ).rows[0];
+    if (
+      sub &&
+      (sub.status === "SUSPENDED" ||
+        sub.status === "EXPIRED" ||
+        (sub.status === "TRIALING" &&
+          new Date(sub.current_period_end).getTime() <= now.getTime()))
+    ) {
+      // Do not dispatch post while subscription is expired; preserve scheduled record safely
+      return null;
+    }
     if (
       content.version !== job.content_version ||
       !["SCHEDULED", "PUBLISHING", "FAILED", "UNCERTAIN"].includes(

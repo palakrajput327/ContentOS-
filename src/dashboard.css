@@ -1,45 +1,50 @@
 .app-shell {
-  --accent: #9d83ff;
-  --accent-hover: #b3a0ff;
-  background: var(--surface);
+  --accent: #818CF8;
+  --accent-hover: #6366F1;
+  background: var(--bg);
   color: var(--ink);
 }
 .app-shell .sidebar {
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
+  backdrop-filter: blur(16px);
   border-color: var(--border);
 }
 .app-shell .main-column {
   background:
     radial-gradient(
-      ellipse at 80% 0,
-      rgba(84, 63, 145, 0.055),
+      ellipse at 85% 0%,
+      rgba(99, 102, 241, 0.05),
       transparent 50%
     ),
-    var(--surface);
+    var(--bg);
 }
 .app-shell .button.primary,
 .app-shell .btn-primary {
-  background: #7953ed;
+  background: linear-gradient(135deg, #6366F1, #4F46E5);
   color: white;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.28);
 }
 .app-shell .nav-item.active {
-  background: var(--surface2);
-  color: #e4dcff;
-  box-shadow: inset 2px 0 #9d83ff;
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 3px 0 var(--accent);
 }
 .app-shell .workspace-avatar,
 .app-shell .studio-symbol {
-  background: var(--surface3);
-  color: #ae94ff;
+  background: var(--surface2);
+  color: var(--accent);
 }
 .app-shell .panel,
 .app-shell .stat-card {
-  background: linear-gradient(130deg, var(--surface2), var(--surface));
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm);
 }
 .app-shell .app-topbar {
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  backdrop-filter: blur(16px);
   border-color: var(--border);
   position: relative;
   gap: 16px;

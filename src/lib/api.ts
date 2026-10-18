@@ -3,6 +3,7 @@ import { useSession } from "./session";
 import { demoSnapshot, type Snapshot, type Post, type Brand } from "./model";
 let demo = demoSnapshot();
 export const apiEnabled = import.meta.env.VITE_API_ENABLED === "true";
+export const apiBase = (import.meta.env.VITE_API_BASE ?? "") as string;
 export async function request<T>(
   path: string,
   method = "GET",
@@ -10,7 +11,6 @@ export async function request<T>(
   retry = true,
 ): Promise<T> {
   const wid = useSession.getState().workspaceId;
-  const apiBase = import.meta.env.VITE_API_BASE ?? "";
   const res = await fetch(`${apiBase}/api/v1${path}`, {
     method,
     credentials: "include",

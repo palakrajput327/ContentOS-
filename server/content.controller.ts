@@ -44,6 +44,7 @@ import {
 } from "./platform-capabilities.js";
 import { createPublishPlan } from "./publish-planner.js";
 import { NotificationsService } from "./notifications/notifications.service.js";
+import { assertWorkspaceActive } from "./billing/entitlement.service.js";
 
 export const publishSchema = z.object({
   socialAccountId: z.string().uuid("Valid social account ID required"),
@@ -161,6 +162,7 @@ export class ContentController {
     @Body() input: unknown,
   ) {
     assertPermission(r.workspace.role, "schedule");
+    await assertWorkspaceActive(r.workspace.id, "publishing content");
     const v = publishSchema.parse(input);
     const w = r.workspace.id;
     const target = (
@@ -413,6 +415,7 @@ export class ContentController {
 
   @Post() async create(@Req() r: AuthedRequest, @Body() input: unknown) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "creating posts");
     const v = inputSchema.parse(input);
     if (v.platforms.includes("YouTube") && !v.youtube) {
       const rawYt = (v.variants as any)?.YouTube || (v.variants as any)?.youtube;
@@ -553,6 +556,9 @@ export class ContentController {
     );
     return transaction(async (db) => {
       const p = await locked(db, id, r.workspace.id);
+      if (["schedule", "approve", "review"].includes(action)) {
+        await assertWorkspaceActive(r.workspace.id, `${action} posts`);
+      }
       let status = p.status;
       if (action === "review") {
         if (p.status !== "DRAFT")

@@ -20,6 +20,7 @@ import {
   Analytics,
 } from "./pages/Manage";
 import Admin from "./pages/Admin";
+import Billing from "./pages/Billing";
 export default function AuthApp() {
   const session = useSession();
   const [checking, setChecking] = useState(true);
@@ -88,6 +89,7 @@ export default function AuthApp() {
         <Route path="activity" element={<Activity />} />
         <Route path="settings" element={<Settings />} />
         <Route path="analytics" element={<Analytics />} />
+        <Route path="billing" element={<Billing />} />
       </Route>
       <Route
         path="*"

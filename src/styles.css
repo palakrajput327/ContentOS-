@@ -1135,3 +1135,158 @@ html {
     transition: none !important;
   }
 }
+
+/* International Phone Input Component */
+.phone-input-root {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+.phone-input-container {
+  display: flex;
+  align-items: stretch;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: visible;
+  position: relative;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.phone-input-container:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.15);
+}
+.phone-country-select-wrapper {
+  position: relative;
+}
+.phone-country-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--surface2, rgba(255, 255, 255, 0.04));
+  border: none;
+  border-right: 1px solid var(--border);
+  border-radius: 8px 0 0 8px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  height: 100%;
+  white-space: nowrap;
+}
+.phone-country-trigger:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.08));
+}
+.phone-country-trigger .country-flag {
+  font-size: 1.1rem;
+}
+.phone-country-trigger .country-code-text {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.dropdown-chevron {
+  transition: transform 0.2s ease;
+  color: var(--muted);
+}
+.dropdown-chevron.rotated {
+  transform: rotate(180deg);
+}
+.phone-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 280px;
+  max-height: 280px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.dropdown-search-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface2);
+}
+.dropdown-search-wrapper .search-icon {
+  color: var(--muted);
+}
+.dropdown-search-input {
+  border: none !important;
+  background: transparent !important;
+  color: var(--ink) !important;
+  font-size: 0.85rem !important;
+  outline: none !important;
+  box-shadow: none !important;
+  width: 100%;
+  padding: 0 !important;
+}
+.countries-list {
+  overflow-y: auto;
+  max-height: 230px;
+  padding: 4px;
+}
+.country-option-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.85rem;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.country-option-item:hover,
+.country-option-item.selected {
+  background: var(--surface2);
+  color: var(--accent);
+}
+.country-option-item .country-flag {
+  font-size: 1.1rem;
+}
+.country-option-item .country-name-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.country-option-item .country-dial-text {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.country-option-item .check-icon {
+  color: var(--accent);
+}
+.dropdown-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.phone-number-input {
+  flex: 1;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  padding: 10px 14px !important;
+  color: var(--ink) !important;
+  font-size: 0.95rem !important;
+}
+.phone-helper-text small {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+

@@ -66,22 +66,30 @@ export function AuthLayout({
     </div>
   );
 }
+import { PhoneInput, type Country } from "../components/PhoneInput";
+
 const registerSchema = z
   .object({
     name: z.string().trim().min(1, "Enter your name").max(100),
-    email: z.string().trim().email(),
+    email: z.string().trim().email("Enter a valid email address"),
     password: z.string().min(12, "Use at least 12 characters").max(128),
     passwordConfirmation: z.string(),
     termsAccepted: z
       .boolean()
-      .refine((v) => v, "Please accept the development terms"),
+      .refine(
+        (v) => v === true,
+        "Please accept the Terms of Service and Privacy Policy",
+      ),
   })
   .refine((v) => v.password === v.passwordConfirmation, {
     path: ["passwordConfirmation"],
     message: "Passwords do not match",
   });
+
 export function Register() {
   const [error, setError] = useState("");
+  const [phone, setPhone] = useState("");
+  const [countryCode, setCountryCode] = useState("+91");
   const nav = useNavigate();
   const {
     register,
@@ -90,16 +98,39 @@ export function Register() {
   } = useForm<z.infer<typeof registerSchema>>({
     resolver: zodResolver(registerSchema),
   });
+
   return (
     <AuthLayout
-      title="Create your account"
-      description="A real account. A fresh start for your content."
+      title="Start your 5-day free trial"
+      description="Enjoy 5 days of intelligent content creation. 3 posts per day. No credit card required."
     >
+      <div className="trial-pill-badge" style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "6px 12px",
+        background: "rgba(249, 115, 22, 0.1)",
+        border: "1px solid rgba(249, 115, 22, 0.25)",
+        borderRadius: "999px",
+        fontSize: "0.8rem",
+        color: "var(--accent, #f97316)",
+        fontWeight: 500,
+        marginBottom: "16px",
+      }}>
+        <ShieldCheck size={14} /> Automatic 5-day trial with 3 daily posts
+      </div>
+
       <form
         onSubmit={handleSubmit(async (values) => {
           try {
             setError("");
-            await authRequest("/register", values);
+            await authRequest("/register", {
+              ...values,
+              phone: phone || undefined,
+              phoneCountryCode: countryCode,
+              termsVersion: "v1.0",
+              privacyVersion: "v1.0",
+            });
             nav("/check-email", { state: { email: values.email } });
           } catch (e) {
             setError((e as Error).message);
@@ -130,6 +161,17 @@ export function Register() {
           )}
         </label>
         <label>
+          Phone number (international)
+          <PhoneInput
+            value={phone}
+            countryCode="IN"
+            onChange={(e164, c) => {
+              setPhone(e164);
+              setCountryCode(c.dialCode);
+            }}
+          />
+        </label>
+        <label>
           Password
           <PasswordInput
             {...register("password")}
@@ -155,14 +197,18 @@ export function Register() {
             </small>
           )}
         </label>
-        <label className="checkbox-label">
-          <input {...register("termsAccepted")} type="checkbox" />
-          <span>
-            I accept the{" "}
-            <Link to="/terms" target="_blank">
-              development terms
+        <label className="checkbox-label" style={{ alignItems: "flex-start", gap: "10px", marginTop: "8px" }}>
+          <input {...register("termsAccepted")} type="checkbox" style={{ marginTop: "3px" }} />
+          <span style={{ fontSize: "0.85rem", lineHeight: "1.4" }}>
+            I agree to the{" "}
+            <Link to="/terms" target="_blank" style={{ textDecoration: "underline" }}>
+              Terms of Service
+            </Link>{" "}
+            and{" "}
+            <Link to="/terms#privacy" target="_blank" style={{ textDecoration: "underline" }}>
+              Privacy Policy
             </Link>
-            .
+            , and understand that I am responsible for reviewing the content and activities managed through my workspace.
           </span>
         </label>
         {errors.termsAccepted && (
@@ -174,7 +220,7 @@ export function Register() {
           </p>
         )}
         <Button type="submit" variant="primary" disabled={isSubmitting}>
-          {isSubmitting ? "Creating account…" : "Create account"}
+          {isSubmitting ? "Creating your trial…" : "Start 5-day free trial"}
           <ArrowRight size={16} />
         </Button>
       </form>

@@ -2,8 +2,14 @@ import { pool, type DB } from './db.js';
 import { postgresQueue } from './queues.js';
 
 export async function relayScheduledPosts(db: DB = pool,limit = 200) {
-  const records = (await db.query(`SELECT id,workspace_id,execute_at FROM scheduled_posts
-    WHERE state IN ('PENDING','ENQUEUED') ORDER BY execute_at,id LIMIT $1`,[limit])).rows;
+  const records = (await db.query(`SELECT s.id,s.workspace_id,s.execute_at FROM scheduled_posts s
+    WHERE s.state IN ('PENDING','ENQUEUED')
+    AND NOT EXISTS (
+      SELECT 1 FROM workspace_subscriptions ws
+      WHERE ws.workspace_id = s.workspace_id
+      AND (ws.status = 'SUSPENDED' OR ws.status = 'EXPIRED' OR (ws.status = 'TRIALING' AND ws.current_period_end <= now()))
+    )
+    ORDER BY s.execute_at,s.id LIMIT $1`,[limit])).rows;
   for (const row of records) {
     await postgresQueue.enqueue('social-publishing','publish',{id:row.id,workspaceId:row.workspace_id},{
       workspaceId:row.workspace_id,key:row.id,runAt:new Date(row.execute_at),attempts:5,backoff:60000,priority:90,

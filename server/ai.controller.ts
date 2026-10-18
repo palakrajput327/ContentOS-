@@ -16,6 +16,7 @@ import {
 } from "./security.js";
 import { platformSchema } from "./content.controller.js";
 import { getLLMProvider } from "./ai/llm.service.js";
+import { assertWorkspaceActive } from "./billing/entitlement.service.js";
 
 const brief = z.object({
   topic: z.string().trim().min(5).max(15000),
@@ -81,6 +82,7 @@ export class AIController {
     @Body() input: unknown,
   ) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "AI generation");
     const v = brief.parse(input);
     if (new Set(v.platforms).size !== v.platforms.length)
       throw new BadRequestException("Choose each platform once.");
