@@ -20,6 +20,7 @@ dist-api/
 
 # Environment and sensitive secrets
 .env
+.env.production
 .env.local
 .env.development.local
 .env.test.local
@@ -61,6 +62,7 @@ err.txt
 prompt.txt
 test_out.txt
 text.txt
+txt.txt
 _git_diff_stat.txt
 _git_status.txt
 _storage_diff.txt

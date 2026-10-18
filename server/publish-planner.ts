@@ -52,6 +52,17 @@ export async function createPublishPlan(
   if (platform !== 'YouTube') {
     variantObj.mediaAssetId ||= content.media_asset_id;
     variantObj.mediaUrl ||= content.media_url || variants?.mediaUrl;
+    if (!variantObj.mediaAssetId && !variantObj.mediaUrl && variants && typeof variants === 'object') {
+      for (const k of Object.keys(variants)) {
+        const v = variants[k];
+        if (typeof v === 'object' && v !== null && (v.mediaAssetId || v.mediaUrl)) {
+          variantObj.mediaAssetId = v.mediaAssetId;
+          variantObj.mediaUrl = v.mediaUrl;
+          if (v.mediaType) variantObj.mediaType = v.mediaType;
+          break;
+        }
+      }
+    }
     if (variantObj.mediaType === 'text' && (variantObj.mediaAssetId || variantObj.mediaUrl)) variantObj.mediaType = variants?.mediaType || 'image';
     if (platform === 'Instagram' && !variantObj.mediaAssetId && !variantObj.mediaUrl) {
       if (isPublishing) {
