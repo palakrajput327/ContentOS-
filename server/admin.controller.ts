@@ -295,9 +295,11 @@ export class AdminController {
        FROM users u
        LEFT JOIN workspace_members wm ON wm.user_id = u.id
        LEFT JOIN workspaces w ON w.id = wm.workspace_id
-       LEFT JOIN workspace_subscriptions ws ON ws.workspace_id = u.active_workspace_id
+       LEFT JOIN workspace_subscriptions ws ON ws.workspace_id = COALESCE(u.active_workspace_id,
+         (SELECT workspace_id FROM workspace_members WHERE user_id=u.id ORDER BY workspace_id LIMIT 1))
        LEFT JOIN subscription_plans p ON p.id = ws.plan_id
-       LEFT JOIN workspace_trials wt ON wt.workspace_id = u.active_workspace_id
+       LEFT JOIN workspace_trials wt ON wt.workspace_id = COALESCE(u.active_workspace_id,
+         (SELECT workspace_id FROM workspace_members WHERE user_id=u.id ORDER BY workspace_id LIMIT 1))
        GROUP BY u.id, ws.status, ws.billing_period, ws.start_at, ws.current_period_end,
                 ws.custom_daily_limit, p.daily_post_limit, wt.daily_post_limit, p.code, p.name,
                 wt.ends_at, wt.status
@@ -307,14 +309,14 @@ export class AdminController {
     return {
       users: res.rows.map((u) => {
         // Calculate dynamic subscription status based on current timestamp
-        let displayStatus = u.subscription_status || "TRIALING";
+        let displayStatus = u.subscription_status || "EXPIRED";
         const now = new Date();
         if (displayStatus === "TRIALING") {
-          if (u.trial_expiry && new Date(u.trial_expiry) <= now) {
+          if (!u.trial_expiry || new Date(u.trial_expiry) <= now || u.trial_status === "EXPIRED") {
             displayStatus = "EXPIRED";
           }
-        } else if (displayStatus === "ACTIVE") {
-          if (u.subscription_expiry && new Date(u.subscription_expiry) <= now) {
+        } else if (["ACTIVE", "ADMIN_GRANTED"].includes(displayStatus)) {
+          if ((displayStatus === "ACTIVE" && !u.subscription_expiry) || (u.subscription_expiry && new Date(u.subscription_expiry) <= now)) {
             displayStatus = "EXPIRED";
           }
         }

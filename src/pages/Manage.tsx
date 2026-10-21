@@ -26,6 +26,7 @@ import {
   Eye,
   EyeOff,
   ChevronDown,
+  HelpCircle,
 } from "lucide-react";
 import "./channels.css";
 import {
@@ -43,6 +44,56 @@ import {
 } from "../lib/model";
 import { data, request } from "../lib/api";
 import { useSession } from "../lib/session";
+const CONNECT_GUIDELINES: Record<Platform, { badge: string; steps: string[] }> = {
+  LinkedIn: {
+    badge: "Official OAuth 2.0",
+    steps: [
+      "Click 'Connect account' below.",
+      "Log into LinkedIn and click 'Allow' to authorize post publishing.",
+      "Your profile will link immediately for automated copywriting and scheduling.",
+    ],
+  },
+  Instagram: {
+    badge: "Meta Business Link",
+    steps: [
+      "Ensure your Instagram is a Professional/Business or Creator account.",
+      "Connect your Instagram account to a Facebook Page you manage.",
+      "Click 'Connect Meta', sign in to Facebook, and select your Page + Instagram account.",
+    ],
+  },
+  Facebook: {
+    badge: "Meta Pages API",
+    steps: [
+      "Click 'Connect Meta' below.",
+      "Log in to Facebook and select the Facebook Page you manage.",
+      "Authorize publishing permissions to enable automatic poster & post scheduling.",
+    ],
+  },
+  YouTube: {
+    badge: "Google OAuth API",
+    steps: [
+      "Click 'Connect account' below.",
+      "Choose the Google account owning your YouTube Channel.",
+      "Click 'Allow' to authorize video uploads and community updates.",
+    ],
+  },
+  Telegram: {
+    badge: "Bot Token & Admin",
+    steps: [
+      "Message @BotFather on Telegram to obtain your HTTP Bot Token.",
+      "Add your bot as an Administrator in your Channel with 'Post Messages' enabled.",
+      "Click 'Connect account', enter your Channel @username (or chat ID) and Bot Token.",
+    ],
+  },
+  X: {
+    badge: "X / Twitter OAuth 2.0",
+    steps: [
+      "Click 'Connect account' below.",
+      "Sign in to X (Twitter) and click 'Authorize app'.",
+      "Your handle will connect for automated text and media tweeting.",
+    ],
+  },
+};
 
 export function Channels() {
   const s = useOutletContext<Snapshot>();
@@ -65,10 +116,15 @@ export function Channels() {
     request<{pages: typeof metaPages}>('/social/meta/pages/' + metaPending).then(result => { setMetaPages(result.pages); setMetaPage(result.pages[0]?.id || ''); }).catch(err => setError(err.message));
   }, [metaPending]);
   const [remove, setRemove] = useState<string | null>(null);
-  const canManage = ["Owner", "Admin"].includes(s.workspace.role);
-  const connectedPlatforms = platforms.filter(p => s.accounts.some(a =>
-    a.platform.toLowerCase() === p.toLowerCase() && a.state === "CONNECTED"));
-  const visiblePlatforms = channelFilter === "connected" ? connectedPlatforms : platforms;
+  const canManage = ["Owner", "Admin"].includes(s?.workspace?.role || "");
+  const connectedPlatforms = platforms.filter(p => (s?.accounts || []).some(a =>
+    String(a?.platform || "").toLowerCase() === p.toLowerCase() && String(a?.state || "").toUpperCase() === "CONNECTED"));
+  const platformParam = searchParams.get("platform");
+  const visiblePlatforms = platformParam
+    ? (platforms.some(p => p.toLowerCase() === platformParam.toLowerCase())
+        ? platforms.filter(p => p.toLowerCase() === platformParam.toLowerCase())
+        : platforms)
+    : channelFilter === "connected" ? connectedPlatforms : platforms;
 
   useEffect(() => {
     const connectedParam = searchParams.get("connected");
@@ -189,8 +245,14 @@ export function Channels() {
 
       <div className="channel-toolbar">
         <div className="channel-filters" role="group" aria-label="Filter platforms">
-          <button type="button" aria-pressed={channelFilter === "all"} onClick={() => setChannelFilter("all")}>All platforms <span>{platforms.length}</span></button>
-          <button type="button" aria-pressed={channelFilter === "connected"} onClick={() => setChannelFilter("connected")}>Connected <span>{connectedPlatforms.length}</span></button>
+          <button type="button" aria-pressed={!platformParam && channelFilter === "all"} onClick={() => { setSearchParams({}, { replace: true }); setChannelFilter("all"); }}>All platforms <span>{platforms.length}</span></button>
+          <button type="button" aria-pressed={!platformParam && channelFilter === "connected"} onClick={() => { setSearchParams({}, { replace: true }); setChannelFilter("connected"); }}>Connected <span>{connectedPlatforms.length}</span></button>
+          {platformParam && (
+            <button type="button" aria-pressed="true" onClick={() => setSearchParams({}, { replace: true })} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+              <span>{platformParam}</span>
+              <span style={{ fontSize: "14px", fontWeight: "bold", opacity: 0.7 }}>×</span>
+            </button>
+          )}
         </div>
         <small><ShieldCheck size={14} aria-hidden="true" /> {demo ? "You're exploring sample accounts" : "Choose what to connect. You're in control."}</small>
       </div>
@@ -207,13 +269,13 @@ export function Channels() {
       {!visiblePlatforms.length && <div className="panel channel-empty"><Link2 size={26} aria-hidden="true" /><h2>Your first connection is waiting.</h2><p>Explore the platforms and pick your favorite to get started.</p><Button onClick={() => setChannelFilter("all")}>Explore platforms <ArrowUpRight size={14} /></Button></div>}
       <div className="channel-grid channel-connections">
         {visiblePlatforms.map((p) => {
-          const accounts = s.accounts.filter(
-            (a) => String(a.platform).toLowerCase() === p.toLowerCase(),
+          const accounts = (s?.accounts || []).filter(
+            (a) => String(a?.platform || "").toLowerCase() === p.toLowerCase(),
           );
           const supported = true;
           const isConnecting = connectingPlatform === p;
           const isConnected = connectedPlatforms.includes(p);
-          const needsAttention = !demo && accounts.some(a => a.state !== "CONNECTED" && a.state !== "DISCONNECTED");
+          const needsAttention = !demo && accounts.some(a => String(a?.state || "").toUpperCase() !== "CONNECTED" && String(a?.state || "").toUpperCase() !== "DISCONNECTED");
 
           return (
             <article key={p} className={`panel channel-card ${isConnected ? "channel-is-connected" : ""}`} aria-busy={isConnecting}>
@@ -236,6 +298,21 @@ export function Channels() {
                         ? "Join the conversation, one thought at a time."
                         : "A home for your longer stories."}
               </p>
+              <details className="channel-how-to" open={!isConnected && accounts.length === 0}>
+                <summary>
+                  <HelpCircle size={13} aria-hidden="true" />
+                  <span>How to connect {p}</span>
+                  <ChevronDown size={13} aria-hidden="true" />
+                </summary>
+                <ol className="channel-how-to-steps">
+                  {CONNECT_GUIDELINES[p]?.steps?.map((step, idx) => (
+                    <li key={idx}>
+                      <span className="step-num">{idx + 1}</span>
+                      <span>{step}</span>
+                    </li>
+                  ))}
+                </ol>
+              </details>
               {accounts.map((a) => (
                 <div className="account-row" key={a.id} style={a.state?.includes('EXPIRED') ? { borderLeft: "3px solid #f59e0b", paddingLeft: "10px" } : {}}>
                   <div>

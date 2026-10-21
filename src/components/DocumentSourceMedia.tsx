@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { request } from "../lib/api";
 import { Button, ModalFrame } from "./ui";
 import { SourceKnowledgeReview } from "./SourceKnowledgeReview";
@@ -41,11 +42,13 @@ export function DocumentSourceMedia({
   documentStatus,
   canExtract,
   onKnowledgeChanged,
+  onSelectVisual,
 }: {
   documentId: string;
   documentStatus: string;
   canExtract: boolean;
   onKnowledgeChanged?: (documentId: string) => void;
+  onSelectVisual?: (visual: { assetId: string; url: string; filename: string }) => void;
 }) {
   const demo = useSession((s) => s.demo);
   const [data, setData] = useState<SourceMedia | null>(null);
@@ -293,6 +296,20 @@ export function DocumentSourceMedia({
                         : "Download original image"}
                     </Button>
                   )}
+                  <Button
+                    variant="primary"
+                    style={{ marginTop: "6px", width: "100%" }}
+                    onClick={() => {
+                      onSelectVisual?.({
+                        assetId: a.assetId,
+                        url: a.url,
+                        filename: `PDF page ${a.pageNumber} visual`,
+                      });
+                      toast.success(`Attached page ${a.pageNumber} visual as post creative!`);
+                    }}
+                  >
+                    ✨ Use as Post Visual
+                  </Button>
                   {a.sourceId && (
                     <div className="source-card-actions">
                       {canExtract && (

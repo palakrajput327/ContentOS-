@@ -67,6 +67,7 @@ export default function AIStudio() {
   const demo = useSession((x) => x.demo);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showClipdropModal, setShowClipdropModal] = useState(false);
+  const [showAutoPilotGuide, setShowAutoPilotGuide] = useState(false);
   const [attachedVisual, setAttachedVisual] = useState<{ assetId: string; url: string; filename: string } | null>(null);
 
   // Studio Mode: 'topic' | 'pdf'
@@ -100,6 +101,7 @@ export default function AIStudio() {
     completed: number;
     currentName: string;
   } | null>(null);
+  const [autopilotRunning, setAutopilotRunning] = useState(false);
 
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
@@ -363,6 +365,33 @@ export default function AIStudio() {
     setSelectedKnowledgeIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
     );
+  }
+
+  async function handleTriggerAutoPilot() {
+    if (!selectedDocId) {
+      toast.error("Please select a PDF document first.");
+      return;
+    }
+    setAutopilotRunning(true);
+    try {
+      const res = await request<{ success: boolean; generated: number; message: string }>(
+        "/knowledge-automation/auto-pilot",
+        "POST",
+        { documentId: selectedDocId }
+      );
+      toast.success(res.message || "⚡ Auto-Pilot executed successfully!");
+      await Promise.all([
+        query.invalidateQueries({ queryKey: ["documents"] }),
+        query.invalidateQueries({ queryKey: ["posts"] }),
+        query.invalidateQueries({ queryKey: ["calendar"] }),
+        query.invalidateQueries({ queryKey: ["knowledge-automation"] }),
+        query.invalidateQueries({ queryKey: ["workspace"] }),
+      ]);
+    } catch (err: any) {
+      toast.error(err.message || "Auto-Pilot failed to start.");
+    } finally {
+      setAutopilotRunning(false);
+    }
   }
 
   async function handleGeneratePosts() {
@@ -882,8 +911,159 @@ export default function AIStudio() {
                   </div>
                 )}
 
+                {/* 100% Zero-Touch Auto-Pilot Mode Banner */}
+                {selectedDocId && (
+                  <div
+                    style={{
+                      margin: "16px 0",
+                      padding: "16px 20px",
+                      borderRadius: "12px",
+                      background: "linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(168, 85, 247, 0.15) 100%)",
+                      border: "1px solid rgba(129, 140, 248, 0.4)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "16px",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                        <Sparkles size={18} color="#818cf8" />
+                        <strong style={{ fontSize: "1rem", color: "#f8fafc" }}>100% Zero-Touch Auto-Pilot</strong>
+                        <span style={{ fontSize: "0.7rem", padding: "2px 8px", borderRadius: "10px", background: "#4f46e5", color: "#fff", fontWeight: 700 }}>
+                          HANDS-FREE
+                        </span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
+                        Auto-pairs PDF visuals, creates multi-platform captions & hashtags, schedules posts day-by-day (10:00 AM), and auto-injects festival greetings (Diwali, Holi, Eid, Independence Day).
+                      </p>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <Button
+                        variant="secondary"
+                        onClick={() => setShowAutoPilotGuide(true)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          background: "rgba(255, 255, 255, 0.08)",
+                          border: "1px solid rgba(255, 255, 255, 0.2)",
+                          color: "#e2e8f0",
+                          padding: "9px 14px",
+                          fontSize: "0.85rem",
+                        }}
+                      >
+                        <BookOpen size={15} /> How It Works
+                      </Button>
+                      <Button
+                        variant="primary"
+                        disabled={autopilotRunning}
+                        onClick={handleTriggerAutoPilot}
+                        style={{
+                          background: "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)",
+                          fontWeight: 700,
+                          padding: "9px 18px",
+                          fontSize: "0.9rem",
+                          border: "none",
+                          boxShadow: "0 4px 14px rgba(99, 102, 241, 0.35)",
+                        }}
+                      >
+                        {autopilotRunning ? "⚡ Running Auto-Pilot…" : "⚡ Start Auto-Pilot"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Smooth In-App Auto-Pilot Guide Modal */}
+                {showAutoPilotGuide && (
+                  <div
+                    style={{
+                      position: "fixed",
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      background: "rgba(0, 0, 0, 0.8)",
+                      backdropFilter: "blur(6px)",
+                      zIndex: 9999,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "20px",
+                    }}
+                    onClick={() => setShowAutoPilotGuide(false)}
+                  >
+                    <div
+                      style={{
+                        background: "#13132b",
+                        border: "1px solid rgba(129, 140, 248, 0.4)",
+                        borderRadius: "16px",
+                        maxWidth: "600px",
+                        width: "100%",
+                        padding: "28px",
+                        boxShadow: "0 24px 48px rgba(0, 0, 0, 0.6)",
+                        color: "#f8fafc",
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <Sparkles size={24} color="#818cf8" />
+                          <h2 style={{ fontSize: "1.2rem", margin: 0, fontWeight: 700 }}>How PDF Post Automation Works</h2>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowAutoPilotGuide(false)}
+                          style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "1.5rem", cursor: "pointer", lineHeight: 1 }}
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                        <div style={{ display: "flex", gap: "14px", alignItems: "flex-start", background: "rgba(255,255,255,0.04)", padding: "14px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                          <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#6366f1", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.85rem", flexShrink: 0 }}>1</div>
+                          <div>
+                            <strong style={{ display: "block", fontSize: "0.92rem", color: "#fff" }}>Upload Your Business PDF</strong>
+                            <p style={{ margin: "4px 0 0", fontSize: "0.82rem", color: "#94a3b8", lineHeight: 1.45 }}>
+                              Upload any brochure, research report, or product catalog. The engine extracts text insights and image previews.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", gap: "14px", alignItems: "flex-start", background: "rgba(255,255,255,0.04)", padding: "14px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                          <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#a855f7", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.85rem", flexShrink: 0 }}>2</div>
+                          <div>
+                            <strong style={{ display: "block", fontSize: "0.92rem", color: "#fff" }}>Click "⚡ Start Auto-Pilot"</strong>
+                            <p style={{ margin: "4px 0 0", fontSize: "0.82rem", color: "#94a3b8", lineHeight: 1.45 }}>
+                              Zero manual work: AI auto-pairs PDF visuals, creates platform-specific copy & hashtags, and assigns posts day-by-day (Day 1, Day 2...).
+                            </p>
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", gap: "14px", alignItems: "flex-start", background: "rgba(255,255,255,0.04)", padding: "14px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                          <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#10b981", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.85rem", flexShrink: 0 }}>3</div>
+                          <div>
+                            <strong style={{ display: "block", fontSize: "0.92rem", color: "#fff" }}>Autonomous Publishing & Dual Alerts</strong>
+                            <p style={{ margin: "4px 0 0", fontSize: "0.82rem", color: "#94a3b8", lineHeight: 1.45 }}>
+                              Posts go live automatically at designated slot times. You receive real-time notifications inside ContentOS and directly in your registered Gmail.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: "20px", display: "flex", justifyContent: "flex-end" }}>
+                        <Button variant="primary" onClick={() => setShowAutoPilotGuide(false)}>
+                          Got it, Let's Automate!
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Active Document Status & Knowledge Extract Action */}
-                {selectedDocId && activeDoc && <DocumentSourceMedia key={selectedDocId} documentId={selectedDocId} documentStatus={activeDoc.status} canExtract={['Owner','Admin','Content Manager','Editor'].includes(s.workspace.role)} onKnowledgeChanged={id=>{if(selectedDocRef.current===id)void fetchKnowledge(id);}} />}
+                {selectedDocId && activeDoc && <DocumentSourceMedia key={selectedDocId} documentId={selectedDocId} documentStatus={activeDoc.status} canExtract={['Owner','Admin','Content Manager','Editor'].includes(s.workspace.role)} onKnowledgeChanged={id=>{if(selectedDocRef.current===id)void fetchKnowledge(id);}} onSelectVisual={visual => setAttachedVisual(visual)} />}
                 {activeDoc && (
                   <div
                     style={{

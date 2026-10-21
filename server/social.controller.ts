@@ -408,6 +408,7 @@ export class SocialController {
         ? "facebook"
         : platformParam.toLowerCase()
     ) as SocialProviderName;
+
     const appUrl =
       platform === "facebook"
         ? metaFrontendUrl()
@@ -433,7 +434,7 @@ export class SocialController {
 
     const stateRecord = stateRes.rows[0];
     if (platform === "facebook")
-      return this.finishMetaOAuth(code, stateHash, stateRecord, res);
+      return this.finishMetaOAuth(code, stateHash, stateRecord, res, appUrl);
     const w = stateRecord.workspace_id;
     const userId = stateRecord.user_id;
 
@@ -633,8 +634,9 @@ export class SocialController {
     stateHash: string,
     record: any,
     res: Response,
+    targetAppUrl?: string,
   ) {
-    const appUrl = metaFrontendUrl();
+    const appUrl = targetAppUrl || metaFrontendUrl();
     try {
       const consumed = await pool.query(
         "DELETE FROM oauth_states WHERE state_hash=$1 AND provider='facebook' RETURNING state_hash",

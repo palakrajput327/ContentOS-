@@ -24,13 +24,14 @@ export const automationSettingsSchema = z
     horizonDays: z.number().int().min(1).max(14),
     cooldownDays: z.number().int().min(1).max(365),
     platforms: z
-      .array(z.enum(["LinkedIn", "Telegram", "X", "Facebook"]))
+      .array(z.enum(["LinkedIn", "Telegram", "X", "Facebook", "Instagram"]))
       .min(1)
-      .max(4)
+      .max(5)
       .refine(
         (p) => new Set(p).size === p.length,
         "Choose each platform once.",
       ),
+    postingTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default("10:00").optional(),
   })
   .strict();
 
@@ -52,7 +53,10 @@ export class KnowledgeAutomationController {
         [workspaceId],
       ),
       pool.query(
-        "SELECT timezone,daily_posting_target FROM workspaces WHERE id=$1",
+        `SELECT timezone, daily_posting_target, festival_automation_enabled, 
+                festival_auto_publish_enabled, festival_approval_mode, 
+                festival_post_time, festival_region, festival_language 
+         FROM workspaces WHERE id=$1`,
         [workspaceId],
       ),
       pool.query(
@@ -67,6 +71,7 @@ export class KnowledgeAutomationController {
         horizon_days: 14,
         cooldown_days: 90,
         platforms: ["LinkedIn"],
+        posting_time: "10:00",
       },
       plans: plans.rows,
       workspace: workspace.rows[0],
@@ -96,8 +101,9 @@ export class KnowledgeAutomationController {
       ).rows[0];
       const result = (
         await db.query(
-          `INSERT INTO knowledge_automation_settings(workspace_id,actor_id,enabled,horizon_days,cooldown_days,platforms)
-        VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(workspace_id) DO UPDATE SET actor_id=$2,enabled=$3,horizon_days=$4,cooldown_days=$5,platforms=$6,next_run_at=now(),updated_at=now() RETURNING *`,
+          `INSERT INTO knowledge_automation_settings(workspace_id,actor_id,enabled,horizon_days,cooldown_days,platforms,posting_time)
+        VALUES($1,$2,$3,$4,$5,$6,COALESCE($7,'10:00')) 
+        ON CONFLICT(workspace_id) DO UPDATE SET actor_id=$2,enabled=$3,horizon_days=$4,cooldown_days=$5,platforms=$6,posting_time=COALESCE($7,knowledge_automation_settings.posting_time,'10:00'),next_run_at=now(),updated_at=now() RETURNING *`,
           [
             r.workspace.id,
             r.user.id,
@@ -105,6 +111,7 @@ export class KnowledgeAutomationController {
             value.horizonDays,
             value.cooldownDays,
             JSON.stringify(value.platforms),
+            value.postingTime || "10:00",
           ],
         )
       ).rows[0];
@@ -142,6 +149,25 @@ export class KnowledgeAutomationController {
       [r.workspace.id],
     );
     return { requested: true };
+  }
+
+  @Post("auto-pilot")
+  async autoPilot(
+    @Req() r: AuthedRequest,
+    @Body() input?: { documentId?: string },
+  ) {
+    assertPermission(r.workspace.role, "edit");
+    const { KnowledgeAutomationService } = await import("./automation.service.js");
+    const service = new KnowledgeAutomationService(pool);
+    const result = await service.runAutoPilot(r.workspace.id, r.user.id, input?.documentId);
+    return {
+      success: true,
+      generated: result.generated,
+      festivalEnabled: true,
+      message: result.generated > 0
+        ? `⚡ Auto-Pilot Active: ${result.generated} posts created, visual assets auto-paired, and scheduled day-by-day (10:00 AM) + Festival Greetings active!`
+        : `⚡ Auto-Pilot ready: All available knowledge has been scheduled day-by-day + Festival Greetings active.`,
+    };
   }
   @Post("plans/:id/retry") async retry(
     @Req() r: AuthedRequest,

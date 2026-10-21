@@ -304,7 +304,9 @@ export default function Admin() {
           ? r.accountStatus === "DELETED"
           : r.accountStatus !== "DELETED" &&
             (!filter ||
-              (filter === "logged"
+              (filter === "inactive"
+                ? r.accountStatus !== "ACTIVE" || !["ACTIVE", "ADMIN_GRANTED", "TRIALING"].includes(r.subscriptionStatus)
+                : filter === "logged"
                 ? r.lastLoginAt
                 : filter === "verified"
                   ? r.emailVerified
@@ -313,7 +315,7 @@ export default function Admin() {
                     : filter === "trial"
                       ? r.subscriptionStatus === "TRIALING"
                       : filter === "paid"
-                        ? ["ACTIVE", "ADMIN_GRANTED"].includes(r.subscriptionStatus)
+                        ? r.accountStatus === "ACTIVE" && ["ACTIVE", "ADMIN_GRANTED"].includes(r.subscriptionStatus)
                         : filter === "expired"
                           ? r.subscriptionStatus === "EXPIRED"
                           : r.accountStatus === filter))),
@@ -526,6 +528,7 @@ export default function Admin() {
                       <option value="SUSPENDED">Suspended accounts</option>
                       <option value="trial">Free Trial</option>
                       <option value="paid">Paid subscribers</option>
+                      <option value="inactive">Inactive subscriptions / accounts</option>
                       <option value="expired">Expired users</option>
                       <option value="verified">Verified email</option>
                       <option value="unverified">Unverified email</option>
@@ -544,10 +547,13 @@ export default function Admin() {
                         <thead>
                           <tr>
                             <th>Account</th>
-                            <th>Status</th>
+                            <th>Phone</th>
+                            <th>Sign-in access</th>
                             <th>Verification</th>
                             <th>Workspace roles</th>
                             <th>Plan & Access</th>
+                            <th>Expires</th>
+                            <th>Joined</th>
                             <th>Posts</th>
                             <th>Logins</th>
                             <th>Last login</th>
@@ -560,12 +566,8 @@ export default function Admin() {
                               <td>
                                 <strong>{r.name}</strong>
                                 <small>{r.email}</small>
-                                {r.phone && r.phone !== "Not recorded" && (
-                                  <small style={{ color: "var(--muted)", display: "block" }}>
-                                    {r.phone}
-                                  </small>
-                                )}
                               </td>
+                              <td>{r.phone && r.phone !== "Not recorded" ? r.phone : "Not recorded"}</td>
                               <td>
                                 <span
                                   className={`admin-status admin-status-${
@@ -602,7 +604,8 @@ export default function Admin() {
                                         : "danger"
                                   }
                                 >
-                                  {r.planName || r.subscriptionStatus}
+                                  {["ACTIVE", "ADMIN_GRANTED", "TRIALING"].includes(r.subscriptionStatus)
+                                    ? `${r.subscriptionStatus === "TRIALING" ? "Trial" : "Active"} · ${r.planName || "No plan"}` : `Inactive · ${r.planName || "No plan"}`}
                                 </Badge>
                                 <small
                                   style={{
@@ -615,6 +618,10 @@ export default function Admin() {
                                   {r.dailyPostingLimit} posts/day
                                 </small>
                               </td>
+                              <td>{r.subscriptionStatus === "TRIALING"
+                                ? r.trialExpiry ? date(r.trialExpiry) : "Not set"
+                                : r.subscriptionExpiry ? date(r.subscriptionExpiry) : "Not set"}</td>
+                              <td>{r.createdAt ? date(r.createdAt) : "Not recorded"}</td>
                               <td>{r.postCount}</td>
                               <td>{r.loginCount}</td>
                               <td>
@@ -1147,6 +1154,7 @@ export default function Admin() {
           {/* User Detail Modal */}
           {selectedUserId && (
             <AdminUserDetailModal
+              key={selectedUserId}
               userId={selectedUserId}
               onClose={() => setSelectedUserId(null)}
             />

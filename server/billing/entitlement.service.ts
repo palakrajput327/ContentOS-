@@ -98,7 +98,7 @@ export async function getWorkspaceEntitlement(
     reason = "Workspace access has been suspended by platform administration.";
   }
   // 2. Complimentary or Administrative Override
-  else if (subStatus === "ADMIN_GRANTED") {
+  else if (subStatus === "ADMIN_GRANTED" && (!periodEnd || periodEnd.getTime() > now.getTime())) {
     effectiveState = "ADMIN_GRANTED";
     reason = "Platform complimentary access active.";
   }
@@ -120,7 +120,7 @@ export async function getWorkspaceEntitlement(
   // 5. Otherwise locked
   else {
     effectiveState = "LOCKED";
-    if (subStatus === "ACTIVE" && periodEnd && periodEnd.getTime() <= now.getTime()) {
+    if (["ACTIVE", "ADMIN_GRANTED"].includes(subStatus) && periodEnd && periodEnd.getTime() <= now.getTime()) {
       reason = "Your subscription period has ended. Please renew to continue.";
     } else if (subStatus === "CANCELED") {
       reason = "Your subscription was canceled.";

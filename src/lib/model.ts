@@ -87,14 +87,22 @@ export interface Snapshot {
   brand: Brand;
 }
 export const statusLabel = (s: string) => s.toLowerCase().replaceAll("_", " ");
-export const dateLabel = (d: string, tz?: string) =>
-  new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    ...(tz ? { timeZone: tz } : {}),
-  }).format(new Date(d));
+export const dateLabel = (d?: string | Date | null, tz?: string) => {
+  if (!d) return "Recently";
+  try {
+    const date = typeof d === "string" || d instanceof Date ? new Date(d) : new Date(String(d));
+    if (isNaN(date.getTime())) return "Recently";
+    return new Intl.DateTimeFormat("en", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      ...(tz && tz !== "undefined" ? { timeZone: tz } : {}),
+    }).format(date);
+  } catch {
+    return "Recently";
+  }
+};
 const now = new Date();
 const upcoming = (n: number) =>
   new Date(now.getTime() + n * 86400000).toISOString();

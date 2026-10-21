@@ -7,6 +7,9 @@ import {
   ShieldCheck,
   Sparkles,
   Search,
+  Zap,
+  PartyPopper,
+  CheckCircle2,
 } from "lucide-react";
 import { request } from "../lib/api";
 import { useSession } from "../lib/session";
@@ -46,6 +49,7 @@ type Config = {
   horizon_days: number;
   cooldown_days: number;
   platforms: string[];
+  posting_time?: string;
   last_message?: string;
   last_run_at?: string;
 };
@@ -53,7 +57,16 @@ type Overview = {
   topics: Topic[];
   plans: Plan[];
   settings: Config;
-  workspace: { timezone: string; daily_posting_target: number };
+  workspace: {
+    timezone: string;
+    daily_posting_target: number;
+    festival_automation_enabled?: boolean;
+    festival_auto_publish_enabled?: boolean;
+    festival_approval_mode?: string;
+    festival_post_time?: string;
+    festival_region?: string;
+    festival_language?: string;
+  };
   accounts: { platform: string; name: string }[];
   canManage: boolean;
   canEdit: boolean;
@@ -95,6 +108,9 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
       await Promise.all([
         query.invalidateQueries({ queryKey: ["knowledge-automation", wid] }),
         query.invalidateQueries({ queryKey: ["workspace", wid] }),
+        query.invalidateQueries({ queryKey: ["calendar"] }),
+        query.invalidateQueries({ queryKey: ["posts"] }),
+        query.invalidateQueries({ queryKey: ["documents"] }),
       ]);
     } catch (error) {
       setMessage(
@@ -103,6 +119,35 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
     } finally {
       setBusy(false);
     }
+  }
+
+  async function triggerAutoPilot() {
+    await action(
+      async () => {
+        const res = await request<{ success: boolean; generated: number; message: string }>(
+          base + "/auto-pilot",
+          "POST",
+          {},
+        );
+        return res;
+      },
+      "⚡ 100% Zero-Touch Auto-Pilot executed! Posts auto-paired with PDF visuals and scheduled day-by-day (10:00 AM) + Festival Greetings enabled.",
+    );
+  }
+
+  async function toggleFestivalAutomation(enable: boolean) {
+    await action(
+      async () => {
+        await request("/calendar/festivals/settings", "PATCH", {
+          festival_automation_enabled: enable,
+          festival_auto_publish_enabled: enable,
+          festival_approval_mode: enable ? "AUTO_APPROVAL" : "MANUAL_APPROVAL",
+        });
+      },
+      enable
+        ? "🪔 Festival Auto-Greetings enabled! Indian & Global festival greeting posters auto-injected in morning slots."
+        : "Festival auto-greetings paused.",
+    );
   }
   async function save(enabled = config?.enabled) {
     if (!config) return;
@@ -113,6 +158,7 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
           horizonDays: config.horizon_days,
           cooldownDays: config.cooldown_days,
           platforms: config.platforms,
+          postingTime: config.posting_time || "10:00",
         });
         setConfig(saved);
         setDirty(false);
@@ -152,18 +198,231 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
           <Link to="/app/studio?tab=pdf">Add a business PDF</Link>
         </Button>
       </header>}
-      <div className="ka-policy">
-        <ShieldCheck size={22} />
-        <div>
-          <strong>Review Mode</strong>
-          <p>
-            Content generation and time proposals run automatically. Approve and
-            schedule each post before it can publish. Proposed times are
-            tentative.
-          </p>
+      {/* 100% Zero-Touch Auto-Pilot Dashboard Banner */}
+      <div className="ka-autopilot-hero">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px", flexWrap: "wrap" }}>
+              <span style={{
+                background: "linear-gradient(135deg, #6366f1, #a855f7)",
+                color: "#fff",
+                padding: "4px 10px",
+                borderRadius: "20px",
+                fontSize: "0.75rem",
+                fontWeight: 700,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                letterSpacing: "0.04em",
+              }}>
+                <Zap size={13} /> 100% ZERO-TOUCH AUTO-PILOT
+              </span>
+              <span style={{
+                background: "rgba(16, 185, 129, 0.15)",
+                color: "var(--success, #10b981)",
+                border: "1px solid rgba(16, 185, 129, 0.35)",
+                padding: "3px 8px",
+                borderRadius: "12px",
+                fontSize: "0.72rem",
+                fontWeight: 600,
+              }}>
+                HANDS-FREE
+              </span>
+              {data?.workspace?.festival_automation_enabled && (
+                <span style={{
+                  background: "rgba(245, 158, 11, 0.15)",
+                  color: "var(--warning, #d97706)",
+                  border: "1px solid rgba(245, 158, 11, 0.35)",
+                  padding: "3px 8px",
+                  borderRadius: "12px",
+                  fontSize: "0.72rem",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}>
+                  <PartyPopper size={12} /> Festivals Enabled
+                </span>
+              )}
+            </div>
+            <h2>Autonomous PDF Publishing & Day-by-Day Scheduling</h2>
+            <p>
+              Upload business PDFs, and AI handles everything automatically: auto-pairs PDF visuals, creates platform-specific copy, schedules posts day-by-day (10:00 AM), and auto-injects morning festival greeting posters.
+            </p>
+          </div>
+
+          <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+              <label className="ka-autopilot-select-label">
+                ⏰ Daily Post Slot
+              </label>
+              <select
+                aria-label="Daily Post Slot Time"
+                className="ka-autopilot-select"
+                value={config?.posting_time || "10:00"}
+                disabled={!data?.canManage || busy}
+                onChange={(e) => {
+                  const newTime = e.target.value;
+                  change({ posting_time: newTime });
+                  if (config) {
+                    action(
+                      () =>
+                        request(base + "/settings", "PATCH", {
+                          enabled: config.enabled,
+                          horizonDays: config.horizon_days,
+                          cooldownDays: config.cooldown_days,
+                          platforms: config.platforms,
+                          postingTime: newTime,
+                        }),
+                      `Daily posting slot set to ${newTime}!`,
+                    );
+                  }
+                }}
+              >
+                <option value="08:00">08:00 AM</option>
+                <option value="09:00">09:00 AM</option>
+                <option value="10:00">10:00 AM (Recommended)</option>
+                <option value="11:00">11:00 AM</option>
+                <option value="12:00">12:00 PM</option>
+                <option value="14:00">02:00 PM</option>
+                <option value="16:00">04:00 PM</option>
+                <option value="18:00">06:00 PM</option>
+                <option value="20:00">08:00 PM</option>
+              </select>
+            </div>
+
+            <button
+              type="button"
+              className="ka-autopilot-btn"
+              disabled={busy || !data?.canEdit}
+              onClick={triggerAutoPilot}
+              style={{ alignSelf: "flex-end" }}
+            >
+              <Zap size={16} />
+              {busy ? "Running Auto-Pilot…" : "⚡ Run Auto-Pilot Now"}
+            </button>
+          </div>
         </div>
-        <span className="ka-pill">Approval required</span>
+
+        {/* 4 Feature Pillars */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: "12px",
+          marginTop: "4px",
+        }}>
+          <div className="ka-feature-pill-card">
+            <div className="pill-title" style={{ color: "var(--accent, #6366f1)" }}>
+              <span>🖼️ Auto-Visual Pairing</span>
+            </div>
+            <p>
+              PDF se nikli images AI poster banakar relevant post ke sath jod deta hai.
+            </p>
+          </div>
+
+          <div className="ka-feature-pill-card">
+            <div className="pill-title" style={{ color: "#8b5cf6" }}>
+              <span>✍️ Auto-Copywriting</span>
+            </div>
+            <p>
+              LinkedIn, Instagram, Facebook, Telegram ke captions & trending hashtags.
+            </p>
+          </div>
+
+          <div className="ka-feature-pill-card">
+            <div className="pill-title" style={{ color: "var(--success, #10b981)" }}>
+              <span>📅 Day-by-Day Scheduling</span>
+            </div>
+            <p>
+              Day 1 (10:00 AM), Day 2 (10:00 AM)... seedhe SCHEDULED mark ho jati hain.
+            </p>
+          </div>
+
+          <div className="ka-feature-pill-card">
+            <div className="pill-title" style={{ color: "var(--warning, #d97706)" }}>
+              <span>🪔 Festival Auto-Greeting</span>
+            </div>
+            <p>
+              Diwali, Holi, Eid, Independence Day posters morning slot ({data?.workspace?.festival_post_time || "09:00 AM"}) me auto-inject.
+            </p>
+          </div>
+        </div>
       </div>
+
+      {/* Festival Auto-Greeting Setting Card */}
+      {data && (
+        <div className="ka-festival-card">
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{
+              width: "36px",
+              height: "36px",
+              borderRadius: "10px",
+              background: "rgba(245, 158, 11, 0.2)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#d97706",
+              flexShrink: 0,
+            }}>
+              <PartyPopper size={20} />
+            </div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <strong>
+                  🪔 Indian & Global Festival Auto-Greetings
+                </strong>
+                <span style={{
+                  fontSize: "0.7rem",
+                  padding: "2px 8px",
+                  borderRadius: "10px",
+                  background: data.workspace.festival_automation_enabled ? "rgba(16, 185, 129, 0.2)" : "rgba(148, 163, 184, 0.2)",
+                  color: data.workspace.festival_automation_enabled ? "var(--success, #10b981)" : "var(--muted, #64748b)",
+                  fontWeight: 600,
+                }}>
+                  {data.workspace.festival_automation_enabled ? "ACTIVE · AUTO-INJECT ON" : "PAUSED"}
+                </span>
+              </div>
+              <p>
+                {data.workspace.festival_automation_enabled
+                  ? `Festival greeting posters will auto-schedule at ${data.workspace.festival_post_time || "09:00"} AM on festival days (Diwali, Holi, Eid, Independence Day, etc.).`
+                  : "Enable to automatically detect festival days and schedule festive greetings in morning slots."}
+              </p>
+            </div>
+          </div>
+          {data.canManage && (
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+              <select
+                aria-label="Festival greeting slot"
+                className="ka-autopilot-select"
+                disabled={busy || !data.workspace.festival_automation_enabled}
+                value={data.workspace.festival_post_time || "09:00"}
+                onChange={(e) => {
+                  const newTime = e.target.value;
+                  action(
+                    () =>
+                      request("/calendar/festivals/settings", "PATCH", {
+                        festival_post_time: newTime,
+                      }),
+                    `Festival greeting time updated to ${newTime}!`,
+                  );
+                }}
+              >
+                <option value="08:00">08:00 AM</option>
+                <option value="09:00">09:00 AM (Recommended)</option>
+                <option value="10:00">10:00 AM</option>
+              </select>
+              <Button
+                variant={data.workspace.festival_automation_enabled ? "secondary" : "primary"}
+                disabled={busy}
+                onClick={() => toggleFestivalAutomation(!data.workspace.festival_automation_enabled)}
+                style={{ fontSize: "0.82rem", padding: "6px 14px" }}
+              >
+                {data.workspace.festival_automation_enabled ? "Pause Festival Greetings" : "Enable Festival Greetings"}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
       {demo ? (
         <Empty icon={<BookOpen />} title="Connect your real workspace">
           <p>
@@ -269,10 +528,31 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
                     />
                     <small>days before reuse</small>
                   </label>
+                  <label>
+                    Daily Auto-Pilot Slot Time
+                    <select
+                      disabled={!data.canManage || busy}
+                      value={config.posting_time || "10:00"}
+                      onChange={(e) =>
+                        change({ posting_time: e.target.value })
+                      }
+                    >
+                      <option value="08:00">08:00 AM</option>
+                      <option value="09:00">09:00 AM</option>
+                      <option value="10:00">10:00 AM (Recommended)</option>
+                      <option value="11:00">11:00 AM</option>
+                      <option value="12:00">12:00 PM</option>
+                      <option value="14:00">02:00 PM</option>
+                      <option value="16:00">04:00 PM</option>
+                      <option value="18:00">06:00 PM</option>
+                      <option value="20:00">08:00 PM</option>
+                    </select>
+                    <small>Day 1, Day 2... posts iss slot par assign hongi</small>
+                  </label>
                 </div></details>
                 <fieldset disabled={!data.canManage || busy}>
-                  <legend>Text channels</legend>
-                  {["LinkedIn", "Telegram", "X", "Facebook"].map((p) => (
+                  <legend>Target channels</legend>
+                  {["LinkedIn", "Instagram", "Facebook", "Telegram", "X"].map((p) => (
                     <label key={p}>
                       <input
                         type="checkbox"
@@ -287,7 +567,7 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
                       />
                       {p}
                       <small>
-                        {data.accounts.some((a) => a.platform === p)
+                        {data.accounts.some((a) => a.platform.toLowerCase() === p.toLowerCase())
                           ? "Connected"
                           : "Connect account"}
                       </small>

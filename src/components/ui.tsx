@@ -52,21 +52,24 @@ export function Logo() {
     </span>
   );
 }
-export function PlatformIcon({ platform }: { platform: Platform }) {
+export function PlatformIcon({ platform }: { platform: Platform | string }) {
+  const norm = String(platform || "").toLowerCase();
   const Icon =
-    platform === "LinkedIn"
+    norm === "linkedin"
       ? Linkedin
-      : platform === "Facebook" ? Facebook : platform === "Instagram"
-        ? Instagram
-        : platform === "YouTube"
-          ? Youtube
-          : platform === "Telegram"
-            ? Send
-            : null;
+      : norm === "facebook"
+        ? Facebook
+        : norm === "instagram"
+          ? Instagram
+          : norm === "youtube"
+            ? Youtube
+            : norm === "telegram"
+              ? Send
+              : null;
   return (
     <span
-      className={`platform platform-${platform.toLowerCase()}`}
-      title={platform}
+      className={`platform platform-${norm}`}
+      title={String(platform || "")}
     >
       {Icon ? <Icon size={15} /> : <span>𝕏</span>}
     </span>

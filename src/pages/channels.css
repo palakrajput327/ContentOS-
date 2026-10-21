@@ -65,3 +65,85 @@
   .channel-connections .channel-card:hover { transform: none; }
   .channel-spinner { animation: none; }
 }
+
+/* Micro-guidelines: How to connect */
+.channel-how-to {
+  margin: 12px 0 16px;
+  border-radius: 9px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  font-size: 0.78rem;
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+
+.channel-how-to summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 600;
+  list-style: none;
+  user-select: none;
+  font-size: 0.76rem;
+  transition: color 0.15s ease;
+}
+
+.channel-how-to summary::-webkit-details-marker {
+  display: none;
+}
+
+.channel-how-to summary svg:last-child {
+  margin-left: auto;
+  transition: transform 0.2s ease;
+}
+
+.channel-how-to[open] summary svg:last-child {
+  transform: rotate(180deg);
+}
+
+.channel-how-to summary:hover {
+  color: var(--accent);
+}
+
+.channel-how-to[open] {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.channel-how-to-steps {
+  margin: 0;
+  padding: 8px 12px 10px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.channel-how-to-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.45;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.channel-how-to-steps .step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--accent);
+  font-size: 0.65rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+

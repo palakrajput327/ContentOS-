@@ -20,8 +20,10 @@ import { audit, pool, transaction } from "../db.js";
 import {
   assertPermission,
   WorkspaceRequired,
+  Public,
   type AuthedRequest,
 } from "../security.js";
+import { verifyStorageSignature } from "./signed-url.js";
 import { Put, Query, Res } from "@nestjs/common";
 import * as path from "node:path";
 import * as fs from "node:fs";
@@ -430,29 +432,73 @@ export class StorageController {
     return res.status(200).json({ ok: true, sizeBytes: bytes });
   }
 
+  @Public()
   @Get("local/download")
   async localDownload(
     @Query("bucket") bucket: string,
     @Query("key") objectKey: string,
+    @Query("expires") expires: string | undefined,
+    @Query("sig") sig: string | undefined,
     @Req() req: AuthedRequest,
     @Res() res: any,
   ) {
-    const asset = (
-      await pool.query(
-        "SELECT m.* FROM media_assets m JOIN workspace_members w ON w.workspace_id=m.workspace_id WHERE m.bucket=$1 AND m.object_key=$2 AND w.user_id=$3 AND m.deleted_at IS NULL AND m.status='COMPLETED'",
+    if (!bucket || !objectKey) {
+      throw new BadRequestException("Bucket and key are required.");
+    }
+
+    let isAuthorized = false;
+
+    // 1. Check if HMAC signed URL is provided and valid
+    if (sig && expires) {
+      const expiresAt = Number(expires);
+      if (!Number.isNaN(expiresAt) && verifyStorageSignature(bucket, objectKey, expiresAt, sig)) {
+        isAuthorized = true;
+      }
+    }
+
+    // 2. Fall back to session cookie authentication if not HMAC verified
+    if (!isAuthorized) {
+      if (!req.user?.id) {
+        throw new ForbiddenException("Invalid or expired download link.");
+      }
+      const assetCheck = await pool.query(
+        "SELECT 1 FROM media_assets m JOIN workspace_members w ON w.workspace_id=m.workspace_id WHERE m.bucket=$1 AND m.object_key=$2 AND w.user_id=$3 AND m.deleted_at IS NULL",
         [bucket, objectKey, req.user.id],
-      )
-    ).rows[0];
-    if (!asset)
-      throw new NotFoundException("Media not found in your workspaces.");
-    const base = path.resolve(process.env.STORAGE_LOCAL_DIR || "uploads"),
-      file = path.resolve(base, bucket, objectKey);
+      );
+      if (!assetCheck.rowCount) {
+        throw new NotFoundException("Media not found in your workspaces.");
+      }
+      isAuthorized = true;
+    }
+
+    const base = path.resolve(process.env.STORAGE_LOCAL_DIR || "uploads");
+    const file = path.resolve(base, bucket, objectKey);
     if (
       !file.startsWith(base + path.sep) ||
       objectKey.includes("..") ||
       objectKey.includes("\\")
-    )
-      throw new BadRequestException("Invalid media path");
+    ) {
+      throw new BadRequestException("Invalid media path.");
+    }
+
+    if (!fs.existsSync(file)) {
+      // Return a graceful branded SVG thumbnail placeholder if file is not locally on disk
+      const cleanName = path.basename(objectKey, path.extname(objectKey)).slice(0, 24);
+      const fallbackSvg = `<svg width="400" height="300" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+        <rect width="400" height="300" fill="#1e1b4b"/>
+        <rect x="20" y="20" width="360" height="260" rx="12" fill="#0f172a" stroke="#6366f1" stroke-width="2"/>
+        <circle cx="200" cy="110" r="36" fill="#6366f1" opacity="0.2"/>
+        <path d="M185 110 L215 110 M200 95 L200 125" stroke="#a855f7" stroke-width="4" stroke-linecap="round"/>
+        <text x="200" y="170" font-family="sans-serif" font-size="14" font-weight="600" fill="#f8fafc" text-anchor="middle">PDF Document Visual</text>
+        <text x="200" y="195" font-family="sans-serif" font-size="11" fill="#94a3b8" text-anchor="middle">${cleanName}</text>
+        <text x="200" y="240" font-family="sans-serif" font-size="10" fill="#6366f1" text-anchor="middle">Ready for Post Creatives</text>
+      </svg>`;
+      res.setHeader("Content-Type", "image/svg+xml");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      return res.send(fallbackSvg);
+    }
+
+    res.setHeader("Cache-Control", "public, max-age=86400");
     return res.sendFile(file);
   }
 }

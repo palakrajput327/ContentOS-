@@ -6,15 +6,20 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
   ArrowRight,
+  ArrowLeft,
   ShieldCheck,
   Mail,
   CheckCircle2,
   LogOut,
   LockKeyhole,
+  FileText,
+  Shield,
+  ExternalLink,
 } from "lucide-react";
 import { Button, Logo } from "../components/ui";
 import { authRequest, type User } from "../lib/auth-client";
 import { ThemeToggle } from '../lib/appearance';
+import "./legal.css";
 
 export function AuthLayout({
   title,
@@ -205,7 +210,7 @@ export function Register() {
               Terms of Service
             </Link>{" "}
             and{" "}
-            <Link to="/terms#privacy" target="_blank" style={{ textDecoration: "underline" }}>
+            <Link to="/privacy" target="_blank" style={{ textDecoration: "underline" }}>
               Privacy Policy
             </Link>
             , and understand that I am responsible for reviewing the content and activities managed through my workspace.
@@ -373,29 +378,290 @@ export function ForgotPassword() {
     </AuthLayout>
   );
 }
-export function Terms() {
+export function Terms({ defaultTab }: { defaultTab?: "terms" | "privacy" }) {
+  const location = useLocation();
+  const [tab, setTab] = useState<"terms" | "privacy">(() => {
+    if (defaultTab) return defaultTab;
+    if (location.pathname.includes("/privacy") || location.hash === "#privacy") return "privacy";
+    return "terms";
+  });
+
+  useEffect(() => {
+    if (location.hash === "#privacy" || location.pathname.includes("/privacy")) {
+      setTab("privacy");
+    } else if (location.pathname.includes("/terms") && !location.hash) {
+      setTab("terms");
+    }
+  }, [location]);
+
   return (
-    <div className="auth-page">
-      <Logo />
-      <h1>Development terms</h1>
-      <p>
-        This is a local development build of ContentOS. Create a test account to
-        evaluate registration, email verification, and password recovery. Email
-        verification uses your inbox.
-      </p>
-      <p>
-        Do not enter confidential business content or reuse passwords from other
-        services. Social publishing, AI services, and paid services are not
-        enabled in this authentication phase.
-      </p>
-      <p>
-        By accepting these development terms, you acknowledge this testing
-        scope. Public production terms and privacy documentation must be
-        finalized before launch.
-      </p>
-      <Button asChild>
-        <Link to="/signup">Back to signup</Link>
-      </Button>
+    <div className="legal-page-container">
+      <div className="legal-page-wrapper">
+        <header className="legal-header">
+          <Link to="/" style={{ display: "inline-flex", textDecoration: "none" }}>
+            <Logo />
+          </Link>
+          <div className="legal-header-actions">
+            <ThemeToggle />
+            <Button asChild variant="secondary">
+              <Link to="/signup" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <ArrowLeft size={14} /> Back to Signup
+              </Link>
+            </Button>
+          </div>
+        </header>
+
+        <div className="legal-hero">
+          <div className="legal-badge-pill">
+            <ShieldCheck size={14} /> Official Legal & Privacy Agreement
+          </div>
+          <h1>Terms of Service & Privacy Policy</h1>
+          <p>
+            Governing the use of ContentOS, the autonomous social media operating system by Hindustan Social Network.
+            Effective date: October 2026.
+          </p>
+        </div>
+
+        <div className="legal-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "terms"}
+            className={`legal-tab-btn ${tab === "terms" ? "active" : ""}`}
+            onClick={() => setTab("terms")}
+          >
+            <FileText size={16} /> Terms of Service
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "privacy"}
+            className={`legal-tab-btn ${tab === "privacy" ? "active" : ""}`}
+            onClick={() => setTab("privacy")}
+          >
+            <Shield size={16} /> Privacy Policy
+          </button>
+        </div>
+
+        <main className="legal-card">
+          {tab === "terms" ? (
+            <div className="legal-content">
+              <div className="legal-section">
+                <h2>1. Acceptance of Terms & Company Identity</h2>
+                <p>
+                  These Terms of Service constitute a legally binding agreement between you (&ldquo;User&rdquo; or &ldquo;Client&rdquo;)
+                  and <strong>Hindustan Social Network</strong> (&ldquo;ContentOS&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;, or &ldquo;our&rdquo;),
+                  governing your access to and use of the ContentOS platform, application, and related services
+                  (accessible at <a href="https://hidustansocialnetwork.in" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>hidustansocialnetwork.in</a>).
+                </p>
+                <p>
+                  By creating an account, linking social media channels, or uploading content, you acknowledge that you have read,
+                  understood, and agree to be bound by these Terms. If you are accepting on behalf of a company or organization,
+                  you represent that you have full legal authority to bind that entity.
+                </p>
+              </div>
+
+              <div className="legal-callout-box">
+                <strong>🔒 Key Principle:</strong> You retain 100% full intellectual property ownership of your business PDFs,
+                uploaded graphics, extracted brand assets, and generated social posts. ContentOS does not claim any ownership over your work.
+              </div>
+
+              <div className="legal-section">
+                <h2>2. Platform Services & Autonomous AI Capabilities</h2>
+                <p>
+                  ContentOS provides an autonomous AI content workflow and digital publishing operating system designed to streamline
+                  business marketing across multiple digital channels:
+                </p>
+                <ul>
+                  <li><strong>Business PDF Ingestion:</strong> Automatic document parsing, knowledge extraction, and intelligent pairing of business visuals with social media concepts.</li>
+                  <li><strong>Multi-Platform AI Copywriting:</strong> Automatic generation of tailored post copy, key takeaways, and hashtags formatted specifically for LinkedIn, Instagram, Facebook, YouTube, and Telegram.</li>
+                  <li><strong>Day-by-Day Zero-Touch Scheduling:</strong> Automated scheduling engines that assign posts to designated future time slots (e.g., 10:00 AM daily) without manual intervention.</li>
+                  <li><strong>Festival Auto-Greetings:</strong> Built-in detection of Indian and global festivals (Diwali, Holi, Eid, Independence Day, etc.) with automatic morning greeting poster scheduling.</li>
+                </ul>
+              </div>
+
+              <div className="legal-section">
+                <h2>3. Social Media Account Integrations & Official APIs</h2>
+                <p>
+                  ContentOS connects with third-party social media platforms exclusively via their official, authorized developer APIs:
+                </p>
+                <ul>
+                  <li><strong>Official OAuth 2.0:</strong> ContentOS accesses your social channels (LinkedIn, Meta / Instagram & Facebook, Google / YouTube, Telegram) strictly using authorized OAuth protocols. We never store or ask for your social media account passwords.</li>
+                  <li><strong>Publishing Authority:</strong> By connecting an account, you grant ContentOS the authorization to publish, schedule, and format posts strictly according to your workspace settings.</li>
+                  <li><strong>1-Click Revocation:</strong> You retain full autonomy. You can disconnect any social media channel at any time from your Channel Settings, which immediately invalidates and deletes the stored access tokens.</li>
+                </ul>
+              </div>
+
+              <div className="legal-section">
+                <h2>4. Data Protection & Bank-Grade Security</h2>
+                <p>
+                  Hindustan Social Network enforces rigorous security standards across all customer data:
+                </p>
+                <ul>
+                  <li><strong>AES-256-GCM Token Encryption:</strong> All social media OAuth access tokens and credentials are encrypted at rest using industry-standard AES-256-GCM cryptographic keys.</li>
+                  <li><strong>Tenant Workspace Isolation:</strong> Your business documents, extracted images, drafts, and analytics are isolated to your workspace and never accessible by other tenants.</li>
+                  <li><strong>Zero Public Model Training:</strong> Your confidential business PDFs and brand materials are never used to train public foundation AI models.</li>
+                  <li><strong>Signed Media Storage:</strong> Uploaded assets and generated posters are secured using time-limited signed URLs to prevent unauthorized indexing or scraping.</li>
+                </ul>
+              </div>
+
+              <div className="legal-section">
+                <h2>5. User Responsibilities & Acceptable Use</h2>
+                <p>
+                  To maintain platform reliability and protect our community, you agree not to use ContentOS to:
+                </p>
+                <ul>
+                  <li>Publish content that is illegal, defamatory, fraudulent, or promotes harassment or hate speech.</li>
+                  <li>Violate copyright, trademark, or proprietary rights of any third party.</li>
+                  <li>Distribute malicious software, phishing campaigns, or unsolicited bulk spam in violation of social media platform developer policies.</li>
+                  <li>Attempt to bypass rate limits, security measures, or reverse engineer any part of the service.</li>
+                </ul>
+                <p>
+                  You are responsible for reviewing and managing the content generated and scheduled through your workspace.
+                </p>
+              </div>
+
+              <div className="legal-section">
+                <h2>6. Termination & Right to Data Erasure</h2>
+                <p>
+                  You may close your account or cancel your workspace subscription at any time. Upon account closure:
+                </p>
+                <ul>
+                  <li>All active social publishing schedules are halted immediately.</li>
+                  <li>Stored OAuth credentials, access tokens, and session data are permanently purged from our active databases.</li>
+                  <li>You may request complete export or deletion of your uploaded business PDFs and media by contacting support.</li>
+                </ul>
+              </div>
+
+              <div className="legal-section">
+                <h2>7. Governing Law & Contact Details</h2>
+                <p>
+                  These Terms are governed by and construed in accordance with the laws of India. For any legal inquiries, compliance audits, or enterprise licensing, contact:
+                </p>
+                <div style={{ background: "var(--surface2)", padding: "14px 18px", borderRadius: "10px", marginTop: "10px" }}>
+                  <strong>Hindustan Social Network</strong><br />
+                  <span style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                    Legal & Compliance Department<br />
+                    Email: <a href="mailto:support@hidustansocialnetwork.in" style={{ color: "var(--accent)" }}>support@hidustansocialnetwork.in</a><br />
+                    Website: <a href="https://hidustansocialnetwork.in" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>https://hidustansocialnetwork.in</a>
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="legal-content">
+              <div className="legal-section">
+                <h2>1. Privacy Commitment & Overview</h2>
+                <p>
+                  At <strong>Hindustan Social Network</strong> (&ldquo;ContentOS&rdquo;, &ldquo;we&rdquo;, &ldquo;our&rdquo;),
+                  protecting your personal and business privacy is a foundational priority. This Privacy Policy details our practices
+                  regarding the collection, processing, storage, and protection of information when you use ContentOS.
+                </p>
+              </div>
+
+              <div className="legal-callout-box">
+                <strong>🛡️ Absolute Privacy Guarantee:</strong> We do NOT sell, rent, monetize, or share your personal data,
+                business documents, or social media tokens with advertisers or third-party data brokers.
+              </div>
+
+              <div className="legal-section">
+                <h2>2. Information We Collect</h2>
+                <p>We collect only the minimum data necessary to deliver automated publishing services:</p>
+                <ul>
+                  <li><strong>Account Credentials:</strong> Full name, business email address, workspace title, and salted cryptographic password hashes (bcrypt).</li>
+                  <li><strong>Social Media OAuth Tokens:</strong> Scoped, time-limited access tokens granted by you during 1-click social connection (LinkedIn, Meta, YouTube, Telegram) used solely to publish posts on your behalf.</li>
+                  <li><strong>Workspace Content:</strong> Uploaded business PDFs, branding assets, images, and copy generated within your workspace.</li>
+                  <li><strong>Security & Operational Logs:</strong> IP addresses (hashed for rate-limiting), login audit records, and publishing execution logs for workspace audit trails.</li>
+                </ul>
+              </div>
+
+              <div className="legal-section">
+                <h2>3. How We Use Your Information</h2>
+                <p>Your information is used strictly to provide the core services of ContentOS:</p>
+                <ul>
+                  <li>To ingest and parse your business PDFs and produce structured social media campaigns.</li>
+                  <li>To publish and schedule approved visual posters and captions to your designated social platforms at configured times.</li>
+                  <li>To authenticate your identity, prevent fraud, and send mandatory security alerts (such as OTP verification codes and password recovery).</li>
+                  <li>To detect national/cultural festival days and prepare festival greeting posts per your workspace settings.</li>
+                </ul>
+              </div>
+
+              <div className="legal-section">
+                <h2>4. AI Inference & Document Confidentiality</h2>
+                <p>
+                  When your uploaded business PDFs are processed:
+                </p>
+                <ul>
+                  <li>Processing occurs through isolated, enterprise-tier AI APIs with strict zero-data-retention guarantees.</li>
+                  <li><strong>Zero Model Training:</strong> Your business secrets, proprietary statistics, and proprietary documents are never incorporated into public LLM training datasets.</li>
+                  <li>Your content remains strictly private to your authenticated workspace session.</li>
+                </ul>
+              </div>
+
+              <div className="legal-section">
+                <h2>5. Security, Encryption & Storage Protocols</h2>
+                <p>
+                  We implement robust enterprise safeguards to protect your data against unauthorized access:
+                </p>
+                <ul>
+                  <li><strong>AES-256-GCM Encryption:</strong> All sensitive social tokens are encrypted at rest with AES-256-GCM before being stored in our PostgreSQL database.</li>
+                  <li><strong>Signed Time-Limited Media URLs:</strong> Media files stored in cloud object storage are served exclusively through cryptographically signed URLs that expire after 1 hour, preventing unauthorized public discovery.</li>
+                  <li><strong>Strict Transport Security:</strong> All data in transit is encrypted using modern TLS (HTTPS) protocols.</li>
+                </ul>
+              </div>
+
+              <div className="legal-section">
+                <h2>6. Your Rights & Data Erasure (GDPR / Indian DPDP Compliance)</h2>
+                <p>
+                  You hold full control over your personal and business data:
+                </p>
+                <ul>
+                  <li><strong>Immediate Token Disconnection:</strong> Disconnecting any linked social account from the Channels page permanently deletes the corresponding OAuth token from our database instantly.</li>
+                  <li><strong>Asset Deletion:</strong> Deleting a PDF or media asset removes the file and extracted knowledge from your workspace.</li>
+                  <li><strong>Right to Erasure (Account Deletion):</strong> You may request complete deletion of your user account and all workspace data by submitting a request to <a href="mailto:privacy@hidustansocialnetwork.in" style={{ color: "var(--accent)" }}>privacy@hidustansocialnetwork.in</a>. All records will be permanently purged within 30 days.</li>
+                </ul>
+              </div>
+
+              <div className="legal-section">
+                <h2>7. Cookies & Session Storage</h2>
+                <p>
+                  ContentOS uses only essential, secure HTTP-only cookies necessary for session authentication and appearance settings
+                  (light/dark theme). We do not deploy third-party advertising tracking cookies or behavioral tracking pixels.
+                </p>
+              </div>
+
+              <div className="legal-section">
+                <h2>8. Data Protection Inquiries</h2>
+                <p>
+                  For any privacy questions, data subject requests, or security inquiries, please contact our Data Protection team:
+                </p>
+                <div style={{ background: "var(--surface2)", padding: "14px 18px", borderRadius: "10px", marginTop: "10px" }}>
+                  <strong>Hindustan Social Network — Data Protection Office</strong><br />
+                  <span style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                    Email: <a href="mailto:privacy@hidustansocialnetwork.in" style={{ color: "var(--accent)" }}>privacy@hidustansocialnetwork.in</a> / <a href="mailto:support@hidustansocialnetwork.in" style={{ color: "var(--accent)" }}>support@hidustansocialnetwork.in</a><br />
+                    Website: <a href="https://hidustansocialnetwork.in" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>https://hidustansocialnetwork.in</a>
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+
+        <footer className="legal-footer-nav">
+          <div style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
+            © {new Date().getFullYear()} Hindustan Social Network · All rights reserved.
+          </div>
+          <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+            <Link to="/login" style={{ fontSize: "0.85rem", color: "var(--accent)", textDecoration: "none" }}>
+              Already registered? Log in
+            </Link>
+            <span style={{ color: "var(--border)" }}>•</span>
+            <Link to="/signup" style={{ fontSize: "0.85rem", color: "var(--accent)", textDecoration: "none" }}>
+              Create Account
+            </Link>
+          </div>
+        </footer>
+      </div>
     </div>
   );
 }

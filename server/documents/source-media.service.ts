@@ -62,12 +62,24 @@ export async function persistDocumentImages(
           "SELECT id FROM media_assets WHERE workspace_id=$1 AND checksum=$2 AND deleted_at IS NULL AND metadata->>'origin'='PDF_SOURCE'",
           [workspaceId, checksum],
         );
+        const objectKey = `workspaces/${workspaceId}/pdf-source/${THUMBNAIL_PROFILE}/${checksum}.webp`;
         let assetId = existing.rows[0]?.id;
-        if (assetId) summary.reused++;
+        if (assetId) {
+          summary.reused++;
+          // Ensure physical file is present on storage provider
+          const fileExists = await provider.exists(bucket, objectKey);
+          if (!fileExists) {
+            await provider.upload({
+              bucket,
+              objectKey,
+              body: thumbnail.data,
+              mimeType: "image/webp",
+            });
+          }
+        }
         if (!assetId) {
           await assertStorageCapacity(db, workspaceId, thumbnail.data.length);
           assetId = randomUUID();
-          const objectKey = `workspaces/${workspaceId}/pdf-source/${THUMBNAIL_PROFILE}/${checksum}.webp`;
           await db.query(
             `INSERT INTO media_assets(id,workspace_id,type,storage_provider,bucket,object_key,mime_type,size_bytes,checksum,original_filename,status,metadata,created_by)
             VALUES($1,$2,'THUMBNAIL',$3,$4,$5,'image/webp',$6,$7,$8,'COMPLETED',$9,$10)`,

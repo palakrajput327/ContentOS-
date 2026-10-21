@@ -7,7 +7,9 @@ export async function relayScheduledPosts(db: DB = pool,limit = 200) {
     AND NOT EXISTS (
       SELECT 1 FROM workspace_subscriptions ws
       WHERE ws.workspace_id = s.workspace_id
-      AND (ws.status = 'SUSPENDED' OR ws.status = 'EXPIRED' OR (ws.status = 'TRIALING' AND ws.current_period_end <= now()))
+      AND (ws.status IN ('SUSPENDED','EXPIRED','CANCELED','PAST_DUE') OR
+        (ws.status = 'ADMIN_GRANTED' AND ws.current_period_end <= now()) OR
+        (ws.status IN ('TRIALING','ACTIVE') AND (ws.current_period_end IS NULL OR ws.current_period_end <= now())))
     )
     ORDER BY s.execute_at,s.id LIMIT $1`,[limit])).rows;
   for (const row of records) {

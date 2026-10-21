@@ -521,8 +521,13 @@ export default function Landing() {
       <footer>
         <Logo />
         <span>Thoughtful content. Connected workflows.</span>
+        <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+          <Link to="/terms" style={{ color: "var(--muted)", fontSize: "0.8rem", textDecoration: "none" }}>Terms of Service</Link>
+          <span style={{ color: "var(--border)" }}>•</span>
+          <Link to="/privacy" style={{ color: "var(--muted)", fontSize: "0.8rem", textDecoration: "none" }}>Privacy Policy</Link>
+        </div>
         <small>
-          © {new Date().getFullYear()} {PRODUCT}
+          © {new Date().getFullYear()} {PRODUCT} · Hindustan Social Network
         </small>
       </footer>
     </div>

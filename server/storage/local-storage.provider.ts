@@ -116,11 +116,14 @@ export class LocalStorageProvider implements ObjectStorageProvider {
   async getSignedDownloadUrl(
     bucket: string,
     objectKey: string,
-    _expiresInSeconds: number = 900,
+    expiresInSeconds: number = 3600,
   ): Promise<string> {
+    const { generateStorageSignature } = await import("./signed-url.js");
+    const expiresAt = Date.now() + expiresInSeconds * 1000;
+    const sig = generateStorageSignature(bucket, objectKey, expiresAt);
     const base = process.env.PUBLIC_URL || process.env.VITE_API_BASE || process.env.APP_ORIGIN || "";
     return `${base}/api/v1/storage/local/download?bucket=${encodeURIComponent(
       bucket,
-    )}&key=${encodeURIComponent(objectKey)}`;
+    )}&key=${encodeURIComponent(objectKey)}&expires=${expiresAt}&sig=${sig}`;
   }
 }

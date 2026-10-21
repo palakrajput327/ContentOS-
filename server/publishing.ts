@@ -9,6 +9,7 @@ import {
 } from "./youtube.service.js";
 import { createPublishPlan } from "./publish-planner.js";
 import { PLATFORM_CAPABILITIES, type Platform } from "./platform-capabilities.js";
+import { queuePublishNotificationEmail } from "./mail.js";
 
 export async function aggregate(
   db: DB,
@@ -71,8 +72,10 @@ export async function claim(id: string, now: Date = new Date()) {
       sub &&
       (sub.status === "SUSPENDED" ||
         sub.status === "EXPIRED" ||
-        (sub.status === "TRIALING" &&
-          new Date(sub.current_period_end).getTime() <= now.getTime()))
+        sub.status === "CANCELED" || sub.status === "PAST_DUE" ||
+        (sub.status === "ADMIN_GRANTED" && sub.current_period_end && new Date(sub.current_period_end).getTime() <= now.getTime()) ||
+        (["TRIALING", "ACTIVE"].includes(sub.status) &&
+          (!sub.current_period_end || new Date(sub.current_period_end).getTime() <= now.getTime())))
     ) {
       // Do not dispatch post while subscription is expired; preserve scheduled record safely
       return null;
@@ -270,6 +273,31 @@ export async function executePublishRecord(
             JSON.stringify({ contentId: content.id, platform: account.platform, error: e.code }),
           ],
         );
+
+        // Notify registered user through Gmail
+        try {
+          const userRow = (
+            await db.query(
+              `SELECT u.email, u.name FROM users u
+               WHERE u.id = $1 OR u.id IN (
+                 SELECT wm.user_id FROM workspace_members wm WHERE wm.workspace_id = $2 AND wm.role = 'Owner' LIMIT 1
+               ) LIMIT 1`,
+              [content.created_by, record.workspace_id],
+            )
+          ).rows[0];
+          if (userRow?.email) {
+            await queuePublishNotificationEmail(db, {
+              recipientEmail: userRow.email,
+              recipientName: userRow.name,
+              platform: account.platform,
+              postTitle: content.title,
+              status: "failed",
+              errorReason: e.code,
+            });
+          }
+        } catch (mailErr) {
+          console.warn("[Publishing Failure Mail]", mailErr);
+        }
       }
     });
     return {
@@ -321,6 +349,31 @@ export async function executePublishRecord(
         JSON.stringify({ contentId: content.id, platform: account.platform, providerPostId: providerId }),
       ],
     );
+
+    // Notify registered user through Gmail
+    try {
+      const userRow = (
+        await db.query(
+          `SELECT u.email, u.name FROM users u
+           WHERE u.id = $1 OR u.id IN (
+             SELECT wm.user_id FROM workspace_members wm WHERE wm.workspace_id = $2 AND wm.role = 'Owner' LIMIT 1
+           ) LIMIT 1`,
+          [content.created_by, record.workspace_id],
+        )
+      ).rows[0];
+      if (userRow?.email) {
+        await queuePublishNotificationEmail(db, {
+          recipientEmail: userRow.email,
+          recipientName: userRow.name,
+          platform: account.platform,
+          postTitle: content.title,
+          status: "published",
+          providerPostId: providerId,
+        });
+      }
+    } catch (mailErr) {
+      console.warn("[Publishing Success Mail]", mailErr);
+    }
   });
   return { success: true, state: "PUBLISHED", providerPostId: providerId };
 }

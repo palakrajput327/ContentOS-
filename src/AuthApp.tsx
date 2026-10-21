@@ -65,6 +65,7 @@ export default function AuthApp() {
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<EmailCode reset />} />
       <Route path="/terms" element={<Terms />} />
+      <Route path="/privacy" element={<Terms defaultTab="privacy" />} />
       <Route path="/admin" element={<Admin />} />
       <Route
         path="/app"

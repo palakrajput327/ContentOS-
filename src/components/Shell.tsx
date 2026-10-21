@@ -29,6 +29,7 @@ import { platforms, type Snapshot } from "../lib/model";
 import { NotificationBell } from "./NotificationBell";
 import { ThemeToggle } from '../lib/appearance';
 import WorkspaceSkeleton from './WorkspaceSkeleton';
+import { ErrorBoundary } from "./ErrorBoundary";
 export const useWorkspace = () => {
   const id = useSession((x) => x.workspaceId);
   return useQuery({ queryKey: ["workspace", id], queryFn: data.snapshot, refetchInterval: 15000 });
@@ -144,7 +145,7 @@ export default function Shell() {
               <PlatformIcon platform={p} />
               {p}
               <span
-                className={`connection-dot ${s?.accounts.some((a) => a.platform === p) ? "connected" : ""}`}
+                className={`connection-dot ${s?.accounts?.some((a) => String(a?.platform || "").toLowerCase() === p.toLowerCase() && String(a?.state || "").toLowerCase() === "connected") ? "connected" : ""}`}
               />
             </NavLink>
           ))}
@@ -448,7 +449,13 @@ export default function Shell() {
               </Button>
             </div>
           ) : (
-            s && <div className="page-enter" key={location.pathname}><Outlet context={s} /></div>
+            s && (
+              <div className="page-enter" key={location.pathname}>
+                <ErrorBoundary>
+                  <Outlet context={s} />
+                </ErrorBoundary>
+              </div>
+            )
           )}
         </main>
         <footer className="app-footer">

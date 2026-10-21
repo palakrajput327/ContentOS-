@@ -64,6 +64,44 @@ export async function queueTokenEmail(
     ],
   );
 }
+
+export async function queuePublishNotificationEmail(
+  db: DB,
+  input: {
+    recipientEmail: string;
+    recipientName?: string;
+    platform: string;
+    postTitle: string;
+    status: "published" | "failed";
+    providerPostId?: string;
+    errorReason?: string;
+  },
+) {
+  const id = randomUUID();
+  const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const isSuccess = input.status === "published";
+  const subject = isSuccess
+    ? `✅ [Published] Your scheduled post is live on ${input.platform}`
+    : `⚠️ [Alert] Post publishing failed on ${input.platform}`;
+
+  const greeting = input.recipientName ? `Hi ${input.recipientName},` : `Hello,`;
+  const body = isSuccess
+    ? `${greeting}\n\nYour automated post "${input.postTitle}" has been successfully published to ${input.platform}.\n\nPlatform: ${input.platform}\nPost ID: ${input.providerPostId || "N/A"}\nTime: ${new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })} IST\n\nYou can review live performance inside your ContentOS dashboard.`
+    : `${greeting}\n\nYour automated post "${input.postTitle}" could not be published to ${input.platform}.\n\nPlatform: ${input.platform}\nReason: ${input.errorReason || "Unknown provider error"}\nTime: ${new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })} IST\n\nPlease log in to ContentOS and verify your account connection or retry publishing.`;
+
+  await db.query(
+    "INSERT INTO email_outbox(id,recipient,subject,encrypted_body,expires_at,is_test) VALUES($1,$2,$3,$4,$5,$6)",
+    [
+      id,
+      input.recipientEmail,
+      subject,
+      encryptToken(body, `mail:${id}`),
+      expires,
+      process.env.APP_ENV === "test",
+    ],
+  );
+}
+
 export async function deliverEmails(options: {limit?:number;budgetMs?:number} = {}) {
   const started=Date.now();
   const limit=options.limit ?? 20;

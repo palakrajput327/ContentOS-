@@ -11,6 +11,18 @@ const idSchema = z.string().uuid();
 export const adminUserEditSchema = z
   .object({
     name: z.string().trim().min(1).max(100),
+    email: z.string().trim().email().max(254).transform(v => v.toLowerCase()).optional(),
+    emailVerified: z.boolean().optional(),
+    subscription: z.object({
+      status: z.enum(["ACTIVE", "INACTIVE", "EXTEND"]),
+      planCode: z.enum(["STARTER", "GROWTH", "SCALE"]),
+      billingPeriod: z.enum(["MONTHLY", "YEARLY"]),
+      expiresAt: z.string().datetime({ offset: true }).optional(),
+      complimentary: z.boolean().optional(),
+      customDailyLimit: z.number().int().min(1).max(50).nullable().optional(),
+      extensionDays: z.number().int().min(1).max(365).optional(),
+      extensionReason: z.string().trim().min(1).max(500).optional(),
+    }).strict().optional(),
     phone: z.string().trim().max(30).optional().or(z.literal("")),
     countryCode: z.string().trim().max(10).optional().or(z.literal("")),
     status: z.enum(["ACTIVE", "SUSPENDED"]),
@@ -74,7 +86,7 @@ export async function adminUserDetail(id: string, db: DB = pool) {
        FROM workspace_members wm
        JOIN workspaces w ON w.id = wm.workspace_id
        WHERE wm.user_id = $1
-       ORDER BY w.created_at ASC`,
+       ORDER BY w.id ASC`,
       [id],
     )
   ).rows;
@@ -288,6 +300,60 @@ export async function mutateAdminUser(
       return { id, email: user.email, account_status: "DELETED", admin_version: user.admin_version + 1 };
     } else {
       const edit = body as z.infer<typeof adminUserEditSchema>;
+      const email = edit.email ?? user.email;
+      if (email !== user.email && (await db.query("SELECT id FROM users WHERE lower(email)=lower($1) AND id<>$2", [email, id])).rowCount) {
+        throw new ConflictException("This email is already used by another account.");
+      }
+      await db.query(
+        `UPDATE users SET email=$2, email_verified_at=CASE
+          WHEN $3::boolean IS TRUE THEN COALESCE(CASE WHEN email=$2 THEN email_verified_at END,now())
+          WHEN $3::boolean IS FALSE OR email<>$2 THEN NULL ELSE email_verified_at END WHERE id=$1`,
+        [id, email, edit.emailVerified ?? null],
+      );
+      if (edit.subscription) {
+        const change = edit.subscription;
+        const workspaceId = user.active_workspace_id || (await db.query(
+          "SELECT workspace_id FROM workspace_members WHERE user_id=$1 ORDER BY workspace_id LIMIT 1", [id],
+        )).rows[0]?.workspace_id;
+        if (!workspaceId) throw new BadRequestException("This user has no billing workspace.");
+        await db.query("SELECT id FROM workspaces WHERE id=$1 FOR UPDATE", [workspaceId]);
+        const previous = (await db.query("SELECT * FROM workspace_subscriptions WHERE workspace_id=$1 FOR UPDATE", [workspaceId])).rows[0];
+        if (change.status === "EXTEND") {
+          if (!previous || !change.extensionDays || !change.extensionReason) throw new BadRequestException("An existing subscription, extension days and a reason are required.");
+          if (!["ACTIVE", "TRIALING", "EXPIRED", "ADMIN_GRANTED"].includes(previous.status)) throw new BadRequestException("Activate the subscription before extending it.");
+          const trial = (await db.query("SELECT * FROM workspace_trials WHERE workspace_id=$1 FOR UPDATE", [workspaceId])).rows[0];
+          const isTrial = previous.status === "TRIALING";
+          const currentEnd = isTrial ? trial?.ends_at || previous.current_period_end : previous.current_period_end;
+          const nextEnd = new Date(Math.max(Date.now(), currentEnd ? new Date(currentEnd).getTime() : 0) + change.extensionDays * 86400000);
+          const nextStatus = previous.status === "EXPIRED" ? "ACTIVE" : previous.status;
+          await db.query("UPDATE workspace_subscriptions SET current_period_end=$2,status=$3,admin_override_note=$4,updated_at=now() WHERE id=$1", [previous.id,nextEnd,nextStatus,change.extensionReason]);
+          if (isTrial) await db.query("UPDATE workspace_trials SET ends_at=$2,status='EXTENDED',extension_count=extension_count+1,extension_reason=$3,updated_at=now() WHERE workspace_id=$1", [workspaceId,nextEnd,change.extensionReason]);
+          await db.query("INSERT INTO subscription_events(id,workspace_id,subscription_id,event_type,details) VALUES($1,$2,$3,'ADMIN_USER_SUBSCRIPTION_EXTENDED',$4)", [randomUUID(),workspaceId,previous.id,JSON.stringify({actor:actor.username,previous,days:change.extensionDays,reason:change.extensionReason,currentPeriodEnd:nextEnd})]);
+        } else {
+        const plan = (await db.query("SELECT id FROM subscription_plans WHERE code=$1", [change.planCode])).rows[0];
+        if (!plan) throw new BadRequestException("Subscription plan not found.");
+        if (change.status === "ACTIVE" && (!change.expiresAt || new Date(change.expiresAt).getTime() <= Date.now())) {
+          throw new BadRequestException("Active subscriptions require a future expiry date.");
+        }
+        const nextSubscription = (await db.query(
+          `INSERT INTO workspace_subscriptions(id,workspace_id,plan_id,billing_period,status,start_at,current_period_end,admin_override_note)
+           VALUES($1,$2,$3,$4,$5,now(),$6,$7)
+           ON CONFLICT(workspace_id) DO UPDATE SET plan_id=EXCLUDED.plan_id,billing_period=EXCLUDED.billing_period,
+             status=EXCLUDED.status,start_at=now(),current_period_end=EXCLUDED.current_period_end,
+             cancel_at_period_end=false,admin_override_note=EXCLUDED.admin_override_note,updated_at=now()
+           RETURNING *`,
+          [randomUUID(),workspaceId,change.status === "INACTIVE" ? previous?.plan_id ?? plan.id : plan.id,change.status === "INACTIVE" ? previous?.billing_period ?? change.billingPeriod : change.billingPeriod,change.status === "ACTIVE" ? change.complimentary ? "ADMIN_GRANTED" : "ACTIVE" : "SUSPENDED",
+           change.status === "ACTIVE" ? change.expiresAt : previous?.current_period_end ?? null,edit.note],
+        )).rows[0];
+        if (change.status === "ACTIVE") await db.query("UPDATE workspace_subscriptions SET custom_daily_limit=$2 WHERE id=$1", [nextSubscription.id,change.customDailyLimit ?? null]);
+        nextSubscription.custom_daily_limit = change.status === "ACTIVE" ? change.customDailyLimit ?? null : previous?.custom_daily_limit ?? null;
+        await db.query(
+          `INSERT INTO subscription_events(id,workspace_id,subscription_id,event_type,details)
+           VALUES($1,$2,$3,'ADMIN_USER_SUBSCRIPTION_UPDATED',$4)`,
+          [randomUUID(),workspaceId,nextSubscription.id,JSON.stringify({actor:actor.username,previous:previous ?? null,next:nextSubscription})],
+        );
+        }
+      }
       await db.query(
         `UPDATE users
          SET name = $2,
@@ -313,12 +379,12 @@ export async function mutateAdminUser(
 
     const next = (
       await db.query(
-        "SELECT name,phone_number,phone_country_code,account_status,admin_note,admin_version FROM users WHERE id=$1",
+        "SELECT name,email,email_verified_at,phone_number,phone_country_code,account_status,admin_note,admin_version FROM users WHERE id=$1",
         [id],
       )
     ).rows[0];
 
-    if (remove || next.account_status !== "ACTIVE") await revoke(db, id);
+    if (remove || next.account_status !== "ACTIVE" || next.email !== user.email) await revoke(db, id);
 
     // Audit log
     await db.query(
@@ -331,6 +397,8 @@ export async function mutateAdminUser(
         remove ? "USER_DELETED" : "USER_UPDATED",
         JSON.stringify({
           name: user.name,
+          email: user.email,
+          emailVerifiedAt: user.email_verified_at,
           phone: user.phone_number,
           status: user.account_status,
           note: user.admin_note,
