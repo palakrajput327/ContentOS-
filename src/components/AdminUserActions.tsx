@@ -271,12 +271,44 @@ export default function AdminUserActions({
               <>
                 <section hidden={editTab !== "profile"} data-edit-section="profile" role="tabpanel" id="edit-user-panel-profile" aria-labelledby="edit-user-tab-profile">
                   <div className="admin-edit-card">
-                    <h3>Personal information</h3><p className="admin-edit-help">Manage this user's contact and account details.</p>
+                    <h3>Personal & Account Information</h3><p className="admin-edit-help">Full control over contact information, active/inactive status, and subscription tier.</p>
                     <div className="admin-edit-grid">
                       <label><span>Full name</span><input required maxLength={100} value={name} onChange={e => setName(e.target.value)} disabled={busy} placeholder="User full name" /></label>
                       <label><span>Email address</span><input required type="email" maxLength={254} value={email} onChange={e => {setEmail(e.target.value);setEmailVerified(false);}} disabled={busy} /></label>
                       <label><span>Country code</span><input maxLength={10} value={countryCode} onChange={e => setCountryCode(e.target.value)} disabled={busy} placeholder="+91" /></label>
                       <label><span>Phone number</span><input type="tel" maxLength={30} value={phone} onChange={e => setPhone(e.target.value)} disabled={busy} placeholder="9876543210" /></label>
+                      <label><span>Account status</span>
+                        <select value={status} onChange={e => setStatus(e.target.value)} disabled={busy}>
+                          <option value="ACTIVE">Active · Sign-in enabled</option>
+                          <option value="SUSPENDED">Inactive · Sign-in blocked</option>
+                        </select>
+                      </label>
+                      <label><span>Subscription Category</span>
+                        <select
+                          value={subscriptionMode === "INACTIVE" ? "INACTIVE" : subscriptionMode === "ACTIVE" ? planCode : "KEEP"}
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (val === "KEEP") {
+                              setSubscriptionMode("KEEP");
+                            } else if (val === "INACTIVE") {
+                              setSubscriptionMode("INACTIVE");
+                            } else {
+                              setSubscriptionMode("ACTIVE");
+                              setPlanCode(val);
+                              setComplimentary(true);
+                              const nextExpiry = new Date(Date.now() + 30 * 86400000);
+                              setExpiresAt(new Date(nextExpiry.getTime() - nextExpiry.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+                            }
+                          }}
+                          disabled={busy || !detail?.workspaceId}
+                        >
+                          <option value="KEEP">Current: {detail?.entitlement?.isLocked ? "Inactive" : (detail?.entitlement?.plan?.name ? `${detail.entitlement.plan.name} (Active)` : "Active")}</option>
+                          <option value="INACTIVE">Inactive · No subscription</option>
+                          <option value="STARTER">Active · Starter (15k · ₹14,999/mo)</option>
+                          <option value="GROWTH">Active · Growth (25k · ₹24,999/mo)</option>
+                          <option value="SCALE">Active · Scale (50k · ₹49,999/mo)</option>
+                        </select>
+                      </label>
                     </div>
                   </div>
                   <div className="admin-edit-card">

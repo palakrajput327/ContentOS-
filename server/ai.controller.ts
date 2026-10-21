@@ -40,6 +40,16 @@ function generateFallbackCaptions(
   let cleanContent = topic.trim();
   let cleanTitle = "";
 
+  if (cleanContent.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(cleanContent);
+      if (parsed.knowledge) {
+        cleanTitle = String(parsed.knowledge).replace(/^"|"$/g, "").slice(0, 100).trim();
+        cleanContent = (parsed.evidence?.[0]?.excerpt || cleanTitle) + "\n\n" + (cleanTitle !== parsed.evidence?.[0]?.excerpt ? cleanTitle : "");
+      }
+    } catch {}
+  }
+
   const contentMatch = cleanContent.match(/Internal title:\s*(.*?)\nContent:\s*([\s\S]*)/i);
   if (contentMatch) {
     cleanTitle = contentMatch[1].trim();

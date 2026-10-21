@@ -117,11 +117,19 @@ export class KnowledgeAutomationService {
         brand,
       );
     },
+    private generateVisual = async (context: { workspaceId: string; actorId: string; topicHash: string; title: string; caption: string }) => {
+      const { ClipdropService } = await import("../clipdrop/clipdrop.service.js");
+      const service = new ClipdropService();
+      const suggested = await service.suggestPrompt(context.caption, "Instagram");
+      return service.generateImage({workspaceId:context.workspaceId,userId:context.actorId,prompt:suggested.prompt,aspectRatio:"1:1",headline:context.title,enableOverlay:true,idempotencyKey:`autopilot:${context.workspaceId}:${context.topicHash}`});
+    },
   ) {}
 
   async run(workspaceId: string, maxRuns = 3) {
     // Bound each cycle so one large workspace cannot starve the worker.
     let generated = 0;
+    let scheduled = 0;
+    let failure: string | null = null;
     for (let index = 0; index < maxRuns; index++) {
       const reservation = await inTransaction(this.database, async (db) => {
         const ws = (
@@ -136,6 +144,12 @@ export class KnowledgeAutomationService {
           )
         ).rows[0];
         if (!ws || !settings?.enabled) return null;
+        if (settings.autopilot_enabled) {
+          await db.query(`UPDATE document_knowledge k SET status='CONFIRMED',updated_at=now()
+            FROM documents d WHERE k.workspace_id=$1 AND d.id=k.document_id AND d.workspace_id=k.workspace_id AND d.status='READY'
+            AND k.status IN ('EXTRACTED','PENDING') AND length(trim(COALESCE(k.source_excerpt,'')))>0
+            AND COALESCE(k.metadata->>'origin','')<>'SOURCE_VISUAL'`,[workspaceId]);
+        }
         const member = (
           await db.query(
             "SELECT role FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
@@ -260,43 +274,32 @@ export class KnowledgeAutomationService {
           at = candidate.timestamp;
           break;
         }
-        // Fallback: Sequential Day-by-Day (Day 1, Day 2, Day 3...) at 10:00 AM
+        // Fill configured daily slots, including today when the time is still ahead.
         if (!at) {
-          const activePlans = (
-            await db.query(
-              "SELECT proposed_at FROM knowledge_content_plans WHERE workspace_id=$1 AND proposed_at IS NOT NULL",
-              [workspaceId],
-            )
-          ).rows.map((r: any) => new Date(r.proposed_at).getTime());
-
-          const scheduledTimes = (
-            await db.query(
-              "SELECT execute_at FROM scheduled_posts WHERE workspace_id=$1 AND state <> 'CANCELLED'",
-              [workspaceId],
-            )
-          ).rows.map((r: any) => new Date(r.execute_at).getTime());
-
-          const occupied = [...activePlans, ...scheduledTimes];
-          const tz = ws.timezone || "Asia/Kolkata";
-
-          let candidateDay = new Date();
-          candidateDay.setDate(candidateDay.getDate() + 1); // Start tomorrow (Day 1)
-          for (let dayOffset = 0; dayOffset < 30; dayOffset++) {
-            const d = new Date(candidateDay);
-            d.setDate(d.getDate() + dayOffset);
-            const ymd = localDate(d, tz);
-            // Use configured user slot time (default 10:00)
-            const targetTime = settings.posting_time || "10:00";
-            const slotDate = new Date(`${ymd}T${targetTime}:00+05:30`);
-            const slotMs = slotDate.getTime();
-            if (!occupied.some((occ: number) => Math.abs(occ - slotMs) < 1800000)) {
-              at = slotDate.toISOString();
-              break;
+          const pending = (await db.query("SELECT proposed_at FROM knowledge_content_plans WHERE workspace_id=$1 AND state='GENERATING'",[workspaceId])).rows;
+          const scheduled = (await db.query("SELECT execute_at FROM scheduled_posts WHERE workspace_id=$1 AND state<>'CANCELLED'",[workspaceId])).rows;
+          const occupied = [...pending.map(r=>new Date(r.proposed_at).getTime()),...scheduled.map(r=>new Date(r.execute_at).getTime())];
+          for (let offset=0;offset<settings.horizon_days && !at;offset++) {
+            const dayDate=new Date(today+"T00:00:00Z");dayDate.setUTCDate(dayDate.getUTCDate()+offset);
+            const day=dayDate.toISOString().slice(0,10);
+            const capacity=await getDailyCapacity(db,workspaceId,day);
+            const pendingCount=pending.filter(r=>localDate(new Date(r.proposed_at),ws.timezone)===day).length;
+            if (pendingCount>=capacity.remaining) continue;
+            const [hours,minutes]=(settings.posting_time || "10:00").split(":").map(Number);
+            for(let slot=0;slot<capacity.target;slot++) {
+              const total=hours*60+minutes+slot*30;
+              if(total>=1440) break;
+              const localTime=day+"T"+String(Math.floor(total/60)).padStart(2,"0")+":"+String(total%60).padStart(2,"0")+":00";
+              const value=(await db.query("SELECT ($1::timestamp AT TIME ZONE $2) AS at",[localTime,ws.timezone])).rows[0].at;
+              const timestamp=new Date(value).getTime();
+              if(timestamp<=Date.now()+60000 || occupied.some(value=>Math.abs(value-timestamp)<1800000)) continue;
+              at=new Date(timestamp).toISOString();break;
             }
           }
-          if (!at) {
-            at = new Date(Date.now() + 86400000).toISOString();
-          }
+        }
+        if (!at) {
+          await this.message(db,workspaceId,"No remaining publishing capacity in the configured planning window. Stored posts and schedules are preserved.");
+          return null;
         }
         const id = randomUUID(),
           token = randomUUID();
@@ -341,6 +344,7 @@ export class KnowledgeAutomationService {
           timezone: ws.timezone,
           proposedAt: at,
           requireApproval: ws.require_approval !== false,
+          autopilot: !!settings.autopilot_enabled,
         };
       });
       if (!reservation) break;
@@ -359,6 +363,9 @@ export class KnowledgeAutomationService {
           reservation.platforms,
           reservation.brand,
         );
+        const safetyResult = validateContentSafety(result.title, result.variants, evidence);
+        if (!safetyResult.safe) throw new Error(safetyResult.reason || "Generated post failed source safety checks.");
+        const generatedVisual = reservation.autopilot ? await this.generateVisual({workspaceId,actorId:reservation.actorId,topicHash:reservation.topic.hash,title:result.title,caption:result.variants[reservation.platforms[0]]}) : null;
         await inTransaction(this.database, async (db) => {
           await db.query("SELECT id FROM workspaces WHERE id=$1 FOR UPDATE", [
             workspaceId,
@@ -408,9 +415,9 @@ export class KnowledgeAutomationService {
 
           // Auto-pair extracted PDF image if available
           const docId = evidence[0]?.documentId || reservation.topic.sources[0]?.documentId;
-          let autoVisualUrl: string | undefined;
-          let autoVisualAssetId: string | undefined;
-          if (docId) {
+          let autoVisualUrl: string | undefined = generatedVisual?.url;
+          let autoVisualAssetId: string | undefined = generatedVisual?.assetId;
+          if (!generatedVisual && docId) {
             const imgRow = (
               await db.query(
                 `SELECT m.bucket, m.object_key, m.id FROM document_source_media dsm
@@ -448,6 +455,7 @@ export class KnowledgeAutomationService {
             Telegram: 4096,
             X: 280,
             Facebook: 5000,
+            Instagram: 2200,
           };
           if (
             !result.title?.trim() ||
@@ -476,22 +484,7 @@ export class KnowledgeAutomationService {
             )
           ).rows;
 
-          let scheduledCount = 0;
-          if (reservation.proposedAt && connectedAccounts.length > 0) {
-            for (const platform of reservation.platforms) {
-              const acc = connectedAccounts.find(
-                (a: any) => a.platform.toLowerCase() === platform.toLowerCase(),
-              );
-              if (acc) {
-                await db.query(
-                  "INSERT INTO scheduled_posts(id,workspace_id,content_id,account_id,content_version,execute_at,timezone,state) VALUES($1,$2,$3,$4,1,$5,$6,'ENQUEUED')",
-                  [randomUUID(), workspaceId, id, acc.id, reservation.proposedAt, reservation.timezone],
-                );
-                scheduledCount++;
-              }
-            }
-          }
-
+          const scheduledCount = reservation.proposedAt ? reservation.platforms.filter((platform: string) => connectedAccounts.some((account:any) => account.platform.toLowerCase()===platform.toLowerCase())).length : 0;
           const finalStatus = scheduledCount > 0 ? "SCHEDULED" : "NEEDS_REVIEW";
           const snapshot = {
             title: result.title,
@@ -516,6 +509,21 @@ export class KnowledgeAutomationService {
               reservation.timezone,
             ],
           );
+          if (reservation.proposedAt && connectedAccounts.length > 0) {
+            for (const platform of reservation.platforms) {
+              const acc = connectedAccounts.find(
+                (a: any) => a.platform.toLowerCase() === platform.toLowerCase(),
+              );
+              if (acc) {
+                await db.query(
+                  "INSERT INTO scheduled_posts(id,workspace_id,content_id,account_id,content_version,execute_at,timezone,state) VALUES($1,$2,$3,$4,1,$5,$6,'ENQUEUED')",
+                  [randomUUID(), workspaceId, id, acc.id, reservation.proposedAt, reservation.timezone],
+                );
+
+              }
+            }
+          }
+
           await db.query(
             "INSERT INTO content_versions(id,workspace_id,content_id,version,snapshot,created_by) VALUES($1,$2,$3,1,$4,$5)",
             [
@@ -542,6 +550,7 @@ export class KnowledgeAutomationService {
             { planId: reservation.id, sourceEvidence: evidence, safetyCheck: safety, autoScheduled: finalStatus === "SCHEDULED" },
           );
           generated++;
+          if (finalStatus === "SCHEDULED") scheduled++;
         });
 
         // Safe notification delivery outside of transaction block
@@ -560,6 +569,7 @@ export class KnowledgeAutomationService {
           );
         } catch {}
       } catch (error: any) {
+        failure = String(error.message || "Generation failed").slice(0, 500);
         await this.database.query(
           "UPDATE knowledge_content_plans SET state='FAILED',error_message=$3,lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND lease_token=$4",
           [
@@ -573,27 +583,44 @@ export class KnowledgeAutomationService {
       }
     }
     await this.database.query(
-      `UPDATE knowledge_automation_settings 
+      `UPDATE knowledge_automation_settings
        SET last_run_at=now(),
-           next_run_at=now()+interval '15 minutes',
-           last_message=CASE 
-             WHEN $2>0 THEN '⚡ 100% Zero-Touch Auto-Pilot Active: ' || $2::text || ' post(s) auto-scheduled day-by-day + Festival Greetings active.' 
-             ELSE '⚡ 100% Zero-Touch Auto-Pilot Active: All available knowledge scheduled day-by-day + Festival Greetings active.' 
-           END 
+           next_run_at=now()+CASE WHEN $2>0 THEN interval '1 minute' ELSE interval '15 minutes' END,
+           last_message=CASE
+             WHEN $4::text IS NOT NULL THEN 'Generation failed: ' || $4::text
+             WHEN $2>0 THEN $2::text || ' posts generated and stored; ' || $3::text || ' scheduled. Publishing results are reported separately.'
+             ELSE 'No new posts generated in this run. Check source knowledge, posting capacity and generation history.'
+           END
        WHERE workspace_id=$1`,
-      [workspaceId, generated],
+      [workspaceId, generated, scheduled, failure],
     );
-    return { generated };
+    return { generated, scheduled, failure };
   }
 
   async runAutoPilot(workspaceId: string, actorId: string, documentId?: string) {
     // 1. Ensure automation settings exist and are enabled
     await this.database.query(
-      `INSERT INTO knowledge_automation_settings(workspace_id, actor_id, enabled, horizon_days, cooldown_days, platforms)
-       VALUES($1, $2, true, 14, 90, '["LinkedIn","Instagram","Facebook","Telegram"]')
-       ON CONFLICT(workspace_id) DO UPDATE SET enabled=true, updated_at=now()`,
+      `INSERT INTO knowledge_automation_settings(workspace_id, actor_id, enabled, autopilot_enabled, horizon_days, cooldown_days, platforms)
+       VALUES($1, $2, true, true, 14, 90, '["LinkedIn","Instagram","Facebook","Telegram"]')
+       ON CONFLICT(workspace_id) DO UPDATE SET enabled=true, autopilot_enabled=true, actor_id=EXCLUDED.actor_id, next_run_at=now(), updated_at=now()`,
       [workspaceId, actorId],
     );
+    // Recover READY PDFs whose earlier text/knowledge extraction produced no facts.
+    const missing = (await this.database.query(`SELECT d.id FROM documents d WHERE d.workspace_id=$1 AND d.status='READY'
+      AND ($2::uuid IS NULL OR d.id=$2) AND NOT EXISTS(SELECT 1 FROM document_knowledge k WHERE k.document_id=d.id AND k.workspace_id=d.workspace_id)`,[workspaceId,documentId ?? null])).rows;
+    if (missing.length) {
+      const { createQueue } = await import("../queues.js");
+      const queue = createQueue("content-generation",{defaultJobOptions:{attempts:3,backoff:{type:"exponential",delay:10000}}});
+      for (const document of missing) await inTransaction(this.database,async db => {
+        await db.query("SELECT id FROM documents WHERE id=$1 AND workspace_id=$2 FOR UPDATE",[document.id,workspaceId]);
+        const running = await db.query("SELECT id FROM ai_generations WHERE workspace_id=$1 AND generation_type='DOCUMENT_KNOWLEDGE' AND input->>'documentId'=$2 AND status IN ('QUEUED','PROCESSING')",[workspaceId,document.id]);
+        if (running.rowCount) return;
+        const generationId=randomUUID();
+        await db.query(`INSERT INTO ai_generations(id,workspace_id,actor_id,provider,generation_type,status,input,output)
+          VALUES($1,$2,$3,$4,'DOCUMENT_KNOWLEDGE','QUEUED',$5,'{}')`,[generationId,workspaceId,actorId,process.env.LLM_PROVIDER || 'groq',JSON.stringify({documentId:document.id,autoTriggered:true})]);
+        await queue.add('extract-knowledge',{generationId,documentId:document.id,workspaceId,forcePdf:true},{jobId:generationId},db);
+      });
+    }
 
     // 2. Enable Festival Auto-Greeting & Auto-Publishing on workspace
     const accounts = (
@@ -631,18 +658,18 @@ export class KnowledgeAutomationService {
     // 4. Auto-confirm any pending knowledge items for this document/workspace so they are immediately eligible
     if (documentId) {
       await this.database.query(
-        "UPDATE document_knowledge SET status='CONFIRMED', updated_at=now() WHERE workspace_id=$1 AND document_id=$2 AND status='PENDING'",
+        "UPDATE document_knowledge SET status='CONFIRMED', updated_at=now() WHERE workspace_id=$1 AND document_id=$2 AND status IN ('PENDING','EXTRACTED') AND length(trim(COALESCE(source_excerpt,'')))>0 AND COALESCE(metadata->>'origin','')<>'SOURCE_VISUAL'",
         [workspaceId, documentId],
       );
     } else {
       await this.database.query(
-        "UPDATE document_knowledge SET status='CONFIRMED', updated_at=now() WHERE workspace_id=$1 AND status='PENDING'",
+        "UPDATE document_knowledge SET status='CONFIRMED', updated_at=now() WHERE workspace_id=$1 AND status IN ('PENDING','EXTRACTED') AND length(trim(COALESCE(source_excerpt,'')))>0 AND COALESCE(metadata->>'origin','')<>'SOURCE_VISUAL'",
         [workspaceId],
       );
     }
 
     // 5. Run the automated generation & scheduling pipeline (process up to 7 items in Auto-Pilot)
-    return this.run(workspaceId, 7);
+    return { generated: 0, requested: true };
   }
 
   private async message(db: DB, workspaceId: string, message: string) {

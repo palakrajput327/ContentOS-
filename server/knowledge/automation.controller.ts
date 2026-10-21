@@ -47,7 +47,7 @@ export class KnowledgeAutomationController {
         [workspaceId],
       ),
       pool.query(
-        `SELECT p.*,c.title,c.status AS content_status FROM knowledge_content_plans p
+        `SELECT p.*,c.title,c.status AS content_status,c.variants,c.platforms,c.scheduled_at FROM knowledge_content_plans p
         LEFT JOIN content c ON c.id=p.content_id AND c.workspace_id=p.workspace_id
         WHERE p.workspace_id=$1 ORDER BY p.created_at DESC LIMIT 100`,
         [workspaceId],
@@ -159,14 +159,15 @@ export class KnowledgeAutomationController {
     assertPermission(r.workspace.role, "edit");
     const { KnowledgeAutomationService } = await import("./automation.service.js");
     const service = new KnowledgeAutomationService(pool);
-    const result = await service.runAutoPilot(r.workspace.id, r.user.id, input?.documentId);
+    assertPermission(r.workspace.role, "manage");
+    const value = z.object({documentId:z.string().uuid().optional()}).strict().parse(input || {});
+    const result = await service.runAutoPilot(r.workspace.id, r.user.id, value.documentId);
     return {
       success: true,
       generated: result.generated,
       festivalEnabled: true,
-      message: result.generated > 0
-        ? `⚡ Auto-Pilot Active: ${result.generated} posts created, visual assets auto-paired, and scheduled day-by-day (10:00 AM) + Festival Greetings active!`
-        : `⚡ Auto-Pilot ready: All available knowledge has been scheduled day-by-day + Festival Greetings active.`,
+      requested: result.requested,
+      message: "Auto-pilot enabled. Background generation is queued. Generated, scheduled and published results will appear separately in history; no publication has been confirmed yet.",
     };
   }
   @Post("plans/:id/retry") async retry(

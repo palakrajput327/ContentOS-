@@ -103,8 +103,8 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
     setBusy(true);
     setMessage("");
     try {
-      await fn();
-      setMessage(success);
+      const result = await fn();
+      setMessage(result && typeof result === "object" && "message" in result && typeof result.message === "string" ? result.message : success);
       await Promise.all([
         query.invalidateQueries({ queryKey: ["knowledge-automation", wid] }),
         query.invalidateQueries({ queryKey: ["workspace", wid] }),
@@ -131,7 +131,7 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
         );
         return res;
       },
-      "⚡ 100% Zero-Touch Auto-Pilot executed! Posts auto-paired with PDF visuals and scheduled day-by-day (10:00 AM) + Festival Greetings enabled.",
+      "Auto-pilot enabled. Background generation is queued; check generation history for stored posts and publishing results.",
     );
   }
 

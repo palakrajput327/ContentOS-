@@ -18,7 +18,7 @@ interface PostingSlotsModalProps {
 }
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const PLATFORMS = ["LinkedIn", "X", "Instagram", "Telegram", "YouTube"];
+const PLATFORMS = ["LinkedIn", "Facebook", "X", "Instagram", "Telegram", "YouTube"];
 
 export function PostingSlotsModal({ isOpen, onClose, onSaved }: PostingSlotsModalProps) {
   const [slots, setSlots] = useState<PostingSlotItem[]>([]);
@@ -194,6 +194,7 @@ export function PostingSlotsModal({ isOpen, onClose, onSaved }: PostingSlotsModa
                             type="time"
                             aria-label={`${dayName} posting time`}
                             value={slot.time_of_day}
+                            onInput={(e) => handleUpdateSlot(slot.originalIndex, { time_of_day: e.currentTarget.value })}
                             onChange={(e) =>
                               handleUpdateSlot(slot.originalIndex, { time_of_day: e.target.value })
                             }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect,useRef } from "react";
 import { Link, useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Sparkles,
@@ -73,6 +73,7 @@ export default function AIStudio() {
   // Studio Mode: 'topic' | 'pdf'
   const [studioParams, setStudioParams] = useSearchParams();
   const activeTab = studioParams.get('tab') === 'automation' ? 'automation' : studioParams.get('tab') === 'pdf' ? 'pdf' : 'topic';
+  const storedAutoPosts = useQuery({queryKey:["studio-autopilot-posts",s.workspace.id],queryFn:()=>request<{plans:any[]}>("/knowledge-automation"),enabled:!demo && activeTab === "pdf",refetchInterval:15000});
   const setActiveTab = (tab: 'topic' | 'pdf' | 'automation') => setStudioParams({tab});
 
   // Topic Mode state
@@ -1447,6 +1448,18 @@ export default function AIStudio() {
               <h2 style={{ fontSize: "1.1rem", fontWeight: 600, margin: 0 }}>Generated Post Variants</h2>
               <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Preview & refine copy for each platform</span>
             </div>
+            {activeTab === "pdf" && <details className="studio-stored-posts" open>
+              <summary>Stored Auto-pilot posts ({storedAutoPosts.data?.plans.filter(post=>post.content_id).length || 0})</summary>
+              <p>Generated posts stay saved here and in Content library. Scheduled does not mean published.</p>
+              {storedAutoPosts.isError ? <p role="alert">Unable to load stored posts. Refresh to retry.</p> : storedAutoPosts.data?.plans.filter(post=>post.content_id).length ? <div style={{maxHeight:260,overflowY:"auto"}}>{storedAutoPosts.data.plans.filter(post=>post.content_id).map(post=><button type="button" key={post.id} onClick={()=>{
+                const targets=(post.platforms || []).filter((platform:string)=>["LinkedIn","Instagram","Facebook","Telegram","X","YouTube"].includes(platform)) as Platform[];
+                setGeneratedTitle(post.title || "Saved post");setSelectedPlatforms(targets);setActivePreviewPlatform(targets[0] || "LinkedIn");
+                setGeneratedVariants(Object.fromEntries(targets.map(platform=>[platform,typeof post.variants?.[platform] === "string" ? post.variants[platform] : post.variants?.[platform]?.caption || ""])));
+                const visual=targets.map(platform=>post.variants?.[platform]).find(variant=>variant?.mediaAssetId && variant?.mediaUrl);
+                setAttachedVisual(visual ? {assetId:visual.mediaAssetId,url:visual.mediaUrl,filename:"Saved autopilot visual"} : null);
+              }}><strong>{post.title}</strong><small>{post.content_status} · {post.scheduled_at ? new Date(post.scheduled_at).toLocaleString() : "Not scheduled"}</small></button>)}</div> : <p>No Auto-pilot posts stored yet. Generation history will show why work is pending or failed.</p>}
+              <Link to="/app/library">Open all stored posts →</Link>
+            </details>}
 
             {/* Platform Variant Tabs */}
             <div className="preview-tabs" style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "16px", paddingBottom: "4px" }}>
