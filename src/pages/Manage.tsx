@@ -113,8 +113,34 @@ export function Channels() {
   const metaPending = searchParams.get('meta_pending');
   useEffect(() => {
     if (!metaPending) return;
-    request<{pages: typeof metaPages}>('/social/meta/pages/' + metaPending).then(result => { setMetaPages(result.pages); setMetaPage(result.pages[0]?.id || ''); }).catch(err => setError(err.message));
-  }, [metaPending]);
+    request<{pages: typeof metaPages}>('/social/meta/pages/' + metaPending)
+      .then(async (result) => {
+        if (!result.pages || result.pages.length === 0) {
+          toast.error("No Facebook Pages found for this account.");
+          setSearchParams({}, { replace: true });
+          return;
+        }
+        if (result.pages.length === 1) {
+          try {
+            await request(`/social/meta/pages/${metaPending}/select`, 'POST', { pageId: result.pages[0].id });
+            toast.success("Meta accounts (Facebook & Instagram) connected successfully!");
+            await query.invalidateQueries({ queryKey: ["workspace"] });
+          } catch (selErr) {
+            toast.error((selErr as Error).message);
+          } finally {
+            setSearchParams({}, { replace: true });
+          }
+          return;
+        }
+        setMetaPages(result.pages);
+        setMetaPage(result.pages[0]?.id || '');
+      })
+      .catch((err) => {
+        toast.error((err as Error).message);
+        setError((err as Error).message);
+        setSearchParams({}, { replace: true });
+      });
+  }, [metaPending, query, setSearchParams]);
   const [remove, setRemove] = useState<string | null>(null);
   const canManage = ["Owner", "Admin"].includes(s?.workspace?.role || "");
   const connectedPlatforms = platforms.filter(p => (s?.accounts || []).some(a =>
@@ -474,6 +500,58 @@ export function Channels() {
         >
           Disconnect channel
         </Button>
+      </Modal>
+
+      <Modal
+        open={metaPages.length > 1}
+        onOpenChange={(o) => {
+          if (!o) {
+            setMetaPages([]);
+            setMetaPage('');
+            setSearchParams({}, { replace: true });
+          }
+        }}
+        title="Select Facebook Page"
+        description="Choose the Facebook Page you want to connect to this workspace."
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <label>
+            Facebook Page
+            <select
+              value={metaPage}
+              onChange={(e) => setMetaPage(e.target.value)}
+              style={{ width: "100%", padding: "8px 12px", marginTop: "6px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--text)" }}
+            >
+              {metaPages.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} {p.instagram ? `(@${p.instagram})` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button
+            variant="primary"
+            disabled={busy || !metaPage}
+            onClick={async () => {
+              try {
+                setBusy(true);
+                await request(`/social/meta/pages/${metaPending}/select`, "POST", { pageId: metaPage });
+                toast.success("Meta account connected successfully!");
+                setMetaPages([]);
+                setMetaPage('');
+                setSearchParams({}, { replace: true });
+                await query.invalidateQueries({ queryKey: ["workspace"] });
+              } catch (e) {
+                toast.error((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+            style={{ width: "100%", justifyContent: "center" }}
+          >
+            {busy ? "Connecting…" : "Connect Selected Page"}
+          </Button>
+        </div>
       </Modal>
     </>
   );

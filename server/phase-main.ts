@@ -118,7 +118,7 @@ class ErrorFilter implements ExceptionFilter {
       message = e.message;
     } else {
       status = 500;
-      message = "The request could not be completed. Please try again.";
+      message = (e instanceof Error && e.message) ? e.message : "The request could not be completed. Please try again.";
     }
 
     // Only log unexpected server faults (>= 500) as api_error.

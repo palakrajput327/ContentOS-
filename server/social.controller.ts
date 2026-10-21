@@ -664,7 +664,58 @@ export class SocialController {
       if (!long.access_token)
         throw new Error("Meta did not return an access token.");
       await metaPermissions(long.access_token);
-      await metaPages(long.access_token);
+      const pages = await metaPages(long.access_token);
+      if (!pages.length) {
+        throw new Error("No Facebook Pages found. Make sure your Facebook profile has admin access to at least one Facebook Page.");
+      }
+
+      // If only 1 page exists, connect it and its linked Instagram immediately!
+      if (pages.length === 1) {
+        const page = pages[0];
+        const ig = page.instagram_business_account;
+        await transaction(async (db) => {
+          for (const account of [
+            { platform: "facebook", id: page.id, name: page.name },
+            ...(ig?.id
+              ? [
+                  {
+                    platform: "instagram",
+                    id: ig.id,
+                    name: ig.username ? "@" + ig.username : "Instagram Business",
+                  },
+                ]
+              : []),
+          ]) {
+            const saved = await db.query(
+              `INSERT INTO social_accounts(id,workspace_id,platform,provider_id,name,state,last_sync) VALUES($1,$2,$3,$4,$5,'CONNECTED',NOW()) ON CONFLICT(workspace_id,platform) DO UPDATE SET provider_id=EXCLUDED.provider_id,name=EXCLUDED.name,state='CONNECTED',last_sync=NOW() RETURNING id`,
+              [
+                randomUUID(),
+                record.workspace_id,
+                account.platform,
+                account.id,
+                account.name,
+              ],
+            );
+            await db.query(
+              "INSERT INTO social_account_tokens(account_id,ciphertext,expires_at) VALUES($1,$2,NULL) ON CONFLICT(account_id) DO UPDATE SET ciphertext=EXCLUDED.ciphertext,expires_at=NULL",
+              [saved.rows[0].id, encryptToken(page.access_token, record.workspace_id)],
+            );
+            await audit(
+              db,
+              record.workspace_id,
+              record.user_id,
+              "connected_channel_oauth",
+              "social_account",
+              saved.rows[0].id,
+              account.name,
+              null,
+              { platform: account.platform, pageId: page.id, instagramId: ig?.id || null },
+            );
+          }
+        });
+        return res.redirect(appUrl + "/app/channels?connected=meta");
+      }
+
       const id = randomUUID();
       await pool.query(
         "DELETE FROM meta_oauth_pending WHERE expires_at < NOW()",
@@ -689,14 +740,20 @@ export class SocialController {
   private async metaPending(r: AuthedRequest, id: string) {
     z.string().uuid().parse(id);
     const result = await pool.query(
-      "SELECT * FROM meta_oauth_pending WHERE id=$1 AND workspace_id=$2 AND user_id=$3 AND expires_at > NOW()",
-      [id, r.workspace.id, r.user.id],
+      "SELECT * FROM meta_oauth_pending WHERE id=$1 AND expires_at > NOW()",
+      [id],
     );
     if (!result.rowCount)
       throw new BadRequestException(
         "Meta Page selection expired. Please Connect Meta again.",
       );
-    return result.rows[0];
+    const pending = result.rows[0];
+    if (pending.workspace_id !== r.workspace.id) {
+      throw new BadRequestException(
+        "Meta OAuth session belongs to a different workspace.",
+      );
+    }
+    return pending;
   }
   @WorkspaceRequired()
   @Get("social/meta/pages/:id")
@@ -704,7 +761,7 @@ export class SocialController {
     assertPermission(r.workspace.role, "manage");
     const pending = await this.metaPending(r, id);
     const pages = await metaPages(
-      decryptToken(pending.ciphertext, r.workspace.id),
+      decryptToken(pending.ciphertext, pending.workspace_id),
     );
     return {
       pages: pages.map((p) => ({
@@ -727,7 +784,7 @@ export class SocialController {
       .parse(input);
     const pending = await this.metaPending(r, id);
     const pages = await metaPages(
-      decryptToken(pending.ciphertext, r.workspace.id),
+      decryptToken(pending.ciphertext, pending.workspace_id),
     );
     const page = pages.find((p) => p.id === pageId);
     if (!page)
