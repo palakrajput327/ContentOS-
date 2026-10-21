@@ -365,7 +365,7 @@ export class KnowledgeAutomationService {
         );
         const safetyResult = validateContentSafety(result.title, result.variants, evidence);
         if (!safetyResult.safe) throw new Error(safetyResult.reason || "Generated post failed source safety checks.");
-        const generatedVisual = reservation.autopilot ? await this.generateVisual({workspaceId,actorId:reservation.actorId,topicHash:reservation.topic.hash,title:result.title,caption:result.variants[reservation.platforms[0]]}) : null;
+        const generatedVisual = null;
         await inTransaction(this.database, async (db) => {
           await db.query("SELECT id FROM workspaces WHERE id=$1 FOR UPDATE", [
             workspaceId,
@@ -413,24 +413,74 @@ export class KnowledgeAutomationService {
           }
           const id = randomUUID();
 
-          // Auto-pair extracted PDF image if available
+          // Auto-pair extracted PDF image by default
+          let autoVisualUrl: string | undefined;
+          let autoVisualAssetId: string | undefined;
+
+          const preferredSourceAssetId =
+            evidence.find((e: any) => e.sourceMediaAssetId)?.sourceMediaAssetId ||
+            reservation.topic.sources?.find((s: any) => s.sourceMediaAssetId)?.sourceMediaAssetId;
+
           const docId = evidence[0]?.documentId || reservation.topic.sources[0]?.documentId;
-          let autoVisualUrl: string | undefined = generatedVisual?.url;
-          let autoVisualAssetId: string | undefined = generatedVisual?.assetId;
-          if (!generatedVisual && docId) {
+          const pageNum = evidence[0]?.pageStart || reservation.topic.sources[0]?.pageStart;
+
+          if (preferredSourceAssetId) {
             const imgRow = (
               await db.query(
-                `SELECT m.bucket, m.object_key, m.id FROM document_source_media dsm
-                 JOIN media_assets m ON m.id = dsm.media_asset_id
-                 WHERE dsm.document_id = $1 AND dsm.workspace_id = $2 AND m.deleted_at IS NULL
-                 ORDER BY dsm.page_number ASC LIMIT 1`,
-                [docId, workspaceId],
+                `SELECT m.bucket, m.object_key, m.id FROM media_assets m
+                 WHERE m.id = $1 AND m.workspace_id = $2 AND m.deleted_at IS NULL`,
+                [preferredSourceAssetId, workspaceId],
               )
             ).rows[0];
             if (imgRow) {
               const { provider } = getStorageProvider();
               autoVisualUrl = await provider.getSignedDownloadUrl(imgRow.bucket, imgRow.object_key, 7 * 86400);
               autoVisualAssetId = imgRow.id;
+            }
+          }
+
+          if (!autoVisualAssetId && docId) {
+            let imgRow;
+            if (pageNum) {
+              imgRow = (
+                await db.query(
+                  `SELECT m.bucket, m.object_key, m.id FROM document_source_media dsm
+                   JOIN media_assets m ON m.id = dsm.media_asset_id
+                   WHERE dsm.document_id = $1 AND dsm.workspace_id = $2 AND dsm.page_number = $3 AND m.deleted_at IS NULL
+                   LIMIT 1`,
+                  [docId, workspaceId, pageNum],
+                )
+              ).rows[0];
+            }
+            if (!imgRow) {
+              imgRow = (
+                await db.query(
+                  `SELECT m.bucket, m.object_key, m.id FROM document_source_media dsm
+                   JOIN media_assets m ON m.id = dsm.media_asset_id
+                   WHERE dsm.document_id = $1 AND dsm.workspace_id = $2 AND m.deleted_at IS NULL
+                   ORDER BY dsm.page_number ASC LIMIT 1`,
+                  [docId, workspaceId],
+                )
+              ).rows[0];
+            }
+            if (imgRow) {
+              const { provider } = getStorageProvider();
+              autoVisualUrl = await provider.getSignedDownloadUrl(imgRow.bucket, imgRow.object_key, 7 * 86400);
+              autoVisualAssetId = imgRow.id;
+            }
+          }
+
+          if (!autoVisualAssetId && reservation.autopilot) {
+            const gen = await this.generateVisual({
+              workspaceId,
+              actorId: reservation.actorId,
+              topicHash: reservation.topic.hash,
+              title: result.title,
+              caption: result.variants[reservation.platforms[0]],
+            });
+            if (gen) {
+              autoVisualUrl = gen.url;
+              autoVisualAssetId = gen.assetId;
             }
           }
 

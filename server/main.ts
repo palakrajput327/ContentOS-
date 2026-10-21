@@ -189,7 +189,34 @@ export async function bootstrap() {
       : res.sendFile(`${root}/index.html`),
   );
   await app.listen(Number(process.env.PORT || 3001), "0.0.0.0");
+
+  // Built-in Auto-Scheduler Loop: Checks every 30s for due posts and publishes automatically
+  const autoPublishInterval = setInterval(async () => {
+    try {
+      const { relayScheduledPosts } = await import("./cron-tasks.js");
+      await relayScheduledPosts(pool);
+
+      const duePosts = (await pool.query(
+        `SELECT id FROM scheduled_posts 
+         WHERE state = 'ENQUEUED' AND execute_at <= NOW()
+         ORDER BY execute_at ASC LIMIT 10`
+      )).rows;
+
+      for (const sp of duePosts) {
+        const { executePublishRecord } = await import("./publishing.js");
+        try {
+          await executePublishRecord(sp.id, { attemptsMade: 0, maxAttempts: 3 });
+        } catch (postErr) {
+          console.warn(`[ContentOS] Auto-publish failed for post ${sp.id}:`, (postErr as Error).message);
+        }
+      }
+    } catch (schedErr) {
+      console.warn("[ContentOS] Auto-scheduler poller warning:", (schedErr as Error).message);
+    }
+  }, 30000);
+
   const shutdown = async () => {
+    clearInterval(autoPublishInterval);
     await app.close();
     await limiter.quit();
     await pool.end();

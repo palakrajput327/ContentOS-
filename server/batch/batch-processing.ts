@@ -1,3 +1,4 @@
+import { getStorageProvider } from '../storage/storage.factory.js';
 import { assertDailySlot } from '../calendar/daily-posting.js';
 import { randomUUID } from "node:crypto";
 import { pool, transaction, audit, type DB } from "../db.js";
@@ -21,7 +22,50 @@ export async function executeChildItem(db: DB, item: any, workspaceId: string, s
       const platforms = payload.platforms || ["LinkedIn"];
       const brand=(await db.query('SELECT data FROM brand_kits WHERE workspace_id=$1',[workspaceId])).rows[0]?.data || {};
       const result = await generateCaptions(topic, tone, goal, platforms,brand);
-      const variants=Object.fromEntries(Object.entries(result.variants).map(([platform,caption])=>[platform,{caption,metadata:{sourceEvidence:payload.sourceEvidence || []}}]));
+
+      // By default: Always use images extracted from PDF if available in source evidence
+      let autoVisualUrl: string | undefined;
+      let autoVisualAssetId: string | undefined;
+      const evidence = payload.sourceEvidence || [];
+      const preferredAssetId = evidence.find((e: any) => e.sourceMediaAssetId)?.sourceMediaAssetId;
+      const docId = evidence[0]?.documentId;
+      const pageNum = evidence[0]?.pageStart;
+
+      if (preferredAssetId) {
+        const imgRow = (await db.query('SELECT bucket, object_key, id FROM media_assets WHERE id=$1 AND workspace_id=$2 AND deleted_at IS NULL', [preferredAssetId, workspaceId])).rows[0];
+        if (imgRow) {
+          const { provider } = getStorageProvider();
+          autoVisualUrl = await provider.getSignedDownloadUrl(imgRow.bucket, imgRow.object_key, 7 * 86400);
+          autoVisualAssetId = imgRow.id;
+        }
+      }
+      if (!autoVisualAssetId && docId) {
+        let imgRow;
+        if (pageNum) {
+          imgRow = (await db.query('SELECT m.bucket, m.object_key, m.id FROM document_source_media dsm JOIN media_assets m ON m.id = dsm.media_asset_id WHERE dsm.document_id = $1 AND dsm.workspace_id = $2 AND dsm.page_number = $3 AND m.deleted_at IS NULL LIMIT 1', [docId, workspaceId, pageNum])).rows[0];
+        }
+        if (!imgRow) {
+          imgRow = (await db.query('SELECT m.bucket, m.object_key, m.id FROM document_source_media dsm JOIN media_assets m ON m.id = dsm.media_asset_id WHERE dsm.document_id = $1 AND dsm.workspace_id = $2 AND m.deleted_at IS NULL ORDER BY dsm.page_number ASC LIMIT 1', [docId, workspaceId])).rows[0];
+        }
+        if (imgRow) {
+          const { provider } = getStorageProvider();
+          autoVisualUrl = await provider.getSignedDownloadUrl(imgRow.bucket, imgRow.object_key, 7 * 86400);
+          autoVisualAssetId = imgRow.id;
+        }
+      }
+
+      const variants = Object.fromEntries(
+        Object.entries(result.variants).map(([platform, caption]) => [
+          platform,
+          {
+            caption,
+            metadata: { sourceEvidence: payload.sourceEvidence || [] },
+            ...(autoVisualUrl && ["Instagram", "LinkedIn", "Facebook", "Telegram"].includes(platform)
+              ? { mediaUrl: autoVisualUrl, mediaType: "image", mediaAssetId: autoVisualAssetId }
+              : {}),
+          },
+        ])
+      );
       const saved=await executeChildItem(db,{...item,operation_type:'bulk_save',payload:{title:result.title,body:Object.values(result.variants)[0] || topic,platforms,variants,userId:payload.userId}},workspaceId,true);
       return {...saved,title:result.title,variants:result.variants};
     }

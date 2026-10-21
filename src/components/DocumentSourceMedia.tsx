@@ -41,12 +41,14 @@ export function DocumentSourceMedia({
   documentId,
   documentStatus,
   canExtract,
+  selectedAssetId,
   onKnowledgeChanged,
   onSelectVisual,
 }: {
   documentId: string;
   documentStatus: string;
   canExtract: boolean;
+  selectedAssetId?: string;
   onKnowledgeChanged?: (documentId: string) => void;
   onSelectVisual?: (visual: { assetId: string; url: string; filename: string }) => void;
 }) {
@@ -152,6 +154,14 @@ export function DocumentSourceMedia({
         if (cancelled) return;
         setData(value);
         setError("");
+        // Auto-select first extracted PDF image by default if none selected yet
+        if (value.assets?.length > 0 && onSelectVisual && !selectedAssetId) {
+          onSelectVisual({
+            assetId: value.assets[0].assetId,
+            url: value.assets[0].url,
+            filename: `PDF page ${value.assets[0].pageNumber} visual`,
+          });
+        }
         // Refresh signed links while open as well as processing progress.
         timer = setTimeout(
           load,
@@ -297,8 +307,14 @@ export function DocumentSourceMedia({
                     </Button>
                   )}
                   <Button
-                    variant="primary"
-                    style={{ marginTop: "6px", width: "100%" }}
+                    variant={selectedAssetId === a.assetId ? "secondary" : "primary"}
+                    style={{
+                      marginTop: "6px",
+                      width: "100%",
+                      borderColor: selectedAssetId === a.assetId ? "var(--success)" : undefined,
+                      color: selectedAssetId === a.assetId ? "var(--success)" : undefined,
+                      background: selectedAssetId === a.assetId ? "rgba(16, 185, 129, 0.15)" : undefined,
+                    }}
                     onClick={() => {
                       onSelectVisual?.({
                         assetId: a.assetId,
@@ -308,7 +324,7 @@ export function DocumentSourceMedia({
                       toast.success(`Attached page ${a.pageNumber} visual as post creative!`);
                     }}
                   >
-                    ✨ Use as Post Visual
+                    {selectedAssetId === a.assetId ? "✓ Active Post Visual (Default)" : "✨ Use as Post Visual"}
                   </Button>
                   {a.sourceId && (
                     <div className="source-card-actions">

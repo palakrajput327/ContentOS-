@@ -536,6 +536,27 @@ export default function AIStudio() {
   async function handleSaveToLibrary(generation?: {title:string;variants:Partial<Record<Platform,string>>}, navigate = true, visual = attachedVisual) {
     try {
       setError(null);
+      let visualToUse = visual;
+      if (!visualToUse && activeTab === 'pdf' && selectedDocId) {
+        try {
+          const media = await request<any>(`/documents/${selectedDocId}/source-media`);
+          if (media.assets && media.assets.length > 0) {
+            const selectedItems = knowledgeItems.filter(k => selectedKnowledgeIds.includes(k.id));
+            const targetPage = selectedItems.find(k => k.page_start)?.page_start;
+            const matchedAsset = (targetPage ? media.assets.find((a: any) => a.pageNumber === targetPage) : null) || media.assets[0];
+            if (matchedAsset) {
+              visualToUse = {
+                assetId: matchedAsset.assetId,
+                url: matchedAsset.url,
+                filename: `PDF page ${matchedAsset.pageNumber} visual`,
+              };
+              setAttachedVisual(visualToUse);
+            }
+          }
+        } catch (e) {
+          console.warn("Could not auto-pair PDF visual:", e);
+        }
+      }
       const titleToSave = generation?.title || generatedTitle;
       const variantsToSave = generation?.variants || generatedVariants;
       if (!titleToSave.trim() || !Object.keys(variantsToSave).length) {
@@ -551,11 +572,11 @@ export default function AIStudio() {
       const sourceEvidence = generation ? (activeTab === 'pdf' ? knowledgeItems.filter(k=>selectedKnowledgeIds.includes(k.id)).map(k=>({documentId:selectedDocId,documentName:activeDoc?.original_filename,knowledgeId:k.id,pageStart:k.page_start,pageEnd:k.page_end,excerpt:k.source_excerpt,...visualEvidence(k)})) : []) : generatedEvidence;
       if (generation) setGeneratedEvidence(sourceEvidence);
       for (const [p, val] of Object.entries(variantsToSave)) {
-        if (visual) {
+        if (visualToUse) {
           finalVariants[p] = {
             caption: typeof val === "string" ? val : (val as any)?.caption || "",
-            mediaAssetId: visual.assetId,
-            mediaUrl: visual.url,
+            mediaAssetId: visualToUse.assetId,
+            mediaUrl: visualToUse.url,
             mediaType: "image",
             metadata: {sourceEvidence},
           };
@@ -1064,7 +1085,7 @@ export default function AIStudio() {
                 )}
 
                 {/* Active Document Status & Knowledge Extract Action */}
-                {selectedDocId && activeDoc && <DocumentSourceMedia key={selectedDocId} documentId={selectedDocId} documentStatus={activeDoc.status} canExtract={['Owner','Admin','Content Manager','Editor'].includes(s.workspace.role)} onKnowledgeChanged={id=>{if(selectedDocRef.current===id)void fetchKnowledge(id);}} onSelectVisual={visual => setAttachedVisual(visual)} />}
+                {selectedDocId && activeDoc && <DocumentSourceMedia key={selectedDocId} documentId={selectedDocId} documentStatus={activeDoc.status} canExtract={['Owner','Admin','Content Manager','Editor'].includes(s.workspace.role)} selectedAssetId={attachedVisual?.assetId} onKnowledgeChanged={id=>{if(selectedDocRef.current===id)void fetchKnowledge(id);}} onSelectVisual={visual => setAttachedVisual(visual)} />}
                 {activeDoc && (
                   <div
                     style={{
