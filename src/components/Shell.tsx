@@ -136,20 +136,24 @@ export default function Shell() {
               <Plus size={15} />
             </Link>
           </div>
-<<<<<<< Updated upstream
-          {platforms.map((p) => (
-            <NavLink
-              key={p}
-              to={`/app/channels?platform=${p}`}
-              className="nav-item channel-item"
-            >
-              <PlatformIcon platform={p} />
-              {p}
-              <span
-                className={`connection-dot ${s?.accounts?.some((a) => String(a?.platform || "").toLowerCase() === p.toLowerCase() && String(a?.state || "").toLowerCase() === "connected") ? "connected" : ""}`}
-              />
-            </NavLink>
-          ))}
+          {platforms.map((p) => {
+            const isConnected = (s?.accounts || []).some(
+              (a) => a.platform?.toLowerCase() === p.toLowerCase() && a.state?.toLowerCase() === "connected"
+            );
+            return (
+              <NavLink
+                key={p}
+                to={`/app/channels?platform=${p}`}
+                className="nav-item channel-item"
+              >
+                <PlatformIcon platform={p} />
+                <span>{p}</span>
+                <span
+                  className={`connection-dot ${isConnected ? "connected" : ""}`}
+                />
+              </NavLink>
+            );
+          })}
           <div className="nav-group">TEAM</div>
           {[
             ["members", "Members", Users],
@@ -157,12 +161,6 @@ export default function Shell() {
             ["approvals", "Approvals", CheckCheck],
           ].map(([path, label, Icon]) => {
             const I = Icon as typeof Users;
-=======
-          {platforms.map((p) => {
-            const isConnected = (s?.accounts || []).some(
-              (a) => a.platform?.toLowerCase() === p.toLowerCase() && a.state?.toLowerCase() === "connected"
-            );
->>>>>>> Stashed changes
             return (
               <NavLink
                 to={`/app/${path}`}

@@ -87,28 +87,17 @@ export interface Snapshot {
   brand: Brand;
 }
 export const statusLabel = (s: string) => s.toLowerCase().replaceAll("_", " ");
-<<<<<<< Updated upstream
 export const dateLabel = (d?: string | Date | null, tz?: string) => {
   if (!d) return "Recently";
   try {
     const date = typeof d === "string" || d instanceof Date ? new Date(d) : new Date(String(d));
-=======
-export const dateLabel = (d?: string | null, tz?: string) => {
-  if (!d) return "Recently";
-  try {
-    const date = new Date(d);
->>>>>>> Stashed changes
     if (isNaN(date.getTime())) return "Recently";
     return new Intl.DateTimeFormat("en", {
       month: "short",
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
-<<<<<<< Updated upstream
       ...(tz && tz !== "undefined" ? { timeZone: tz } : {}),
-=======
-      ...(tz ? { timeZone: tz } : {}),
->>>>>>> Stashed changes
     }).format(date);
   } catch {
     return "Recently";
