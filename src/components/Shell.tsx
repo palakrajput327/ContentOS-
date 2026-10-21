@@ -136,6 +136,7 @@ export default function Shell() {
               <Plus size={15} />
             </Link>
           </div>
+<<<<<<< Updated upstream
           {platforms.map((p) => (
             <NavLink
               key={p}
@@ -156,6 +157,12 @@ export default function Shell() {
             ["approvals", "Approvals", CheckCheck],
           ].map(([path, label, Icon]) => {
             const I = Icon as typeof Users;
+=======
+          {platforms.map((p) => {
+            const isConnected = (s?.accounts || []).some(
+              (a) => a.platform?.toLowerCase() === p.toLowerCase() && a.state?.toLowerCase() === "connected"
+            );
+>>>>>>> Stashed changes
             return (
               <NavLink
                 to={`/app/${path}`}

@@ -119,12 +119,16 @@ export function Channels() {
   const canManage = ["Owner", "Admin"].includes(s?.workspace?.role || "");
   const connectedPlatforms = platforms.filter(p => (s?.accounts || []).some(a =>
     String(a?.platform || "").toLowerCase() === p.toLowerCase() && String(a?.state || "").toUpperCase() === "CONNECTED"));
+<<<<<<< Updated upstream
   const platformParam = searchParams.get("platform");
   const visiblePlatforms = platformParam
     ? (platforms.some(p => p.toLowerCase() === platformParam.toLowerCase())
         ? platforms.filter(p => p.toLowerCase() === platformParam.toLowerCase())
         : platforms)
     : channelFilter === "connected" ? connectedPlatforms : platforms;
+=======
+  const visiblePlatforms = channelFilter === "connected" ? connectedPlatforms : platforms;
+>>>>>>> Stashed changes
 
   useEffect(() => {
     const connectedParam = searchParams.get("connected");
