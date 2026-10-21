@@ -225,15 +225,32 @@ export async function publishMeta(
       return start.video_id;
     }
     submitted = true;
+    let postParams: Record<string, string> | FormData;
+    if (type === "video") {
+      postParams = { file_url: url, description: post.text };
+    } else if (type === "image") {
+      let form: FormData | null = null;
+      try {
+        const imgRes = await fetch(url, { signal: AbortSignal.timeout(20000) });
+        if (imgRes.ok) {
+          const blob = await imgRes.blob();
+          form = new FormData();
+          form.append("source", blob, "photo.png");
+          if (post.text) form.append("caption", post.text);
+        }
+      } catch {
+        // Fall back to url parameter if direct fetch fails
+      }
+      postParams = form || { url, caption: post.text };
+    } else {
+      postParams = { message: post.text };
+    }
+
     const result = await metaRequest(
       post.destination +
         (type === "video" ? "/videos" : type === "image" ? "/photos" : "/feed"),
       token,
-      type === "video"
-        ? { file_url: url, description: post.text }
-        : type === "image"
-          ? { url, caption: post.text }
-          : { message: post.text },
+      postParams,
       "POST",
       type === "video" ? "graph-video.facebook.com" : "graph.facebook.com",
     );

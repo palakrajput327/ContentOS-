@@ -27,7 +27,7 @@ export class MetaGraphError extends Error {
 export async function metaRequest(
   path: string,
   token: string,
-  params: Record<string, string> = {},
+  params: Record<string, string> | FormData = {},
   method = "GET",
   host: "graph.facebook.com" | "graph-video.facebook.com" = "graph.facebook.com",
 ): Promise<any> {
@@ -37,10 +37,15 @@ export async function metaRequest(
   const options: RequestInit = {
     method,
     headers: { Authorization: "Bearer " + token },
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(45000),
   };
-  if (method === "GET") url.search = new URLSearchParams(params).toString();
-  else options.body = new URLSearchParams(params);
+  if (method === "GET") {
+    url.search = new URLSearchParams(params as Record<string, string>).toString();
+  } else if (typeof FormData !== "undefined" && params instanceof FormData) {
+    options.body = params;
+  } else {
+    options.body = new URLSearchParams(params as Record<string, string>);
+  }
   let response: Response;
   try { response = await fetch(url, options); }
   catch { throw new Error(`Meta ${path} request could not complete. Check connectivity and retry.`); }
