@@ -210,6 +210,14 @@ export async function bootstrap() {
           console.warn(`[ContentOS] Auto-publish failed for post ${sp.id}:`, (postErr as Error).message);
         }
       }
+
+      // Immediately dispatch notification emails to user's registered Gmail
+      try {
+        const { deliverEmails } = await import("./mail.js");
+        await deliverEmails({ limit: 10 });
+      } catch (mailErr) {
+        console.warn("[ContentOS] Auto-scheduler email dispatch warning:", (mailErr as Error).message);
+      }
     } catch (schedErr) {
       console.warn("[ContentOS] Auto-scheduler poller warning:", (schedErr as Error).message);
     }

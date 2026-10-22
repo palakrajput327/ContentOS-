@@ -345,6 +345,7 @@ export class KnowledgeAutomationService {
           proposedAt: at,
           requireApproval: ws.require_approval !== false,
           autopilot: !!settings.autopilot_enabled,
+          posterStyle: settings.poster_style || 'DIRECT',
         };
       });
       if (!reservation) break;
@@ -481,6 +482,54 @@ export class KnowledgeAutomationService {
             if (gen) {
               autoVisualUrl = gen.url;
               autoVisualAssetId = gen.assetId;
+            }
+          }
+
+          // Composite poster creation: when user chooses BRANDED_CANVAS mode
+          if (autoVisualAssetId && reservation.posterStyle === 'BRANDED_CANVAS') {
+            try {
+              const { renderSourcePoster } = await import("../documents/source-poster.js");
+              const { uploadManagedMedia } = await import("../storage/managed-media.js");
+              const { provider, bucket } = getStorageProvider();
+              const assetRow = (await db.query("SELECT bucket, object_key FROM media_assets WHERE id = $1", [autoVisualAssetId])).rows[0];
+              if (assetRow) {
+                const stream = await provider.read(assetRow.bucket, assetRow.object_key);
+                const chunks: Buffer[] = [];
+                for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+                const originalBuffer = Buffer.concat(chunks);
+                const rendered = await renderSourcePoster(
+                  originalBuffer,
+                  {
+                    headline: result.title.slice(0, 100),
+                    subtitle: (evidence[0]?.excerpt || result.title).slice(0, 180),
+                    cta: reservation.brand?.cta || "",
+                    format: "square",
+                    primaryColor: reservation.brand?.primary_color || "#704bd6",
+                  },
+                  reservation.brand || {}
+                );
+                const compAssetId = randomUUID();
+                const compKey = `workspaces/${workspaceId}/branded-posters/${compAssetId}.jpg`;
+                const uploaded = await uploadManagedMedia(
+                  {
+                    assetId: compAssetId,
+                    workspaceId,
+                    userId: reservation.actorId,
+                    bucket,
+                    objectKey: compKey,
+                    body: rendered.buffer,
+                    mimeType: "image/jpeg",
+                    filename: `branded-poster-${compAssetId.slice(0, 8)}.jpg`,
+                    type: "IMAGE",
+                    provider,
+                  },
+                  db
+                );
+                autoVisualAssetId = uploaded;
+                autoVisualUrl = await provider.getSignedDownloadUrl(bucket, compKey, 7 * 86400);
+              }
+            } catch (canvasErr) {
+              console.warn("[ContentOS] Composite poster generation failed, using direct PDF visual:", (canvasErr as Error).message);
             }
           }
 
