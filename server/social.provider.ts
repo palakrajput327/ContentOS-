@@ -259,14 +259,79 @@ export class TelegramProvider implements SocialProvider {
 
     try {
       if (request.mediaUrl) {
-        const mediaInfo = await getMediaBuffer(request.mediaUrl);
+        let mediaInfo = await getMediaBuffer(request.mediaUrl);
+        
+        // If media is missing, unreadable, or SVG, generate a crisp high-res 1080x1080 branded JPEG poster on the fly
+        if (!mediaInfo || mediaInfo.mimeType.includes('svg') || mediaInfo.buffer.length < 1000) {
+          try {
+            const { createCanvas } = await import('@napi-rs/canvas');
+            const canvas = createCanvas(1080, 1080);
+            const ctx = canvas.getContext('2d');
+            
+            const grad = ctx.createLinearGradient(0, 0, 1080, 1080);
+            grad.addColorStop(0, '#0f172a');
+            grad.addColorStop(0.5, '#1e1b4b');
+            grad.addColorStop(1, '#312e81');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 1080, 1080);
+
+            // Aesthetic header accent
+            ctx.fillStyle = '#6366f1';
+            ctx.fillRect(80, 100, 140, 8);
+
+            // Render post text
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 46px sans-serif';
+            const cleanText = (request.text || 'ContentOS Autonomous Post').replace(/#\S+/g, '').trim().slice(0, 160);
+            const words = cleanText.split(' ');
+            let line = '';
+            let y = 200;
+            for (const w of words) {
+              if ((line + w).length > 28) {
+                ctx.fillText(line, 80, y);
+                line = w + ' ';
+                y += 60;
+                if (y > 800) break;
+              } else {
+                line += w + ' ';
+              }
+            }
+            if (line && y <= 800) ctx.fillText(line, 80, y);
+
+            // Hashtag branding footer
+            ctx.fillStyle = '#a5b4fc';
+            ctx.font = 'bold 32px sans-serif';
+            ctx.fillText('#hindustansoftwaresolution', 80, 980);
+
+            const jpegBuf = await canvas.encode('jpeg');
+            mediaInfo = { buffer: jpegBuf, mimeType: 'image/jpeg' };
+          } catch (canvasErr) {
+            console.warn('[Telegram Canvas Fallback]', canvasErr);
+          }
+        }
+
         if (!mediaInfo) return {success:false,publishedAt:new Date(),error:'Telegram attached media could not be read. Re-upload the media and retry.'};
         if (request.text.length > 1024) return {success:false,publishedAt:new Date(),error:'Telegram media caption exceeds 1024 characters. Shorten the Telegram caption.'};
+
+        // Convert WebP images to JPEG format for Telegram API compatibility
+        if (mediaInfo.mimeType === 'image/webp') {
+          try {
+            const { loadImage, createCanvas } = await import('@napi-rs/canvas');
+            const img = await loadImage(mediaInfo.buffer);
+            const canvas = createCanvas(img.width, img.height);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const jpegBuf = await canvas.encode('jpeg');
+            mediaInfo = { buffer: jpegBuf, mimeType: 'image/jpeg' };
+          } catch (e) {
+            console.warn('[Telegram Provider] WebP to JPEG conversion fallback:', e);
+          }
+        }
 
         const isVideo = mediaInfo.mimeType.startsWith('video/') || request.mediaType === 'video' || request.mediaUrl.toLowerCase().includes('.mp4');
         const endpoint = isVideo ? 'sendVideo' : 'sendPhoto';
         const paramName = isVideo ? 'video' : 'photo';
-        const filename = isVideo ? 'video.mp4' : (mediaInfo.mimeType === 'image/jpeg' ? 'photo.jpg' : 'photo.png');
+        const filename = isVideo ? 'video.mp4' : 'photo.jpg';
 
         const formData = new FormData();
         formData.append("chat_id", chatId);
@@ -274,7 +339,7 @@ export class TelegramProvider implements SocialProvider {
           type: mediaInfo.mimeType,
         });
         formData.append(paramName, blob, filename);
-        formData.append("caption", request.text);
+        formData.append("caption", request.text.slice(0, 1024));
 
         const res = await fetch(
           `https://api.telegram.org/bot${botToken}/${endpoint}`,
