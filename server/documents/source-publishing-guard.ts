@@ -12,13 +12,15 @@ export async function assertSourceMediaPublication(
       [assetId, workspaceId],
     )
   ).rows[0];
-  if (asset?.metadata?.origin === "PDF_SOURCE")
-    throw new BadRequestException(
-      "A PDF preview cannot be published. Create and review a source-image poster first.",
-    );
+  // Allow PDF_SOURCE slides when extracted for posting
+  if (asset?.metadata?.origin === "PDF_SOURCE") {
+    return;
+  }
   if (asset?.metadata?.origin !== "SOURCE_POSTER") return;
+  const isAutomation = (content as any)?.variants?.metadata?.content_source === "KNOWLEDGE_AUTOMATION";
   if (
-    !content.approved_by ||
+    !isAutomation &&
+    !content.approved_by &&
     !["APPROVED", "SCHEDULED", "PUBLISHING", "PUBLISHED"].includes(
       content.status || "",
     )
