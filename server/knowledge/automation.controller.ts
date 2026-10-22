@@ -31,7 +31,7 @@ export const automationSettingsSchema = z
         (p) => new Set(p).size === p.length,
         "Choose each platform once.",
       ),
-    postingTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default("10:00").optional(),
+    postingTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(,\s*([01]\d|2[0-3]):[0-5]\d)*$/).default("10:00").optional(),
     posterStyle: z.enum(["DIRECT", "BRANDED_CANVAS"]).default("DIRECT").optional(),
   })
   .strict();

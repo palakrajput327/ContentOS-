@@ -285,15 +285,30 @@ export class KnowledgeAutomationService {
             const capacity=await getDailyCapacity(db,workspaceId,day);
             const pendingCount=pending.filter(r=>localDate(new Date(r.proposed_at),ws.timezone)===day).length;
             if (pendingCount>=capacity.remaining) continue;
-            const [hours,minutes]=(settings.posting_time || "10:00").split(":").map(Number);
-            for(let slot=0;slot<capacity.target;slot++) {
-              const total=hours*60+minutes+slot*30;
-              if(total>=1440) break;
-              const localTime=day+"T"+String(Math.floor(total/60)).padStart(2,"0")+":"+String(total%60).padStart(2,"0")+":00";
-              const value=(await db.query("SELECT ($1::timestamp AT TIME ZONE $2) AS at",[localTime,ws.timezone])).rows[0].at;
-              const timestamp=new Date(value).getTime();
-              if(timestamp<=Date.now()+60000 || occupied.some(value=>Math.abs(value-timestamp)<1800000)) continue;
-              at=new Date(timestamp).toISOString();break;
+            const rawSlots = (settings.posting_time || "10:00").split(",").map((s: string) => s.trim());
+            for (const rawSlot of rawSlots) {
+              const [hours, minutes] = rawSlot.split(":").map(Number);
+              const total = hours * 60 + minutes;
+              if (total >= 1440) continue;
+              const localTime = day + "T" + String(Math.floor(total / 60)).padStart(2, "0") + ":" + String(total % 60).padStart(2, "0") + ":00";
+              const value = (await db.query("SELECT ($1::timestamp AT TIME ZONE $2) AS at", [localTime, ws.timezone])).rows[0].at;
+              const timestamp = new Date(value).getTime();
+              if (timestamp <= Date.now() + 60000 || occupied.some((val: number) => Math.abs(val - timestamp) < 1800000)) continue;
+              at = new Date(timestamp).toISOString();
+              break;
+            }
+            if (!at) {
+              const [hours, minutes] = rawSlots[0].split(":").map(Number);
+              for (let slot = 0; slot < capacity.target; slot++) {
+                const total = hours * 60 + minutes + slot * 30;
+                if (total >= 1440) break;
+                const localTime = day + "T" + String(Math.floor(total / 60)).padStart(2, "0") + ":" + String(total % 60).padStart(2, "0") + ":00";
+                const value = (await db.query("SELECT ($1::timestamp AT TIME ZONE $2) AS at", [localTime, ws.timezone])).rows[0].at;
+                const timestamp = new Date(value).getTime();
+                if (timestamp <= Date.now() + 60000 || occupied.some((val: number) => Math.abs(val - timestamp) < 1800000)) continue;
+                at = new Date(timestamp).toISOString();
+                break;
+              }
             }
           }
         }

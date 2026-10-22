@@ -340,14 +340,17 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
                   }
                 }}
               >
+                <option value="15:00,16:00,17:00">⚡ 03:00 PM, 04:00 PM & 05:00 PM (Triple Slots)</option>
+                <option value="15:00">03:00 PM (Afternoon Prime)</option>
+                <option value="16:00">04:00 PM (Evening Teaser)</option>
+                <option value="17:00">05:00 PM (Rush Hour)</option>
+                <option value="18:00">06:00 PM (Peak Prime)</option>
                 <option value="08:00">08:00 AM</option>
                 <option value="09:00">09:00 AM</option>
-                <option value="10:00">10:00 AM (Recommended)</option>
+                <option value="10:00">10:00 AM</option>
                 <option value="11:00">11:00 AM</option>
                 <option value="12:00">12:00 PM</option>
                 <option value="14:00">02:00 PM</option>
-                <option value="16:00">04:00 PM</option>
-                <option value="18:00">06:00 PM (Target Slot)</option>
                 <option value="20:00">08:00 PM</option>
               </select>
             </div>
