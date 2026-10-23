@@ -80,7 +80,7 @@ export class AnalyticsController {
          FROM content
          WHERE workspace_id = $1
            AND created_at >= ${intervalSql}
-           AND ($2::text IS NULL OR $2 = ANY(platforms))`,
+           AND ($2::text IS NULL OR platforms ? $2)`,
         [w, platformFilter]
       ),
 
@@ -94,7 +94,7 @@ export class AnalyticsController {
       pool.query(
         `SELECT id, title, status, platforms, created_at, scheduled_at 
          FROM content 
-         WHERE workspace_id = $1 AND ($2::text IS NULL OR $2 = ANY(platforms))
+         WHERE workspace_id = $1 AND ($2::text IS NULL OR platforms ? $2)
          ORDER BY created_at DESC 
          LIMIT 10`,
         [w, platformFilter]
@@ -112,7 +112,7 @@ export class AnalyticsController {
          FROM content
          WHERE workspace_id = $1 
            AND created_at >= ${intervalSql}
-           AND ($2::text IS NULL OR $2 = ANY(platforms))
+           AND ($2::text IS NULL OR platforms ? $2)
          GROUP BY DATE(created_at)
          ORDER BY DATE(created_at) ASC`,
         [w, platformFilter]

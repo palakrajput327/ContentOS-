@@ -62,13 +62,13 @@ let AnalyticsController = class AnalyticsController {
          FROM content
          WHERE workspace_id = $1
            AND created_at >= ${intervalSql}
-           AND ($2::text IS NULL OR $2 = ANY(platforms))`, [w, platformFilter]),
+           AND ($2::text IS NULL OR platforms ? $2)`, [w, platformFilter]),
             // 2. Channels
             pool.query(`SELECT platform, name, state, last_sync FROM social_accounts WHERE workspace_id = $1`, [w]),
             // 3. Recent Content
             pool.query(`SELECT id, title, status, platforms, created_at, scheduled_at 
          FROM content 
-         WHERE workspace_id = $1 AND ($2::text IS NULL OR $2 = ANY(platforms))
+         WHERE workspace_id = $1 AND ($2::text IS NULL OR platforms ? $2)
          ORDER BY created_at DESC 
          LIMIT 10`, [w, platformFilter]),
             // 4. Timeline
@@ -82,7 +82,7 @@ let AnalyticsController = class AnalyticsController {
          FROM content
          WHERE workspace_id = $1 
            AND created_at >= ${intervalSql}
-           AND ($2::text IS NULL OR $2 = ANY(platforms))
+           AND ($2::text IS NULL OR platforms ? $2)
          GROUP BY DATE(created_at)
          ORDER BY DATE(created_at) ASC`, [w, platformFilter]),
             // 5. Platform Distribution
