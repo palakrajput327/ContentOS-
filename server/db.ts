@@ -7,13 +7,13 @@ if (!(globalThis as any).__dnsFallbackPatched) {
   (globalThis as any).__dnsFallbackPatched = true;
   try {
     dns.setDefaultResultOrder("ipv4first");
-  } catch {}
+  } catch (e) {}
 
   const originalLookup = dns.lookup;
   const fallbackResolver = new dns.promises.Resolver();
   try {
     fallbackResolver.setServers(["8.8.8.8", "1.1.1.1"]);
-  } catch {}
+  } catch (e) {}
 
   dns.lookup = function (hostname: any, options: any, callback: any) {
     if (typeof options === "function") {
@@ -50,7 +50,7 @@ const databaseHost = process.env.DATABASE_URL
   ? (() => {
       try {
         return new URL(process.env.DATABASE_URL).hostname;
-      } catch {
+      } catch (e) {
         return "localhost";
       }
     })()

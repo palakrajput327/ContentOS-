@@ -1,16 +1,51 @@
 import { queueBackend } from './queue-backend.js';
 import { pool } from './db.js';
 
-export async function postgresRateLimit(key: string, windowSeconds = 60) {
-  return Number((await pool.query(`INSERT INTO api_rate_limits(key,hits,expires_at)
-    VALUES($1,1,now()+$2*interval '1 second') ON CONFLICT(key) DO UPDATE SET
-    hits=CASE WHEN api_rate_limits.expires_at<=now() THEN 1 ELSE api_rate_limits.hits+1 END,
-    expires_at=CASE WHEN api_rate_limits.expires_at<=now() THEN EXCLUDED.expires_at ELSE api_rate_limits.expires_at END
-    RETURNING hits`,[key,windowSeconds])).rows[0].hits);
+const memoryLimits = new Map<string, { hits: number; expires: number }>();
+
+export async function postgresRateLimit(key: string, windowSeconds = 60): Promise<number> {
+  try {
+    return Number((await pool.query(`INSERT INTO api_rate_limits(key,hits,expires_at)
+      VALUES($1,1,now()+$2*interval '1 second') ON CONFLICT(key) DO UPDATE SET
+      hits=CASE WHEN api_rate_limits.expires_at<=now() THEN 1 ELSE api_rate_limits.hits+1 END,
+      expires_at=CASE WHEN api_rate_limits.expires_at<=now() THEN EXCLUDED.expires_at ELSE api_rate_limits.expires_at END
+      RETURNING hits`,[key,windowSeconds])).rows[0].hits);
+  } catch (err: any) {
+    if (err?.code === '42P01') {
+      try {
+        await pool.query(`CREATE TABLE IF NOT EXISTS api_rate_limits (
+          key text PRIMARY KEY,
+          hits integer NOT NULL,
+          expires_at timestamptz NOT NULL
+        )`);
+        return await postgresRateLimit(key, windowSeconds);
+      } catch {}
+    }
+    const now = Date.now();
+    const entry = memoryLimits.get(key);
+    if (!entry || entry.expires <= now) {
+      memoryLimits.set(key, { hits: 1, expires: now + windowSeconds * 1000 });
+      return 1;
+    }
+    entry.hits += 1;
+    return entry.hits;
+  }
 }
 export async function createRateLimiter() {
   if (queueBackend() === 'postgres') return {
-    ping: async () => { await pool.query('SELECT 1 FROM api_rate_limits LIMIT 1'); },
+    ping: async () => {
+      try {
+        await pool.query('SELECT 1 FROM api_rate_limits LIMIT 1');
+      } catch (err: any) {
+        if (err?.code === '42P01') {
+          await pool.query(`CREATE TABLE IF NOT EXISTS api_rate_limits (
+            key text PRIMARY KEY,
+            hits integer NOT NULL,
+            expires_at timestamptz NOT NULL
+          )`);
+        }
+      }
+    },
     count: postgresRateLimit, quit: async () => {}, disconnect: () => {}, status: 'ready',
   };
   const { Redis } = await import('ioredis');

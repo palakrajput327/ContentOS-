@@ -8,9 +8,16 @@ export async function migrate(options: {only?:string;list?:boolean} = {}) {
     if(!options.list)await client.query(
       "CREATE TABLE IF NOT EXISTS schema_migrations(name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
     );
-    const dir = fileURLToPath(
+    let dir = fileURLToPath(
       new URL("../server/migrations/", import.meta.url),
     );
+    const fs = await import("node:fs");
+    if (!fs.existsSync(dir)) {
+      const alt1 = fileURLToPath(new URL("./migrations/", import.meta.url));
+      const alt2 = fileURLToPath(new URL("../migrations/", import.meta.url));
+      if (fs.existsSync(alt1)) dir = alt1;
+      else if (fs.existsSync(alt2)) dir = alt2;
+    }
     const files=(await readdir(dir))
       .filter((f) => f.endsWith(".sql"))
       .sort();

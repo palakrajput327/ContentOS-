@@ -211,9 +211,36 @@ class PhaseModule {}
 export async function bootstrap() {
   const config = loadConfig();
   redis = await createRateLimiter();
-  await pool.query("SELECT 1");
-  if (queueBackend() === 'postgres') await pool.query('SELECT id FROM queue_jobs LIMIT 1');
-  await redis.ping();
+
+  // Resilient DB connectivity check & auto-migration
+  try {
+    await pool.query("SELECT 1");
+    if (queueBackend() === "postgres") {
+      try {
+        await pool.query("SELECT id FROM queue_jobs LIMIT 1");
+      } catch (tableErr) {
+        console.warn("[ContentOS] Database tables not found. Initializing auto-migrations...");
+        try {
+          const { migrate } = await import("./migrate.js");
+          await migrate();
+          console.log("[ContentOS] Auto-migrations completed successfully.");
+        } catch (migErr: any) {
+          console.warn("[ContentOS] Auto-migration warning:", migErr?.message || migErr);
+        }
+      }
+    }
+  } catch (dbErr: any) {
+    console.warn("[ContentOS Warning] Database connection pending or failed:", dbErr?.message || dbErr);
+  }
+
+  try {
+    if (redis && typeof (redis as any).ping === "function") {
+      await redis.ping();
+    }
+  } catch (redisErr: any) {
+    console.warn("[ContentOS Warning] Rate limiter ping warning:", redisErr?.message || redisErr);
+  }
+
   const app = await NestFactory.create(PhaseModule, {
     logger: ["error", "warn"],
     bodyParser: false,
