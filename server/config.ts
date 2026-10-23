@@ -5,7 +5,15 @@ export function loadConfig() {
       APP_ENV: z
         .enum(["development", "production", "test"])
         .default("development"),
-      APP_URL: z.string().url(),
+      APP_URL: z
+        .string()
+        .url()
+        .optional()
+        .default(() => {
+          if (process.env.APP_ORIGIN && process.env.APP_ORIGIN.startsWith("http")) return process.env.APP_ORIGIN;
+          if (process.env.RENDER_EXTERNAL_HOSTNAME) return `https://${process.env.RENDER_EXTERNAL_HOSTNAME}`;
+          return "https://hidustansocialnetwork.in";
+        }),
       DATABASE_URL: z.string().url(),
       QUEUE_BACKEND: z.enum(['bullmq','postgres']).default('postgres'),
       REDIS_URL: z.string().url().optional(),
