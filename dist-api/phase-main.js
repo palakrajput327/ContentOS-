@@ -258,14 +258,40 @@ export async function bootstrap() {
         new URL(config.APP_URL).origin,
         "https://hidustansocialnetwork.in",
         "http://hidustansocialnetwork.in",
+        "https://www.hidustansocialnetwork.in",
+        "http://www.hidustansocialnetwork.in",
         "https://api.hidustansocialnetwork.in",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3001",
         "http://127.0.0.1:3001",
     ];
+    function isOriginAllowed(origin) {
+        if (!origin)
+            return true;
+        if (allowedOrigins.includes(origin))
+            return true;
+        try {
+            const url = new URL(origin);
+            if (url.hostname.endsWith(".vercel.app") || url.hostname === "vercel.app")
+                return true;
+            if (url.hostname.endsWith("hidustansocialnetwork.in"))
+                return true;
+            if (url.hostname === "localhost" || url.hostname === "127.0.0.1")
+                return true;
+        }
+        catch { }
+        return false;
+    }
     app.enableCors({
-        origin: allowedOrigins,
+        origin: (origin, callback) => {
+            if (isOriginAllowed(origin)) {
+                callback(null, true);
+            }
+            else {
+                callback(null, false);
+            }
+        },
         credentials: true,
         methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allowedHeaders: ["Content-Type", "X-Workspace-Id"],
@@ -281,7 +307,7 @@ export async function bootstrap() {
         if (req.path.startsWith("/api/") &&
             !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
             reqOrigin &&
-            !allowedOrigins.includes(reqOrigin))
+            !isOriginAllowed(reqOrigin))
             return res.status(403).json({
                 data: null,
                 message: "Request origin is not allowed.",
