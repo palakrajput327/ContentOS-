@@ -357,10 +357,62 @@ export async function bootstrap() {
     }),
   );
 
+  // Built-in Auto-Scheduler Loop: Checks every 30s for due posts and publishes automatically
+  const autoPublishInterval = setInterval(async () => {
+    try {
+      const { relayScheduledPosts } = await import("./cron-tasks.js");
+      await relayScheduledPosts(pool);
+
+      const duePosts = (await pool.query(
+        `SELECT id FROM scheduled_posts 
+         WHERE state = 'ENQUEUED' AND execute_at <= NOW()
+         ORDER BY execute_at ASC LIMIT 10`
+      )).rows;
+
+      for (const sp of duePosts) {
+        const { executePublishRecord } = await import("./publishing.js");
+        try {
+          console.log(`[ContentOS] Auto-publishing due post ${sp.id}...`);
+          await executePublishRecord(sp.id, { attemptsMade: 0, maxAttempts: 3 });
+        } catch (postErr) {
+          console.warn(`[ContentOS] Auto-publish failed for post ${sp.id}:`, (postErr as Error).message);
+        }
+      }
+
+      const { deliverEmails } = await import("./mail.js");
+      await deliverEmails({ limit: 10 });
+    } catch (loopErr) {
+      console.warn("[ContentOS] Auto-scheduler loop error:", (loopErr as Error).message);
+    }
+  }, 30000);
+
+  // Immediate check on startup for overdue posts
+  setTimeout(async () => {
+    try {
+      const duePosts = (await pool.query(
+        `SELECT id FROM scheduled_posts 
+         WHERE state = 'ENQUEUED' AND execute_at <= NOW()
+         ORDER BY execute_at ASC LIMIT 10`
+      )).rows;
+      for (const sp of duePosts) {
+        const { executePublishRecord } = await import("./publishing.js");
+        try {
+          console.log(`[ContentOS] Immediate auto-publishing overdue post ${sp.id}...`);
+          await executePublishRecord(sp.id, { attemptsMade: 0, maxAttempts: 3 });
+        } catch (postErr) {
+          console.warn(`[ContentOS] Immediate auto-publish failed for post ${sp.id}:`, (postErr as Error).message);
+        }
+      }
+    } catch (err) {
+      console.warn("[ContentOS] Immediate overdue check error:", (err as Error).message);
+    }
+  }, 3000);
+
   let closing = false;
   const close = async () => {
     if (closing) return;
     closing = true;
+    clearInterval(autoPublishInterval);
 
     try {
       await app.close();

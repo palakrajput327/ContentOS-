@@ -1,9 +1,51 @@
-import { loadEnvFile } from "node:process";
+import process from "node:process";
+import fs from "node:fs";
 import dns from "node:dns";
 import net from "node:net";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
-// 1. Resilient DNS fallback for Cloud Databases (Neon, AWS, etc.)
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// 1. Safe .env loader that works across all Node.js versions (v18, v20, v22+)
+function safeLoadEnv(envPath) {
+  if (typeof process.loadEnvFile === "function") {
+    try {
+      process.loadEnvFile(envPath);
+      return;
+    } catch {
+      // file might not exist or parser error, fallback to manual parse
+    }
+  }
+  try {
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, "utf8");
+      for (const line of content.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eqIdx = trimmed.indexOf("=");
+        if (eqIdx > 0) {
+          const key = trimmed.slice(0, eqIdx).trim();
+          let val = trimmed.slice(eqIdx + 1).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          }
+          if (process.env[key] === undefined) {
+            process.env[key] = val;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[ContentOS] Could not load env file manually:", err?.message || err);
+  }
+}
+
+safeLoadEnv(path.join(__dirname, ".env"));
+safeLoadEnv(".env");
+
+// 2. Resilient DNS fallback for Cloud Databases (Neon, AWS, etc.)
 const originalLookup = dns.lookup;
 const fallbackResolver = new dns.promises.Resolver();
 try {
@@ -40,20 +82,6 @@ dns.lookup = function (hostname, options, callback) {
   });
 };
 
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-try {
-  loadEnvFile(path.join(__dirname, ".env"));
-} catch (error) {
-  try {
-    loadEnvFile(".env");
-  } catch (err) {
-    console.error("Could not load .env:", err.message);
-  }
-}
 
 // 2. Automatically ensure local Redis is running (Windows dev only)
 async function ensureRedis() {

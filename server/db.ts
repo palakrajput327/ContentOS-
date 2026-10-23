@@ -46,20 +46,38 @@ if (!(globalThis as any).__dnsFallbackPatched) {
   } as any;
 }
 
-const databaseHost = process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).hostname : '';
-const localDatabase = ['localhost','127.0.0.1','[::1]'].includes(databaseHost);
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: Number(process.env.PG_POOL_MAX) || (process.env.QUEUE_BACKEND === 'postgres' ? 6 : 20),
-  connectionTimeoutMillis: 30000,
-  idleTimeoutMillis: 30000,
-  keepAlive: true,
-  keepAliveInitialDelayMillis: 10000,
-  ssl: localDatabase ? false : {
-    rejectUnauthorized: false,
-    servername: databaseHost || undefined,
-  },
-} as any);
+const databaseHost = process.env.DATABASE_URL
+  ? (() => {
+      try {
+        return new URL(process.env.DATABASE_URL).hostname;
+      } catch {
+        return "localhost";
+      }
+    })()
+  : (process.env.PGHOST || "localhost");
+const localDatabase = ["localhost", "127.0.0.1", "[::1]"].includes(databaseHost);
+
+const poolConfig: any = process.env.DATABASE_URL
+  ? { connectionString: process.env.DATABASE_URL }
+  : {
+      host: process.env.PGHOST || "localhost",
+      port: Number(process.env.PGPORT) || 5432,
+      database: process.env.PGDATABASE,
+      user: process.env.PGUSER,
+      password: process.env.PGPASSWORD,
+    };
+
+poolConfig.max = Number(process.env.PG_POOL_MAX) || (process.env.QUEUE_BACKEND === "postgres" ? 6 : 20);
+poolConfig.connectionTimeoutMillis = 30000;
+poolConfig.idleTimeoutMillis = 30000;
+poolConfig.keepAlive = true;
+poolConfig.keepAliveInitialDelayMillis = 10000;
+poolConfig.ssl = localDatabase ? false : {
+  rejectUnauthorized: false,
+  servername: databaseHost || undefined,
+};
+
+export const pool = new Pool(poolConfig);
 
 // Prevent cloud Postgres (Neon) idle socket drops from crashing the Node.js process
 pool.on("error", (err: any) => {
