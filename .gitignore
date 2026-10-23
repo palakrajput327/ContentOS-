@@ -15,8 +15,7 @@ tmp/
 node_modules/
 
 # Production & Build outputs
-# dist/ is committed to git — deployed via .cpanel.yml to public_html/
-dist-api/
+# dist/ and dist-api/ are committed for zero-overhead cloud deployment
 
 # Environment and sensitive secrets
 .env
