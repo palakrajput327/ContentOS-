@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host localhost --configLoader runner",
     "build": "node scripts/build.mjs",
+    "build:vercel": "vite build",
     "build:api": "tsc -p server/tsconfig.json",
     "build:backend": "tsc -p server/tsconfig.json",
     "build:frontend": "cross-env VITE_API_BASE=https://api.hidustansocialnetwork.in vite build",
