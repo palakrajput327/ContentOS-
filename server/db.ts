@@ -46,32 +46,43 @@ if (!(globalThis as any).__dnsFallbackPatched) {
   } as any;
 }
 
-const databaseHost = process.env.DATABASE_URL
+let rawConnectionString = process.env.DATABASE_URL;
+if (rawConnectionString && rawConnectionString.includes('.neon.tech') && !rawConnectionString.includes('-pooler')) {
+  rawConnectionString = rawConnectionString.replace(/(\.c-[^.]+\.[^.]+\.aws\.neon\.tech|\.neon\.tech)/, (match) => `-pooler${match}`);
+}
+
+let databaseHost = rawConnectionString
   ? (() => {
       try {
-        return new URL(process.env.DATABASE_URL).hostname;
+        return new URL(rawConnectionString).hostname;
       } catch (e) {
         return "localhost";
       }
     })()
   : (process.env.PGHOST || "localhost");
+
+if (databaseHost && databaseHost.includes('.neon.tech') && !databaseHost.includes('-pooler')) {
+  databaseHost = databaseHost.replace(/(\.c-[^.]+\.[^.]+\.aws\.neon\.tech|\.neon\.tech)/, (match) => `-pooler${match}`);
+}
+
 const localDatabase = ["localhost", "127.0.0.1", "[::1]"].includes(databaseHost);
 
-const poolConfig: any = process.env.DATABASE_URL
-  ? { connectionString: process.env.DATABASE_URL }
+const poolConfig: any = rawConnectionString
+  ? { connectionString: rawConnectionString }
   : {
-      host: process.env.PGHOST || "localhost",
+      host: databaseHost,
       port: Number(process.env.PGPORT) || 5432,
       database: process.env.PGDATABASE,
       user: process.env.PGUSER,
       password: process.env.PGPASSWORD,
     };
 
-poolConfig.max = Number(process.env.PG_POOL_MAX) || (process.env.QUEUE_BACKEND === "postgres" ? 6 : 20);
-poolConfig.connectionTimeoutMillis = 30000;
-poolConfig.idleTimeoutMillis = 30000;
+poolConfig.max = Math.min(Number(process.env.PG_POOL_MAX) || 4, 8);
+poolConfig.connectionTimeoutMillis = 10000;
+poolConfig.idleTimeoutMillis = 5000;
+poolConfig.allowExitOnIdle = true;
 poolConfig.keepAlive = true;
-poolConfig.keepAliveInitialDelayMillis = 10000;
+poolConfig.keepAliveInitialDelayMillis = 5000;
 poolConfig.ssl = localDatabase ? false : {
   rejectUnauthorized: false,
   servername: databaseHost || undefined,

@@ -100,8 +100,24 @@ export class KnowledgeAutomationService {
     }, generateVisual = async (context) => {
         const { ClipdropService } = await import("../clipdrop/clipdrop.service.js");
         const service = new ClipdropService();
-        const suggested = await service.suggestPrompt(context.caption, "Instagram");
-        return service.generateImage({ workspaceId: context.workspaceId, userId: context.actorId, prompt: suggested.prompt, aspectRatio: "1:1", headline: context.title, enableOverlay: true, idempotencyKey: `autopilot:${context.workspaceId}:${context.topicHash}` });
+        const suggested = await service.suggestPosterPrompt({
+            knowledgeConcept: typeof context.knowledgeValue === "string" ? context.knowledgeValue : JSON.stringify(context.knowledgeValue || context.title),
+            excerpt: context.excerpt,
+            sourceVisualContext: context.sourceVisualContext,
+            title: context.title,
+            brand: context.brand,
+            platform: "Instagram",
+        });
+        return service.generateImage({
+            workspaceId: context.workspaceId,
+            userId: context.actorId,
+            prompt: suggested.prompt,
+            aspectRatio: "1:1",
+            headline: suggested.headline || context.title,
+            stylePreset: "3d-render",
+            enableOverlay: true,
+            idempotencyKey: `autopilot:${context.workspaceId}:${context.topicHash}:${Date.now()}`,
+        });
     }) {
         this.database = database;
         this.generate = generate;
@@ -148,13 +164,36 @@ export class KnowledgeAutomationService {
                 const topics = (await knowledgePool(db, workspaceId)).filter((t) => t.eligible);
                 const history = (await db.query("SELECT * FROM knowledge_content_plans WHERE workspace_id=$1", [workspaceId])).rows;
                 const cutoff = Date.now() - settings.cooldown_days * 86400000;
-                const topic = topics.find((t) => !history.some((h) => h.topic_hash === t.hash &&
+                let topic = topics.find((t) => !history.some((h) => h.topic_hash === t.hash &&
                     (h.state === "GENERATING" ||
                         h.state === "REVIEW" ||
                         (h.state === "FAILED"
                             ? h.attempts >= 3 ||
                                 new Date(h.updated_at).getTime() > Date.now() - 15 * 60000
                             : new Date(h.updated_at).getTime() > cutoff))));
+                if (!topic && topics.length > 0) {
+                    // If all topics were already generated once, recycle the least recently planned topic
+                    const activeOrRecent = history.filter((h) => h.state === "GENERATING" ||
+                        (h.state === "FAILED" &&
+                            new Date(h.updated_at).getTime() > Date.now() - 15 * 60000));
+                    const available = topics.filter((t) => !activeOrRecent.some((h) => h.topic_hash === t.hash));
+                    if (available.length > 0) {
+                        available.sort((a, b) => {
+                            const lastA = history
+                                .filter((h) => h.topic_hash === a.hash)
+                                .sort((x, y) => new Date(y.created_at).getTime() -
+                                new Date(x.created_at).getTime())[0];
+                            const lastB = history
+                                .filter((h) => h.topic_hash === b.hash)
+                                .sort((x, y) => new Date(y.created_at).getTime() -
+                                new Date(x.created_at).getTime())[0];
+                            const timeA = lastA ? new Date(lastA.created_at).getTime() : 0;
+                            const timeB = lastB ? new Date(lastB.created_at).getTime() : 0;
+                            return timeA - timeB;
+                        });
+                        topic = available[0];
+                    }
+                }
                 if (!topic) {
                     await this.message(db, workspaceId, "No unused, confirmed source-backed topics remain. Add or confirm knowledge; empty slots are left open.");
                     return null;
@@ -259,7 +298,7 @@ export class KnowledgeAutomationService {
                     proposedAt: at,
                     requireApproval: ws.require_approval !== false,
                     autopilot: !!settings.autopilot_enabled,
-                    posterStyle: settings.poster_style || 'DIRECT',
+                    posterStyle: settings.poster_style || 'AI_POSTER',
                 };
             });
             if (!reservation)
@@ -296,14 +335,47 @@ export class KnowledgeAutomationService {
                         return;
                     }
                     const id = randomUUID();
-                    // Auto-pair extracted PDF image by default
+                    // Visual generation / pairing:
+                    // 1. If AI_POSTER mode, generate AI poster prompt from knowledge and create custom social poster
+                    // 2. If DIRECT mode, prefer extracted PDF image first, fallback to AI Poster
+                    // 3. If BRANDED_CANVAS mode, apply brand framing/canvas
                     let autoVisualUrl;
                     let autoVisualAssetId;
                     const preferredSourceAssetId = evidence.find((e) => e.sourceMediaAssetId)?.sourceMediaAssetId ||
                         reservation.topic.sources?.find((s) => s.sourceMediaAssetId)?.sourceMediaAssetId;
                     const docId = evidence[0]?.documentId || reservation.topic.sources[0]?.documentId;
                     const pageNum = evidence[0]?.pageStart || reservation.topic.sources[0]?.pageStart;
+                    let sourceVisualContext;
                     if (preferredSourceAssetId) {
+                        sourceVisualContext = `Extracted diagram/figure from PDF (Page ${pageNum || 1})`;
+                    }
+                    else if (docId) {
+                        const hasSourceMedia = (await db.query(`SELECT dsm.page_number, dsm.kind FROM document_source_media dsm
+                 WHERE dsm.document_id = $1 AND dsm.workspace_id = $2
+                 ${pageNum ? 'AND dsm.page_number = $3' : ''}
+                 LIMIT 1`, pageNum ? [docId, workspaceId, pageNum] : [docId, workspaceId])).rows[0];
+                        if (hasSourceMedia) {
+                            sourceVisualContext = `Extracted ${hasSourceMedia.kind === 'PAGE_RENDER' ? 'page layout' : 'diagram/graphic'} from PDF Page ${hasSourceMedia.page_number}`;
+                        }
+                    }
+                    if (reservation.posterStyle === 'AI_POSTER') {
+                        const gen = await this.generateVisual({
+                            workspaceId,
+                            actorId: reservation.actorId,
+                            topicHash: reservation.topic.hash,
+                            title: result.title,
+                            caption: result.variants[reservation.platforms[0]],
+                            knowledgeValue: reservation.topic.value,
+                            excerpt: evidence[0]?.excerpt || reservation.topic.sources[0]?.excerpt,
+                            sourceVisualContext,
+                            brand: reservation.brand,
+                        });
+                        if (gen) {
+                            autoVisualUrl = gen.url;
+                            autoVisualAssetId = gen.assetId;
+                        }
+                    }
+                    if (!autoVisualAssetId && preferredSourceAssetId) {
                         const imgRow = (await db.query(`SELECT m.bucket, m.object_key, m.id FROM media_assets m
                  WHERE m.id = $1 AND m.workspace_id = $2 AND m.deleted_at IS NULL`, [preferredSourceAssetId, workspaceId])).rows[0];
                         if (imgRow) {
@@ -332,13 +404,17 @@ export class KnowledgeAutomationService {
                             autoVisualAssetId = imgRow.id;
                         }
                     }
-                    if (!autoVisualAssetId && reservation.autopilot) {
+                    if (!autoVisualAssetId) {
                         const gen = await this.generateVisual({
                             workspaceId,
                             actorId: reservation.actorId,
                             topicHash: reservation.topic.hash,
                             title: result.title,
                             caption: result.variants[reservation.platforms[0]],
+                            knowledgeValue: reservation.topic.value,
+                            excerpt: evidence[0]?.excerpt || reservation.topic.sources[0]?.excerpt,
+                            sourceVisualContext,
+                            brand: reservation.brand,
                         });
                         if (gen) {
                             autoVisualUrl = gen.url;
@@ -502,9 +578,9 @@ export class KnowledgeAutomationService {
     }
     async runAutoPilot(workspaceId, actorId, documentId) {
         // 1. Ensure automation settings exist and are enabled
-        await this.database.query(`INSERT INTO knowledge_automation_settings(workspace_id, actor_id, enabled, autopilot_enabled, horizon_days, cooldown_days, platforms)
-       VALUES($1, $2, true, true, 14, 90, '["LinkedIn","Instagram","Facebook","Telegram"]')
-       ON CONFLICT(workspace_id) DO UPDATE SET enabled=true, autopilot_enabled=true, actor_id=EXCLUDED.actor_id, next_run_at=now(), updated_at=now()`, [workspaceId, actorId]);
+        await this.database.query(`INSERT INTO knowledge_automation_settings(workspace_id, actor_id, enabled, autopilot_enabled, horizon_days, cooldown_days, platforms, poster_style)
+       VALUES($1, $2, true, true, 14, 90, '["LinkedIn","Instagram","Facebook","Telegram"]', 'AI_POSTER')
+       ON CONFLICT(workspace_id) DO UPDATE SET enabled=true, autopilot_enabled=true, actor_id=EXCLUDED.actor_id, poster_style=COALESCE(knowledge_automation_settings.poster_style, 'AI_POSTER'), next_run_at=now(), updated_at=now()`, [workspaceId, actorId]);
         // Recover READY PDFs whose earlier text/knowledge extraction produced no facts.
         const missing = (await this.database.query(`SELECT d.id FROM documents d WHERE d.workspace_id=$1 AND d.status='READY'
       AND ($2::uuid IS NULL OR d.id=$2) AND NOT EXISTS(SELECT 1 FROM document_knowledge k WHERE k.document_id=d.id AND k.workspace_id=d.workspace_id)`, [workspaceId, documentId ?? null])).rows;
@@ -535,8 +611,7 @@ export class KnowledgeAutomationService {
              WHEN array_length(festival_social_account_ids, 1) IS NULL OR array_length(festival_social_account_ids, 1) = 0 
              THEN $2::uuid[] 
              ELSE festival_social_account_ids 
-           END,
-           updated_at = now()
+           END
        WHERE id = $1`, [workspaceId, accountIds]);
         // 3. Trigger immediate scan for upcoming festivals (Diwali, Holi, Eid, Independence Day, etc.)
         try {
@@ -553,8 +628,14 @@ export class KnowledgeAutomationService {
         else {
             await this.database.query("UPDATE document_knowledge SET status='CONFIRMED', updated_at=now() WHERE workspace_id=$1 AND status IN ('PENDING','EXTRACTED') AND length(trim(COALESCE(source_excerpt,'')))>0 AND COALESCE(metadata->>'origin','')<>'SOURCE_VISUAL'", [workspaceId]);
         }
-        // 5. Run the automated generation & scheduling pipeline (process up to 7 items in Auto-Pilot)
-        return { generated: 0, requested: true };
+        // 5. Run the automated generation & scheduling pipeline (process multiple items sequentially in Auto-Pilot)
+        const runResult = await this.run(workspaceId, 5);
+        return {
+            generated: runResult.generated,
+            scheduled: runResult.scheduled,
+            failure: runResult.failure,
+            requested: true,
+        };
     }
     async message(db, workspaceId, message) {
         await db.query("UPDATE knowledge_automation_settings SET last_message=$2 WHERE workspace_id=$1", [workspaceId, message]);

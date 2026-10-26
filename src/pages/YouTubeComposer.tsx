@@ -133,7 +133,7 @@ export default function YouTubeComposer({
         mimeType: file.type,
         sizeBytes: file.size,
       });
-      const apiBase = import.meta.env.VITE_API_BASE ?? "";
+      const apiBase = (import.meta.env.VITE_API_BASE || (typeof window !== "undefined" && window.location.hostname.includes("hidustansocialnetwork") ? "https://api.hidustansocialnetwork.in" : "")) as string;
       const targetUpload = presign.uploadUrl.startsWith("/")
         ? `${apiBase}${presign.uploadUrl}`
         : presign.uploadUrl;

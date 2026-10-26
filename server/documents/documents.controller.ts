@@ -371,19 +371,22 @@ export class DocumentsController {
       throw new NotFoundException("Document not found in this workspace.");
     }
 
-    if (queueBackend()==='postgres') {
-      await pdfProcessingQueue.add('extract',{documentId,workspaceId:w},{jobId:`${documentId}-fast-${Date.now()}`});
-      return {documentId,status:'QUEUED'};
+    try {
+      const { processPDFDocument } = await import("../pdf-processing.js");
+      const result = await processPDFDocument(documentId, w);
+      return {
+        documentId,
+        status: "READY",
+        pageCount: result.pageCount,
+        chunkCount: result.chunkCount,
+      };
+    } catch (fastErr) {
+      if (queueBackend() === 'postgres') {
+        await pdfProcessingQueue.add('extract', { documentId, workspaceId: w }, { jobId: `${documentId}-fast-${Date.now()}` });
+        return { documentId, status: 'QUEUED' };
+      }
+      throw fastErr;
     }
-    const { processPDFDocument } = await import("../pdf-processing.js");
-    const result = await processPDFDocument(documentId, w);
-
-    return {
-      documentId,
-      status: "READY",
-      pageCount: result.pageCount,
-      chunkCount: result.chunkCount,
-    };
   }
 
   @WorkspaceRequired()

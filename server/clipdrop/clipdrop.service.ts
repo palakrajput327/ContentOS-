@@ -98,6 +98,92 @@ STRICT RULES:
   }
 
   /**
+   * Generates a platform-optimized visual poster prompt directly from PDF knowledge concepts & brand guidelines
+   */
+  async suggestPosterPrompt(opts: {
+    knowledgeConcept: string;
+    excerpt?: string;
+    sourceVisualContext?: string;
+    title?: string;
+    brand?: {
+      primary_color?: string;
+      secondary_color?: string;
+      tone?: string;
+      name?: string;
+      cta?: string;
+    };
+    platform?: string;
+  }): Promise<{ prompt: string; headline: string }> {
+    const provider = getLLMProvider();
+    const primaryColor = opts.brand?.primary_color || "vibrant violet and cyan";
+    const systemPrompt = `You are a world-class creative art director and prompt engineer for high-growth tech brands and viral social media visual posters.
+Your job is to read extracted knowledge facts/concepts from a document, along with any source visual context (diagrams/infographics from the PDF), and craft:
+1. A descriptive, high-quality text-to-image prompt (for FLUX / Midjourney / Clipdrop) that visually represents the core concept as an eye-catching social media poster.
+2. A short, punchy 3-6 word visual headline for the poster.
+
+STRICT RULES FOR IMAGE PROMPT:
+1. Translate conceptual/technical ideas and source visual themes into tangible visual metaphors: e.g. glowing 3D isometric data structures, sleek futuristic holographic interfaces, minimalist frosted glass cubes, clean studio product podiums, or cinematic atmospheric lighting.
+2. Specify lighting (soft studio rim light, volumetric lighting, bioluminescent glow, subtle neon accents), color palette (harmonious with brand: ${primaryColor}), and style (ultra-modern 3D render, Octane render, 8k resolution, minimalist SaaS aesthetic).
+3. Do NOT copy raw document text or citations into the prompt.
+4. Do NOT include phrases like "Create an image of", "Poster of", or quotes.
+5. Return 35 to 65 words of rich visual keywords.
+
+SCHEMA:
+Return JSON matching schema:
+{
+  "prompt": "35-65 words image generation prompt",
+  "headline": "3-6 words bold title"
+}`;
+
+    const userMessage = `Knowledge Concept: "${opts.knowledgeConcept.slice(0, 1000)}"
+${opts.excerpt ? `Source Excerpt: "${opts.excerpt.slice(0, 800)}"` : ""}
+${opts.sourceVisualContext ? `Extracted PDF Visual Context: "${opts.sourceVisualContext}"` : ""}
+${opts.title ? `Working Title: "${opts.title}"` : ""}
+Brand Tone: ${opts.brand?.tone || "Professional, Modern"}
+Platform: ${opts.platform || "Instagram"}`;
+
+    try {
+      if (await provider.validateConfiguration()) {
+        const res = await provider.generateStructured({
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+          schema: {
+            type: "object",
+            properties: {
+              prompt: { type: "string" },
+              headline: { type: "string" },
+            },
+            required: ["prompt", "headline"],
+          } as any,
+          schemaName: "PosterPromptSuggestion",
+        });
+        const data = res.data as any;
+        if (data?.prompt && data.prompt.trim().length > 15) {
+          return {
+            prompt: data.prompt.trim(),
+            headline: (data.headline || opts.title || "Key Insight").trim().slice(0, 60),
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("[ClipdropService] suggestPosterPrompt LLM warning:", (err as Error)?.message || err);
+    }
+
+    // Dynamic smart fallback if LLM is offline
+    const cleanSubject = (opts.title || opts.knowledgeConcept || "innovation")
+      .replace(/[^a-zA-Z0-9 ]/g, " ")
+      .trim()
+      .slice(0, 60);
+
+    return {
+      prompt: `Futuristic 3D minimalist tech poster visual representing ${cleanSubject}, floating frosted glass nodes, glowing volumetric violet and cyan lighting, sleek isometric composition, ultra-detailed 8k octane render`,
+      headline: (opts.title || cleanSubject).slice(0, 40),
+    };
+  }
+
+  /**
    * Generates image via Clipdrop API or FLUX.1 Pro, applies optional brand overlay,
    * saves as media asset, and links to content draft.
    */

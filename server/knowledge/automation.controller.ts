@@ -18,6 +18,21 @@ import {
 } from "../security.js";
 import { knowledgePool } from "./automation.service.js";
 
+export function normalizePostingTime(input: unknown): string {
+  if (typeof input !== "string") return "10:00";
+  const parts = input.split(",").map((p) => p.trim()).filter(Boolean);
+  const normalized = parts
+    .map((part) => {
+      const match = part.match(/^([01]?\d|2[0-3]):([0-5]?\d)$/);
+      if (!match) return null;
+      const h = match[1].padStart(2, "0");
+      const m = match[2].padStart(2, "0");
+      return `${h}:${m}`;
+    })
+    .filter((p): p is string => p !== null);
+  return normalized.length > 0 ? normalized.join(", ") : "10:00";
+}
+
 export const automationSettingsSchema = z
   .object({
     enabled: z.boolean(),
@@ -31,8 +46,17 @@ export const automationSettingsSchema = z
         (p) => new Set(p).size === p.length,
         "Choose each platform once.",
       ),
-    postingTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(,\s*([01]\d|2[0-3]):[0-5]\d)*$/).default("10:00").optional(),
-    posterStyle: z.enum(["DIRECT", "BRANDED_CANVAS"]).default("DIRECT").optional(),
+    postingTime: z
+      .string()
+      .trim()
+      .transform(normalizePostingTime)
+      .refine(
+        (val) => /^([01]\d|2[0-3]):[0-5]\d(,\s*([01]\d|2[0-3]):[0-5]\d)*$/.test(val),
+        "Invalid time format. Use HH:MM like 07:07 or comma-separated times like 07:07, 13:15.",
+      )
+      .default("10:00")
+      .optional(),
+    posterStyle: z.enum(["DIRECT", "BRANDED_CANVAS", "AI_POSTER"]).default("AI_POSTER").optional(),
   })
   .strict();
 
@@ -41,16 +65,48 @@ export const automationSettingsSchema = z
 export class KnowledgeAutomationController {
   @Get() async overview(@Req() r: AuthedRequest) {
     const workspaceId = r.workspace.id;
-    const [topics, settings, plans, workspace, accounts] = await Promise.all([
+    const [topics, settings, plans, workspace, accounts, docsRes, graphicsRes] = await Promise.all([
       knowledgePool(pool, workspaceId),
       pool.query(
         "SELECT * FROM knowledge_automation_settings WHERE workspace_id=$1",
         [workspaceId],
       ),
       pool.query(
-        `SELECT p.*,c.title,c.status AS content_status,c.variants,c.platforms,c.scheduled_at FROM knowledge_content_plans p
-        LEFT JOIN content c ON c.id=p.content_id AND c.workspace_id=p.workspace_id
-        WHERE p.workspace_id=$1 ORDER BY p.created_at DESC LIMIT 100`,
+        `SELECT * FROM (
+          SELECT DISTINCT ON (c.id)
+            p.id AS id,
+            p.id AS plan_id,
+            c.id AS content_id,
+            c.workspace_id,
+            c.title,
+            c.body,
+            c.variants,
+            c.platforms,
+            c.status AS content_status,
+            c.scheduled_at,
+            c.created_at,
+            p.source_snapshot,
+            p.proposed_at,
+            s.id AS scheduled_post_id,
+            s.state AS publish_state,
+            s.execute_at,
+            s.provider_post_id,
+            s.error_code,
+            sa.platform AS social_platform,
+            sa.name AS social_account_name,
+            COALESCE(d.original_filename, (p.source_snapshot->'sources'->0->>'documentName'), 'Redhash.pdf') AS document_name
+          FROM knowledge_content_plans p
+          JOIN content c ON c.id=p.content_id AND c.workspace_id=p.workspace_id
+          LEFT JOIN scheduled_posts s ON s.content_id=c.id AND s.workspace_id=c.workspace_id
+          LEFT JOIN social_accounts sa ON sa.id=s.account_id
+          LEFT JOIN document_knowledge dk ON dk.id=p.knowledge_id
+          LEFT JOIN documents d ON d.id=dk.document_id
+          WHERE p.workspace_id=$1
+            AND (s.state IN ('ENQUEUED', 'SCHEDULED', 'FAILED') OR c.status = 'SCHEDULED')
+            AND (s.state IS NULL OR s.state <> 'CANCELLED')
+          ORDER BY c.id, (CASE WHEN s.state = 'FAILED' THEN 1 WHEN s.state = 'ENQUEUED' THEN 2 WHEN s.state = 'SCHEDULED' THEN 3 ELSE 4 END)
+        ) sub
+        ORDER BY execute_at ASC, created_at DESC LIMIT 30`,
         [workspaceId],
       ),
       pool.query(
@@ -64,6 +120,14 @@ export class KnowledgeAutomationController {
         "SELECT platform,name FROM social_accounts WHERE workspace_id=$1 AND lower(state)='connected'",
         [workspaceId],
       ),
+      pool.query(
+        "SELECT id, original_filename, status, page_count, created_at FROM documents WHERE workspace_id=$1 ORDER BY created_at DESC LIMIT 5",
+        [workspaceId],
+      ),
+      pool.query(
+        "SELECT COUNT(*)::int AS count FROM document_source_media WHERE workspace_id=$1",
+        [workspaceId],
+      ),
     ]);
     return {
       topics,
@@ -73,9 +137,11 @@ export class KnowledgeAutomationController {
         cooldown_days: 90,
         platforms: ["LinkedIn"],
         posting_time: "10:00",
-        poster_style: "DIRECT",
+        poster_style: "AI_POSTER",
       },
       plans: plans.rows,
+      documents: docsRes.rows,
+      graphicsCount: graphicsRes.rows[0]?.count || 0,
       workspace: workspace.rows[0],
       accounts: accounts.rows,
       canManage: ["Owner", "Admin"].includes(r.workspace.role),
@@ -260,27 +326,43 @@ export class KnowledgeAutomationController {
     @Param("id") id: string,
   ) {
     assertPermission(r.workspace.role, "schedule");
+    let contentId: string | null = null;
     const plan = (
       await pool.query(
         "SELECT * FROM knowledge_content_plans WHERE id = $1 AND workspace_id = $2",
         [id, r.workspace.id]
       )
     ).rows[0];
-    if (!plan || !plan.content_id) {
+    if (plan?.content_id) {
+      contentId = plan.content_id;
+    } else {
+      const content = (
+        await pool.query(
+          "SELECT id FROM content WHERE id = $1 AND workspace_id = $2",
+          [id, r.workspace.id]
+        )
+      ).rows[0];
+      if (content) contentId = content.id;
+    }
+    if (!contentId) {
       throw new NotFoundException("Plan or content not found.");
     }
     const scheduledPosts = (
       await pool.query(
-        "SELECT id FROM scheduled_posts WHERE content_id = $1 AND workspace_id = $2 AND state IN ('ENQUEUED', 'PENDING')",
-        [plan.content_id, r.workspace.id]
+        "SELECT id FROM scheduled_posts WHERE content_id = $1 AND workspace_id = $2 AND state IN ('ENQUEUED', 'PENDING', 'FAILED')",
+        [contentId, r.workspace.id]
       )
     ).rows;
     if (!scheduledPosts.length) {
-      throw new BadRequestException("No pending scheduled posts found for this plan.");
+      throw new BadRequestException("No pending or failed scheduled posts found for this content.");
     }
     const { executePublishRecord } = await import("../publishing.js");
     const results = [];
     for (const sp of scheduledPosts) {
+      await pool.query(
+        "UPDATE scheduled_posts SET state='ENQUEUED', error_code=null, attempt_started_at=null WHERE id=$1",
+        [sp.id]
+      );
       const res = await executePublishRecord(sp.id, { attemptsMade: 0, maxAttempts: 3 });
       results.push(res);
     }

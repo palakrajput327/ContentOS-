@@ -3,7 +3,7 @@ import { useSession } from "./session";
 import { demoSnapshot, type Snapshot, type Post, type Brand } from "./model";
 let demo = demoSnapshot();
 export const apiEnabled = import.meta.env.VITE_API_ENABLED === "true";
-export const apiBase = (import.meta.env.VITE_API_BASE ?? "") as string;
+export const apiBase = (import.meta.env.VITE_API_BASE || (typeof window !== "undefined" && window.location.hostname.includes("hidustansocialnetwork") ? "https://api.hidustansocialnetwork.in" : "")) as string;
 export async function request<T>(
   path: string,
   method = "GET",

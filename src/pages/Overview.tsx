@@ -481,5 +481,5 @@ export default function Overview() {
         </section>
       </div>
     </>
-  );
+  )
 }

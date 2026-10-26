@@ -99,7 +99,7 @@ export class LocalStorageProvider implements ObjectStorageProvider {
 
   async getSignedUploadUrl(input: SignedUploadInput): Promise<SignedUrlResult> {
     const expiresIn = input.expiresInSeconds || 900;
-    const base = process.env.PUBLIC_URL || process.env.VITE_API_BASE || process.env.APP_ORIGIN || "";
+    const base = (process.env.PUBLIC_URL || process.env.STORAGE_PUBLIC_URL || "https://api.hidustansocialnetwork.in").replace(/\/+$/, "");
     const uploadUrl = `${base}/api/v1/storage/local/upload?bucket=${encodeURIComponent(
       input.bucket,
     )}&key=${encodeURIComponent(input.objectKey)}`;
@@ -121,7 +121,7 @@ export class LocalStorageProvider implements ObjectStorageProvider {
     const { generateStorageSignature } = await import("./signed-url.js");
     const expiresAt = Date.now() + expiresInSeconds * 1000;
     const sig = generateStorageSignature(bucket, objectKey, expiresAt);
-    const base = process.env.PUBLIC_URL || process.env.VITE_API_BASE || process.env.APP_ORIGIN || "";
+    const base = (process.env.PUBLIC_URL || process.env.STORAGE_PUBLIC_URL || "https://api.hidustansocialnetwork.in").replace(/\/+$/, "");
     return `${base}/api/v1/storage/local/download?bucket=${encodeURIComponent(
       bucket,
     )}&key=${encodeURIComponent(objectKey)}&expires=${expiresAt}&sig=${sig}`;

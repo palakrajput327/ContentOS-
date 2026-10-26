@@ -47,6 +47,7 @@ export interface ClipdropImageModalProps {
   composerMode?: boolean;
   attachmentLabel?: string;
   initialAsset?: {assetId:string;url:string;filename:string};
+  initialPrompt?: string;
 }
 
 /**
@@ -204,6 +205,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
   composerMode = false,
   attachmentLabel = 'Image for this post',
   initialAsset,
+  initialPrompt,
 }) => {
   // Engine & Prompt
   const [engine, setEngine] = useState<"clipdrop" | "flux">("clipdrop");
@@ -355,8 +357,12 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
           return connectedAccounts.map((a) => a.id);
         });
       }
+
+      if (initialPrompt) {
+        setPrompt(initialPrompt);
+      }
     }
-  }, [isOpen, targetPlatform, connectedAccounts, initialContentText, captionManuallyEdited]);
+  }, [isOpen, targetPlatform, connectedAccounts, initialContentText, captionManuallyEdited, initialPrompt]);
 
   if (!isOpen) return null;
 
@@ -605,7 +611,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
       const filename='branded_poster.png';
       const upload=await request<{assetId:string;uploadUrl:string;headers?:Record<string,string>}>('/storage/uploads/presign','POST',{type:'IMAGE',originalFilename:filename,mimeType:'image/png',sizeBytes:blob.size});
       const workspaceId=useSession.getState().workspaceId;
-      const apiBase = import.meta.env.VITE_API_BASE ?? "";
+      const apiBase = (import.meta.env.VITE_API_BASE || (typeof window !== "undefined" && window.location.hostname.includes("hidustansocialnetwork") ? "https://api.hidustansocialnetwork.in" : "")) as string;
       const targetUpload = upload.uploadUrl.startsWith("/") ? `${apiBase}${upload.uploadUrl}` : upload.uploadUrl;
       const response=await fetch(targetUpload,{method:'PUT',credentials:'include',headers:{'Content-Type':'image/png',...(workspaceId?{'X-Workspace-Id':workspaceId}:{}),...upload.headers},body:blob});
       if(!response.ok)throw new Error('Branded image upload failed. Your original image is preserved.');

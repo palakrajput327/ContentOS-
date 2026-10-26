@@ -92,7 +92,7 @@ export function DocumentSourceMedia({
     setError("");
     try {
       const workspaceId = useSession.getState().workspaceId;
-      const apiBase = import.meta.env.VITE_API_BASE ?? "";
+      const apiBase = (import.meta.env.VITE_API_BASE || (typeof window !== "undefined" && window.location.hostname.includes("hidustansocialnetwork") ? "https://api.hidustansocialnetwork.in" : "")) as string;
       const response = await fetch(
         `${apiBase}/api/v1/documents/${documentId}/source-media/${sourceId}/original`,
         {

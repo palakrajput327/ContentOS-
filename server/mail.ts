@@ -75,19 +75,22 @@ export async function queuePublishNotificationEmail(
     status: "published" | "failed";
     providerPostId?: string;
     errorReason?: string;
+    layer?: string;
+    previewUrl?: string;
   },
 ) {
   const id = randomUUID();
   const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const isSuccess = input.status === "published";
+  const layerName = input.layer || (isSuccess ? "Layer 5: Social Publishing & Channel Dispatch" : "Layer 5: Channel Publishing");
   const subject = isSuccess
-    ? `✅ [Published] Your scheduled post is live on ${input.platform}`
-    : `⚠️ [Alert] Post publishing failed on ${input.platform}`;
+    ? `✅ [ContentOS] Post Live on ${input.platform} (${layerName})`
+    : `⚠️ [ContentOS Alert] Publishing Failed in ${layerName}`;
 
   const greeting = input.recipientName ? `Hi ${input.recipientName},` : `Hello,`;
   const body = isSuccess
-    ? `${greeting}\n\nYour automated post "${input.postTitle}" has been successfully published to ${input.platform}.\n\nPlatform: ${input.platform}\nPost ID: ${input.providerPostId || "N/A"}\nTime: ${new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })} IST\n\nYou can review live performance inside your ContentOS dashboard.`
-    : `${greeting}\n\nYour automated post "${input.postTitle}" could not be published to ${input.platform}.\n\nPlatform: ${input.platform}\nReason: ${input.errorReason || "Unknown provider error"}\nTime: ${new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })} IST\n\nPlease log in to ContentOS and verify your account connection or retry publishing.`;
+    ? `${greeting}\n\nYour automated post "${input.postTitle}" has been successfully published to ${input.platform}.\n\nPipeline Stage: ${layerName} ✅\nPlatform: ${input.platform}\nPost ID: ${input.providerPostId || "N/A"}\nTime: ${new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })} IST\n\nAll 5 automation layers (PDF Extraction -> AI Prompt -> AI Poster Studio -> Copywriting -> Live Channel Dispatch) executed successfully.\n\nYou can review live performance inside your ContentOS dashboard.`
+    : `${greeting}\n\nAn automated operation encountered an issue in ${layerName} for "${input.postTitle}".\n\nPipeline Stage: ${layerName} ❌\nPlatform: ${input.platform}\nDiagnosed Error: ${input.errorReason || "Unknown provider error"}\nTime: ${new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })} IST\n\nAction Required: Please log in to your ContentOS dashboard to review the layer diagnostics or reconnect your ${input.platform} channel.`;
 
   await db.query(
     "INSERT INTO email_outbox(id,recipient,subject,encrypted_body,expires_at,is_test) VALUES($1,$2,$3,$4,$5,$6)",

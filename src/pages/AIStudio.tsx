@@ -28,6 +28,7 @@ import {
   Share2,
   Trash2,
   Wand2,
+  ArrowUpRight,
 } from "lucide-react";
 import { Button, PlatformIcon, StatusBadge } from "../components/ui";
 import { platforms, type Platform, type Snapshot } from "../lib/model";
@@ -110,9 +111,10 @@ export default function AIStudio() {
   const [error, setError] = useState<string | null>(null);
   const [generatedTitle, setGeneratedTitle] = useState("");
   const [savedContentId, setSavedContentId] = useState<string | undefined>();
-  const [generatedEvidence,setGeneratedEvidence] = useState<Array<{documentId:string|null;documentName?:string;knowledgeId:string;pageStart?:number;pageEnd?:number;excerpt?:string}>>([]);
   const [generatedVariants, setGeneratedVariants] = useState<Partial<Record<Platform, string>>>({});
   const [activePreviewPlatform, setActivePreviewPlatform] = useState<Platform>("LinkedIn");
+  const [posterScript, setPosterScript] = useState<{ prompt: string; headline: string } | null>(null);
+  const [isGeneratingPosterScript, setIsGeneratingPosterScript] = useState(false);
 
   // Platform limits mapping
   const platformLimits: Record<Platform, number> = {
@@ -205,6 +207,7 @@ export default function AIStudio() {
         });
         setLoadingKnowledge(false);
         setExtractingKnowledge(false);
+        void triggerFastPosterScript(items, activeDoc?.original_filename);
         return;
       }
 
@@ -224,6 +227,51 @@ export default function AIStudio() {
         setLoadingKnowledge(false);
         setExtractingKnowledge(false);
       }
+    }
+  }
+
+  async function triggerFastPosterScript(items: Array<{ id: string; knowledge_key?: string; value: any; source_excerpt?: string }>, docName?: string) {
+    if (!items || !items.length) return;
+    try {
+      setIsGeneratingPosterScript(true);
+      const topItem = items[0];
+      const concept = typeof topItem.value === "string" ? topItem.value : JSON.stringify(topItem.value);
+      const excerpt = topItem.source_excerpt || "";
+      const title = topItem.knowledge_key || docName || "SaaS Insights";
+
+      const res = await request<{ prompt: string; headline: string }>("/clipdrop/suggest-poster-prompt", "POST", {
+        knowledgeConcept: concept,
+        excerpt,
+        sourceVisualContext: `Extracted from PDF ${docName || "document"}`,
+        title,
+        platform: activePreviewPlatform || "Instagram",
+      });
+
+      if (res?.prompt) {
+        setPosterScript(res);
+        setGeneratedTitle(res.headline || title);
+
+        const defaultPlatforms: Platform[] = ["LinkedIn", "Instagram", "Facebook", "Telegram"];
+        const newVariants: Partial<Record<Platform, string>> = {};
+        const hashtags = ["#SaaS", "#Growth", "#Innovation", "#TechTrends"];
+        for (const p of defaultPlatforms) {
+          if (p === "LinkedIn") {
+            newVariants[p] = `🚀 ${res.headline || title}\n\n${concept}\n\n"${excerpt.slice(0, 220)}"\n\nKey takeaways from our latest technical breakdown.\n\n${hashtags.join(" ")}`;
+          } else if (p === "Instagram") {
+            newVariants[p] = `✨ ${res.headline || title}\n\nSwipe to see how ${concept.slice(0, 100)} transforms operations.\n\n${hashtags.join(" ")}`;
+          } else if (p === "Telegram") {
+            newVariants[p] = `⚡️ *${res.headline || title}*\n\n${concept}\n\n${excerpt.slice(0, 180)}\n\n${hashtags.join(" ")}`;
+          } else {
+            newVariants[p] = `${res.headline || title}: ${concept}\n\n${hashtags.join(" ")}`;
+          }
+        }
+        setGeneratedVariants((prev) => ({ ...newVariants, ...prev }));
+        toast.success("⚡ AI Poster Script & Multi-Platform Copy generated instantly!");
+      }
+    } catch (err) {
+      console.warn("Fast poster script generation notice:", err);
+    } finally {
+      setIsGeneratingPosterScript(false);
     }
   }
 
@@ -651,14 +699,15 @@ export default function AIStudio() {
       </div>
 
       {/* Mode Selector Tabs */}
+      {/* Mode Selector Tabs */}
       <div
         className="studio-tabs"
         style={{
           display: "flex",
-          gap: "8px",
-          marginBottom: "24px",
+          gap: "6px",
+          marginBottom: "20px",
           background: "var(--surface2)",
-          padding: "6px",
+          padding: "5px",
           borderRadius: "12px",
           border: "1px solid var(--border)",
           width: "fit-content",
@@ -667,65 +716,117 @@ export default function AIStudio() {
         <button
           type="button"
           onClick={() => setActiveTab("topic")}
-          className={activeTab==='topic'?'active':''}
-          aria-pressed={activeTab==='topic'}
+          className={activeTab === 'topic' ? 'active' : ''}
+          aria-pressed={activeTab === 'topic'}
           style={{
             display: "flex",
             alignItems: "center",
             gap: "8px",
-            padding: "10px 20px",
+            padding: "9px 18px",
             borderRadius: "8px",
             border: "none",
             background: activeTab === "topic" ? "var(--color-accent, #6366f1)" : "transparent",
             color: activeTab === "topic" ? "#fff" : "var(--color-text-muted, #94a3b8)",
             fontWeight: 600,
-            fontSize: "0.9rem",
+            fontSize: "0.88rem",
             cursor: "pointer",
             transition: "all 0.2s ease",
           }}
         >
-          <FileText size={17} />
+          <FileText size={16} />
           Create content
         </button>
         <button
           type="button"
           onClick={() => setActiveTab("pdf")}
-          className={activeTab==='pdf'?'active':''}
-          aria-pressed={activeTab==='pdf'}
+          className={activeTab === 'pdf' ? 'active' : ''}
+          aria-pressed={activeTab === 'pdf'}
           style={{
             display: "flex",
             alignItems: "center",
             gap: "8px",
-            padding: "10px 20px",
+            padding: "9px 18px",
             borderRadius: "8px",
             border: "none",
             background: activeTab === "pdf" ? "var(--color-accent, #6366f1)" : "transparent",
             color: activeTab === "pdf" ? "#fff" : "var(--color-text-muted, #94a3b8)",
             fontWeight: 600,
-            fontSize: "0.9rem",
+            fontSize: "0.88rem",
             cursor: "pointer",
             transition: "all 0.2s ease",
           }}
         >
-          <BookOpen size={17} />
+          <BookOpen size={16} />
           Business knowledge
           <span
             style={{
-              background: "rgba(16, 185, 129, 0.2)",
-              color: "var(--success)",
-              fontSize: "0.7rem",
-              padding: "2px 6px",
+              background: activeTab === "pdf" ? "rgba(255, 255, 255, 0.25)" : "rgba(16, 185, 129, 0.15)",
+              color: activeTab === "pdf" ? "#fff" : "var(--success, #10b981)",
+              fontSize: "0.68rem",
+              padding: "2px 7px",
               borderRadius: "10px",
-              marginLeft: "4px",
+              fontWeight: 700,
             }}
           >
             PDFs
           </span>
         </button>
-        <button type="button" className={`studio-automation-tab ${activeTab === 'automation' ? 'active' : ''}`} onClick={()=>setActiveTab('automation')}><Clock size={17}/>Automate content</button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("automation")}
+          className={activeTab === 'automation' ? 'active' : ''}
+          aria-pressed={activeTab === 'automation'}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "9px 18px",
+            borderRadius: "8px",
+            border: "none",
+            background: activeTab === "automation" ? "var(--color-accent, #6366f1)" : "transparent",
+            color: activeTab === "automation" ? "#fff" : "var(--color-text-muted, #94a3b8)",
+            fontWeight: 600,
+            fontSize: "0.88rem",
+            cursor: "pointer",
+            transition: "all 0.2s ease",
+          }}
+        >
+          <Clock size={16} />
+          Automate content
+          <span
+            style={{
+              background: activeTab === "automation" ? "rgba(255, 255, 255, 0.25)" : "rgba(99, 102, 241, 0.15)",
+              color: activeTab === "automation" ? "#fff" : "var(--accent, #6366f1)",
+              fontSize: "0.68rem",
+              padding: "2px 7px",
+              borderRadius: "10px",
+              fontWeight: 700,
+            }}
+          >
+            Auto
+          </span>
+        </button>
       </div>
 
-      <div className="studio-workflow-strip"><span>Business knowledge → Content → Approval → Scheduled publishing</span><div><Link to="/app/approvals">Approvals</Link><Link to="/app/calendar">Calendar</Link></div></div>
+      <div className="studio-workflow-strip">
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "0.82rem", color: "var(--color-text-muted, #94a3b8)" }}>
+          <span>Business knowledge</span>
+          <ChevronRight size={13} style={{ opacity: 0.5 }} />
+          <span>AI Content</span>
+          <ChevronRight size={13} style={{ opacity: 0.5 }} />
+          <span>Approval Queue</span>
+          <ChevronRight size={13} style={{ opacity: 0.5 }} />
+          <span style={{ color: "var(--accent, #6366f1)", fontWeight: 600 }}>Scheduled Publishing</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <Link to="/app/approvals" style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.82rem", fontWeight: 600, color: "var(--color-text-muted, #94a3b8)", textDecoration: "none" }}>
+            Approvals <ArrowUpRight size={13} />
+          </Link>
+          <Link to="/app/calendar" style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.82rem", fontWeight: 600, color: "var(--color-text-muted, #94a3b8)", textDecoration: "none" }}>
+            Calendar <ArrowUpRight size={13} />
+          </Link>
+        </div>
+      </div>
       {activeTab === 'automation' && <KnowledgeAutomation embedded />}
       <div className="composer-grid studio-creation-grid" style={{ display: activeTab === 'automation' ? 'none' : "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 420px)", gap: "24px" }}>
         {/* Main Creation Column */}
@@ -863,6 +964,7 @@ export default function AIStudio() {
                           onClick={() => {
                             setSelectedDocId(doc.id);
                             setActiveDoc(doc);
+                            setPosterScript(null);
                             if (doc.status === "READY") fetchKnowledge(doc.id);
                           }}
                           style={{
@@ -1160,6 +1262,96 @@ export default function AIStudio() {
                   </div>
                 )}
               </div>
+
+              {/* Fast AI Poster Script Card Generated from PDF */}
+              {(posterScript || isGeneratingPosterScript) && (
+                <div
+                  style={{
+                    marginBottom: "20px",
+                    padding: "18px 22px",
+                    borderRadius: "14px",
+                    background: "linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(168, 85, 247, 0.12) 100%)",
+                    border: "1px solid rgba(129, 140, 248, 0.4)",
+                    boxShadow: "0 8px 30px rgba(99, 102, 241, 0.15)",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "14px", flexWrap: "wrap", marginBottom: "12px" }}>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                        <Sparkles size={18} style={{ color: "#818cf8" }} />
+                        <strong style={{ fontSize: "1.05rem", color: "#f8fafc" }}>
+                          AI Poster Script &amp; Visual Prompt (Generated from PDF)
+                        </strong>
+                        {isGeneratingPosterScript ? (
+                          <span style={{ fontSize: "0.72rem", padding: "2px 8px", borderRadius: "10px", background: "rgba(99, 102, 241, 0.3)", color: "#a5b4fc", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                            <RotateCw size={12} className="animate-spin" /> Generating Fast...
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: "0.72rem", padding: "2px 8px", borderRadius: "10px", background: "rgba(16, 185, 129, 0.2)", color: "#34d399", fontWeight: 700 }}>
+                            READY TO RENDER
+                          </span>
+                        )}
+                      </div>
+                      <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
+                        Automatically crafted high-converting 3D SaaS visual prompt based on PDF insights &amp; diagrams.
+                      </p>
+                    </div>
+
+                    {posterScript && (
+                      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                        <Button
+                          type="button"
+                          onClick={() => setShowClipdropModal(true)}
+                          style={{
+                            padding: "8px 16px",
+                            fontSize: "0.85rem",
+                            fontWeight: 700,
+                            background: "linear-gradient(135deg, #ec4899, #8b5cf6)",
+                            border: "none",
+                            color: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            boxShadow: "0 4px 14px rgba(236, 72, 153, 0.4)",
+                          }}
+                        >
+                          <Wand2 size={15} /> Render Poster with AI
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => triggerFastPosterScript(knowledgeItems, activeDoc?.original_filename)}
+                          disabled={isGeneratingPosterScript}
+                          style={{ fontSize: "0.85rem", padding: "8px 12px" }}
+                        >
+                          <RotateCw size={14} className={isGeneratingPosterScript ? "animate-spin" : ""} /> Regenerate
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  {posterScript && (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: "14px", marginTop: "12px", background: "rgba(0, 0, 0, 0.25)", padding: "14px", borderRadius: "10px", border: "1px solid rgba(255, 255, 255, 0.08)" }}>
+                      <div>
+                        <span style={{ fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "#818cf8", fontWeight: 700, display: "block", marginBottom: "4px" }}>
+                          Catchy Poster Headline
+                        </span>
+                        <strong style={{ fontSize: "1rem", color: "#fff", lineHeight: 1.3, display: "block" }}>
+                          {posterScript.headline}
+                        </strong>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "#a855f7", fontWeight: 700, display: "block", marginBottom: "4px" }}>
+                          3D SaaS Visual Prompt (Clipdrop / FLUX)
+                        </span>
+                        <p style={{ margin: 0, fontSize: "0.83rem", color: "#e2e8f0", lineHeight: 1.45, fontStyle: "italic" }}>
+                          &ldquo;{posterScript.prompt}&rdquo;
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Extracted Knowledge & Evidence Panel */}
               <div className="panel" style={{ padding: "24px" }}>
@@ -1772,6 +1964,7 @@ export default function AIStudio() {
           .filter(Boolean)
           .join("\n\nExtracted Knowledge:\n")}
         initialTitle={generatedTitle}
+        initialPrompt={posterScript?.prompt}
         targetPlatform={activePreviewPlatform}
         accounts={s?.accounts || []}
         brandName={s?.brand?.name}

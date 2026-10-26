@@ -16,6 +16,14 @@ const suggestPromptSchema = z.object({
   contextInfo: z.string().optional(),
 });
 
+const suggestPosterPromptSchema = z.object({
+  knowledgeConcept: z.string().min(1).max(5000),
+  excerpt: z.string().max(2000).optional(),
+  sourceVisualContext: z.string().max(1000).optional(),
+  title: z.string().max(200).optional(),
+  platform: z.string().optional(),
+});
+
 const generateImageSchema = z.object({
   prompt: z.string().trim().min(3).max(2000),
   engine: z.enum(["clipdrop", "flux"]).default("clipdrop"),
@@ -67,6 +75,23 @@ export class ClipdropController {
     assertPermission(r.workspace.role, "edit");
     const v = suggestPromptSchema.parse(input);
     return this.clipdropService.suggestPrompt(v.contentText, v.platform, v.contextInfo);
+  }
+
+  @Post("suggest-poster-prompt")
+  async suggestPosterPrompt(@Req() r: AuthedRequest, @Body() input: unknown) {
+    assertPermission(r.workspace.role, "edit");
+    const v = suggestPosterPromptSchema.parse(input);
+    const { pool } = await import("../db.js");
+    const ws = (await pool.query("SELECT brand_settings FROM workspaces WHERE id=$1", [r.workspace.id])).rows[0];
+    const brand = ws?.brand_settings || {};
+    return this.clipdropService.suggestPosterPrompt({
+      knowledgeConcept: v.knowledgeConcept,
+      excerpt: v.excerpt,
+      sourceVisualContext: v.sourceVisualContext,
+      title: v.title,
+      brand,
+      platform: v.platform,
+    });
   }
 
   @Post("generate-image")

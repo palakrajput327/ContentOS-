@@ -20,6 +20,13 @@ const suggestPromptSchema = z.object({
     platform: z.string().optional(),
     contextInfo: z.string().optional(),
 });
+const suggestPosterPromptSchema = z.object({
+    knowledgeConcept: z.string().min(1).max(5000),
+    excerpt: z.string().max(2000).optional(),
+    sourceVisualContext: z.string().max(1000).optional(),
+    title: z.string().max(200).optional(),
+    platform: z.string().optional(),
+});
 const generateImageSchema = z.object({
     prompt: z.string().trim().min(3).max(2000),
     engine: z.enum(["clipdrop", "flux"]).default("clipdrop"),
@@ -67,6 +74,21 @@ let ClipdropController = class ClipdropController {
         assertPermission(r.workspace.role, "edit");
         const v = suggestPromptSchema.parse(input);
         return this.clipdropService.suggestPrompt(v.contentText, v.platform, v.contextInfo);
+    }
+    async suggestPosterPrompt(r, input) {
+        assertPermission(r.workspace.role, "edit");
+        const v = suggestPosterPromptSchema.parse(input);
+        const { pool } = await import("../db.js");
+        const ws = (await pool.query("SELECT brand_settings FROM workspaces WHERE id=$1", [r.workspace.id])).rows[0];
+        const brand = ws?.brand_settings || {};
+        return this.clipdropService.suggestPosterPrompt({
+            knowledgeConcept: v.knowledgeConcept,
+            excerpt: v.excerpt,
+            sourceVisualContext: v.sourceVisualContext,
+            title: v.title,
+            brand,
+            platform: v.platform,
+        });
     }
     async generateImage(r, input) {
         assertPermission(r.workspace.role, "edit");
@@ -123,6 +145,14 @@ __decorate([
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], ClipdropController.prototype, "suggestPrompt", null);
+__decorate([
+    Post("suggest-poster-prompt"),
+    __param(0, Req()),
+    __param(1, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], ClipdropController.prototype, "suggestPosterPrompt", null);
 __decorate([
     Post("generate-image"),
     __param(0, Req()),

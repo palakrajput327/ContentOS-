@@ -313,22 +313,38 @@ export class TelegramProvider implements SocialProvider {
         if (!mediaInfo) return {success:false,publishedAt:new Date(),error:'Telegram attached media could not be read. Re-upload the media and retry.'};
         if (request.text.length > 1024) return {success:false,publishedAt:new Date(),error:'Telegram media caption exceeds 1024 characters. Shorten the Telegram caption.'};
 
-        // Convert WebP images to JPEG format for Telegram API compatibility
-        if (mediaInfo.mimeType === 'image/webp') {
+        // Pre-normalize and optimize images for Telegram API:
+        // Telegram strictly requires width + height <= 10000 and aspect ratio <= 20:1.
+        // We auto-resize any high-res image so max dimension is 1920px (full HD quality).
+        const isVideo = mediaInfo.mimeType.startsWith('video/') || request.mediaType === 'video' || request.mediaUrl.toLowerCase().includes('.mp4');
+        if (!isVideo && mediaInfo.mimeType.startsWith('image/')) {
           try {
             const { loadImage, createCanvas } = await import('@napi-rs/canvas');
             const img = await loadImage(mediaInfo.buffer);
-            const canvas = createCanvas(img.width, img.height);
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
-            const jpegBuf = await canvas.encode('jpeg');
-            mediaInfo = { buffer: jpegBuf, mimeType: 'image/jpeg' };
+            let targetW = img.width;
+            let targetH = img.height;
+            const maxDim = 1920;
+            if (targetW > maxDim || targetH > maxDim) {
+              if (targetW > targetH) {
+                targetH = Math.round((targetH * maxDim) / targetW);
+                targetW = maxDim;
+              } else {
+                targetW = Math.round((targetW * maxDim) / targetH);
+                targetH = maxDim;
+              }
+            }
+            if (targetW !== img.width || targetH !== img.height || mediaInfo.mimeType === 'image/webp') {
+              const canvas = createCanvas(targetW, targetH);
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, targetW, targetH);
+              const jpegBuf = await canvas.encode('jpeg');
+              mediaInfo = { buffer: jpegBuf, mimeType: 'image/jpeg' };
+            }
           } catch (e) {
-            console.warn('[Telegram Provider] WebP to JPEG conversion fallback:', e);
+            console.warn('[Telegram Provider] Image pre-normalization:', e);
           }
         }
 
-        const isVideo = mediaInfo.mimeType.startsWith('video/') || request.mediaType === 'video' || request.mediaUrl.toLowerCase().includes('.mp4');
         const endpoint = isVideo ? 'sendVideo' : 'sendPhoto';
         const paramName = isVideo ? 'video' : 'photo';
         const filename = isVideo ? 'video.mp4' : 'photo.jpg';
@@ -348,14 +364,66 @@ export class TelegramProvider implements SocialProvider {
             body: formData,
           },
         );
-        const data = await res.json();
-        if (!res.ok || !data.ok || !data.result?.message_id) {
+        let data = await res.json();
+        // Fallback 1: If sendPhoto/sendVideo was rejected by Telegram (e.g. PHOTO_INVALID_DIMENSIONS, aspect ratio limits, format),
+        // automatically send as sendDocument which accepts ANY dimensions and aspect ratios without restriction.
+        if (!res.ok || !data.ok) {
           const desc = data.description || "";
-          const isTokenError =
-            res.status === 401 ||
-            res.status === 403 ||
-            desc.toLowerCase().includes("unauthorized") ||
-            desc.toLowerCase().includes("token");
+          const isTokenError = res.status === 401 || res.status === 403 || desc.toLowerCase().includes("unauthorized") || desc.toLowerCase().includes("token");
+          
+          if (!isTokenError) {
+            try {
+              const docFormData = new FormData();
+              docFormData.append("chat_id", chatId);
+              const docFilename = isVideo ? "video.mp4" : (mediaInfo.mimeType.includes("png") ? "image.png" : "photo.jpg");
+              docFormData.append("document", blob, docFilename);
+              if (request.text) {
+                docFormData.append("caption", request.text.slice(0, 1024));
+              }
+              const docRes = await fetch(
+                `https://api.telegram.org/bot${botToken}/sendDocument`,
+                { method: "POST", body: docFormData },
+              );
+              const docData = await docRes.json();
+              if (docRes.ok && docData.ok && docData.result?.message_id) {
+                return {
+                  success: true,
+                  providerPostId: String(docData.result.message_id),
+                  publishedAt: new Date(docData.result.date * 1000),
+                };
+              }
+            } catch (err) {
+              console.warn("[Telegram Provider] sendDocument fallback error:", err);
+            }
+
+            // Fallback 2: If media cannot be sent at all, deliver the post text directly via sendMessage
+            try {
+              const messageText = request.text || (request.mediaUrl ? `Post: ${request.mediaUrl}` : "");
+              if (messageText) {
+                const fbRes = await fetch(
+                  `https://api.telegram.org/bot${botToken}/sendMessage`,
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      chat_id: chatId,
+                      text: messageText,
+                    }),
+                  },
+                );
+                const fbData = await fbRes.json();
+                if (fbData.ok && fbData.result?.message_id) {
+                  return {
+                    success: true,
+                    providerPostId: String(fbData.result.message_id),
+                    publishedAt: new Date(fbData.result.date * 1000),
+                  };
+                }
+              }
+            } catch (err) {
+              console.warn("[Telegram Provider] sendMessage fallback error:", err);
+            }
+          }
 
           return {
             success: false,

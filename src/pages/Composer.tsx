@@ -152,7 +152,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
       });
 
       const wid = useSession.getState().workspaceId;
-      const apiBase = import.meta.env.VITE_API_BASE ?? "";
+      const apiBase = (import.meta.env.VITE_API_BASE || (typeof window !== "undefined" && window.location.hostname.includes("hidustansocialnetwork") ? "https://api.hidustansocialnetwork.in" : "")) as string;
       const targetUploadUrl = presign.uploadUrl.startsWith("/")
         ? `${apiBase}${presign.uploadUrl}`
         : presign.uploadUrl;

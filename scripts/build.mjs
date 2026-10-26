@@ -53,6 +53,7 @@ try {
 
 if (vitePath && fs.existsSync(vitePath)) {
   const env = { ...process.env };
+  if (!env.VITE_API_BASE) env.VITE_API_BASE = 'https://api.hidustansocialnetwork.in';
   delete env.NODE_ENV;
   const r2 = spawnSync(process.execPath, [vitePath, 'build'], { cwd, env, stdio: 'inherit' });
   if (r2.status !== 0) process.exit(r2.status || 1);

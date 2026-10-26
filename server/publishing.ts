@@ -293,6 +293,7 @@ export async function executePublishRecord(
               postTitle: content.title,
               status: "failed",
               errorReason: e.code,
+              layer: "Layer 5: Channel Publishing",
             });
           }
         } catch (mailErr) {
@@ -300,6 +301,8 @@ export async function executePublishRecord(
         }
       }
     });
+    // Immediately deliver alert email so user knows without delay
+    import("./mail.js").then((m) => m.deliverEmails({ limit: 5 })).catch(() => {});
     return {
       success: false,
       state: retry ? "ENQUEUED" : e.uncertain ? "UNCERTAIN" : "FAILED",
@@ -369,12 +372,15 @@ export async function executePublishRecord(
           postTitle: content.title,
           status: "published",
           providerPostId: providerId,
+          layer: "Layer 5: Social Publishing & Channel Dispatch",
         });
       }
     } catch (mailErr) {
       console.warn("[Publishing Success Mail]", mailErr);
     }
   });
+  // Immediately deliver success confirmation email
+  import("./mail.js").then((m) => m.deliverEmails({ limit: 5 })).catch(() => {});
   return { success: true, state: "PUBLISHED", providerPostId: providerId };
 }
 

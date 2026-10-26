@@ -631,7 +631,19 @@ export function Terms({ defaultTab }: { defaultTab?: "terms" | "privacy" }) {
               </div>
 
               <div className="legal-section">
-                <h2>8. Data Protection Inquiries</h2>
+                <h2>8. Google API & YouTube Limited Use Disclosure</h2>
+                <p>
+                  ContentOS accesses Google APIs (including YouTube Data API v3) exclusively to allow users to publish and schedule video content and view channel details upon explicit user authorization.
+                </p>
+                <ul>
+                  <li><strong>Limited Use:</strong> ContentOS&apos;s use and transfer of information received from Google APIs to any other app will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Google API Services User Data Policy</a>, including the Limited Use requirements.</li>
+                  <li><strong>Data Retention & Revocation:</strong> You can revoke ContentOS&apos;s access to your Google account at any time via your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Google Security Settings</a> or by disconnecting YouTube in ContentOS Channel Settings, which immediately deletes all stored access and refresh tokens.</li>
+                  <li><strong>Third-Party Terms:</strong> ContentOS uses YouTube API Services. By using these features, you agree to be bound by the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>YouTube Terms of Service</a> and <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Google Privacy Policy</a>.</li>
+                </ul>
+              </div>
+
+              <div className="legal-section">
+                <h2>9. Data Protection Inquiries</h2>
                 <p>
                   For any privacy questions, data subject requests, or security inquiries, please contact our Data Protection team:
                 </p>
