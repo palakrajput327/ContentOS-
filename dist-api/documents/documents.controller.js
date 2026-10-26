@@ -257,6 +257,55 @@ let DocumentsController = class DocumentsController {
             throw fastErr;
         }
     }
+    async getPosterScripts(r, documentId) {
+        const w = r.workspace.id;
+        const knowRes = await pool.query(`SELECT id, knowledge_key, knowledge_type, value, page_start, page_end, source_excerpt, confidence
+       FROM document_knowledge
+       WHERE document_id = $1 AND workspace_id = $2
+       ORDER BY page_start ASC, created_at ASC`, [documentId, w]);
+        const mediaRes = await pool.query(`SELECT dsm.id, dsm.page_number, dsm.kind, m.bucket, m.object_key, m.id as asset_id
+       FROM document_source_media dsm
+       JOIN media_assets m ON m.id = dsm.media_asset_id
+       WHERE dsm.document_id = $1 AND dsm.workspace_id = $2 AND m.deleted_at IS NULL
+       ORDER BY dsm.page_number ASC`, [documentId, w]);
+        const { provider } = getStorageProvider();
+        const pageImageMap = new Map();
+        for (const m of mediaRes.rows) {
+            if (!pageImageMap.has(m.page_number)) {
+                try {
+                    const url = await provider.getSignedDownloadUrl(m.bucket, m.object_key, 7 * 86400);
+                    pageImageMap.set(m.page_number, { url, assetId: m.asset_id });
+                }
+                catch { }
+            }
+        }
+        const firstImage = pageImageMap.values().next().value;
+        const scripts = [];
+        for (const k of knowRes.rows) {
+            const pageNum = k.page_start || 1;
+            const media = pageImageMap.get(pageNum) || firstImage || null;
+            const concept = typeof k.value === "string" ? k.value : JSON.stringify(k.value);
+            const cleanConcept = concept.replace(/["{}]/g, "").trim();
+            const excerpt = (k.source_excerpt || "").trim();
+            const title = k.knowledge_key || cleanConcept;
+            const visualPrompt = `Futuristic 3D minimalist tech poster visual representing ${cleanConcept}, floating holographic data interface, floating frosted glass cubes, glowing volumetric violet and cyan studio lighting, ultra-detailed 8k octane render`;
+            const headline = cleanConcept.length > 36 ? cleanConcept.slice(0, 34) + "..." : cleanConcept;
+            scripts.push({
+                id: k.id,
+                page: pageNum,
+                concept: cleanConcept,
+                excerpt,
+                knowledgeType: k.knowledge_type,
+                sourceImageUrl: media?.url || null,
+                mediaAssetId: media?.assetId || null,
+                posterPrompt: visualPrompt,
+                headline,
+                caption: `🚀 ${headline}\n\n${cleanConcept}\n\n"${excerpt.slice(0, 220)}"\n\n#SaaS #SocialGrowth #TechTrends #ContentOS`,
+                hashtags: ["#SaaS", "#SocialGrowth", "#TechTrends", "#ContentOS"],
+            });
+        }
+        return { scripts };
+    }
     async deleteDocument(r, documentId) {
         assertPermission(r.workspace.role, "edit");
         const w = r.workspace.id;
@@ -375,6 +424,15 @@ __decorate([
     __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", Promise)
 ], DocumentsController.prototype, "fastTrackDocument", null);
+__decorate([
+    WorkspaceRequired(),
+    Get(":documentId/poster-scripts"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "getPosterScripts", null);
 __decorate([
     WorkspaceRequired(),
     Delete(":documentId"),

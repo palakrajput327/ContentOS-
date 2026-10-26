@@ -379,6 +379,24 @@ export const documentsApi = {
     await request(`/documents/${documentId}/knowledge/${knowledgeId}`, "DELETE");
   },
 
+  listPosterScripts: async (documentId: string): Promise<Array<{
+    id: string;
+    page: number;
+    concept: string;
+    excerpt: string;
+    knowledgeType: string;
+    sourceImageUrl: string | null;
+    mediaAssetId: string | null;
+    posterPrompt: string;
+    headline: string;
+    caption: string;
+    hashtags: string[];
+  }>> => {
+    if (useSession.getState().demo) return [];
+    const res = await request<{ scripts: any[] }>(`/documents/${documentId}/poster-scripts`);
+    return res.scripts || [];
+  },
+
   clearAllKnowledge: async (documentId: string): Promise<void> => {
     if (useSession.getState().demo) return;
     await request(`/documents/${documentId}/knowledge`, "DELETE");

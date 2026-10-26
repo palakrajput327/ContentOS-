@@ -34,6 +34,8 @@ import {
   FileText,
   Mail,
   RefreshCw,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { request } from "../lib/api";
 import { useSession } from "../lib/session";
@@ -115,16 +117,26 @@ type Overview = {
 };
 const base = "/knowledge-automation";
 
+function formatSlotTo12h(timeStr: string): string {
+  if (!timeStr) return "";
+  const [hStr, mStr] = timeStr.trim().split(":");
+  const h = parseInt(hStr, 10);
+  if (isNaN(h)) return timeStr;
+  const m = mStr ? mStr.padStart(2, "0") : "00";
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${String(h12).padStart(2, "0")}:${m} ${ampm}`;
+}
+
 const TIME_PRESETS = [
-  { label: "07:07 AM (Custom Slot)", value: "07:07" },
-  { label: "08:00 AM", value: "08:00" },
-  { label: "09:00 AM (Morning)", value: "09:00" },
-  { label: "10:00 AM (Recommended)", value: "10:00" },
-  { label: "01:15 PM (Afternoon)", value: "13:15" },
-  { label: "04:00 PM (Teaser)", value: "16:00" },
+  { label: "10:00 AM (Recommended Peak)", value: "10:00" },
+  { label: "09:00 AM (Morning Rush)", value: "09:00" },
+  { label: "08:00 AM (Early Bird)", value: "08:00" },
+  { label: "01:15 PM (Lunch Break)", value: "13:15" },
+  { label: "04:00 PM (Afternoon Catchup)", value: "16:00" },
   { label: "06:00 PM (Peak Prime)", value: "18:00" },
-  { label: "08:00 PM (Night)", value: "20:00" },
-  { label: "03, 04 & 05 PM (Triple Slots)", value: "15:00,16:00,17:00" },
+  { label: "08:00 PM (Night Digest)", value: "20:00" },
+  { label: "09:00 AM, 02:00 PM & 06:00 PM (Triple Growth)", value: "09:00,14:00,18:00" },
 ];
 
 export default function KnowledgeAutomation({ embedded = false }: { embedded?: boolean }) {
@@ -144,6 +156,8 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
     [search, setSearch] = useState(""),
     [isCustomTime, setIsCustomTime] = useState(false),
     [customTimeVal, setCustomTimeVal] = useState(""),
+    [customPickerTime, setCustomPickerTime] = useState("10:00"),
+    [savedSlotNotice, setSavedSlotNotice] = useState<string | null>(null),
     [showGuide, setShowGuide] = useState(true),
     [activeLightbox, setActiveLightbox] = useState<string | null>(null),
     [tab, setTab] = useState<"proposals" | "knowledge">("proposals");
@@ -244,9 +258,32 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
             postingTime: slot,
             posterStyle: config.poster_style || "AI_POSTER",
           }),
-        `Daily posting slot set to ${slot}!`
+        `Daily posting schedule updated & saved to ${slot}!`
       );
+      setSavedSlotNotice(`✓ Daily Posting Schedule successfully saved: ${slot} (${data?.workspace?.timezone || "Asia/Kolkata"})`);
+      setTimeout(() => setSavedSlotNotice(null), 5000);
     }
+  }
+
+  function handleAddSlot(slotToAdd: string) {
+    if (!slotToAdd) return;
+    const current = (config?.posting_time || "10:00")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!current.includes(slotToAdd)) {
+      const updated = [...current, slotToAdd].sort();
+      handleSaveTime(updated.join(","));
+    }
+  }
+
+  function handleRemoveSlot(slotToRemove: string) {
+    const current = (config?.posting_time || "10:00")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const updated = current.filter((s) => s !== slotToRemove);
+    handleSaveTime(updated.length > 0 ? updated.join(",") : "10:00");
   }
   const date = (value: string) =>
     new Intl.DateTimeFormat("en-IN", {
@@ -513,61 +550,201 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
         </div>
       </section>
 
-      {/* Flexible Daily Posting Schedule Strip */}
+      {/* Flexible Daily Posting Schedule Strip (Presets + Dynamic Custom Time Picker) */}
       {data && config && (
         <div className="ka-timing-section">
+          {/* Header with Save Button */}
           <div className="ka-timing-header">
             <div className="ka-timing-title">
               <Clock size={18} style={{ color: "#6366f1" }} />
               <span>Flexible Daily Posting Schedule</span>
               <span className="ka-timing-active-badge">
-                <CheckCircle2 size={13} /> Active Slot: {config.posting_time || "10:00"} ({data.workspace.timezone})
+                <CheckCircle2 size={13} />
+                {((config.posting_time || "10:00").split(",").map((s) => s.trim()).filter(Boolean).length > 1)
+                  ? `${(config.posting_time || "10:00").split(",").map((s) => s.trim()).filter(Boolean).length} Slots/Day`
+                  : `Active Slot: ${formatSlotTo12h(config.posting_time || "10:00")}`} ({data.workspace.timezone})
               </span>
             </div>
-            <div className="ka-custom-time-form">
-              <input
-                type="text"
-                className="ka-custom-input"
-                placeholder="Custom (e.g. 07:07)"
-                value={customTimeVal}
-                onChange={(e) => setCustomTimeVal(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && customTimeVal.trim()) {
-                    handleSaveTime(customTimeVal.trim());
-                    setCustomTimeVal("");
-                  }
-                }}
-              />
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <Button
-                variant="secondary"
-                disabled={busy || !customTimeVal.trim()}
-                onClick={() => {
-                  if (customTimeVal.trim()) {
-                    handleSaveTime(customTimeVal.trim());
-                    setCustomTimeVal("");
-                  }
+                variant="primary"
+                size="sm"
+                disabled={busy}
+                onClick={() => handleSaveTime(config.posting_time || "10:00")}
+                style={{
+                  background: "#16a34a",
+                  borderColor: "#16a34a",
+                  color: "#ffffff",
+                  fontSize: "0.82rem",
+                  padding: "6px 14px",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  boxShadow: "0 2px 6px rgba(22, 163, 74, 0.25)"
                 }}
-                style={{ fontSize: "0.8rem", padding: "6px 12px" }}
               >
-                Set Time
+                <Save size={14} /> Save Schedule
               </Button>
             </div>
           </div>
-          <div className="ka-timing-chips-row">
-            {TIME_PRESETS.map((p) => {
-              const isActive = config.posting_time === p.value;
-              return (
-                <button
-                  key={p.value}
-                  type="button"
-                  className={`ka-time-chip ${isActive ? "is-active" : ""}`}
-                  onClick={() => handleSaveTime(p.value)}
+
+          {/* Dual Panel Grid: Presets & Custom Picker */}
+          <div className="ka-timing-grid">
+            {/* Panel 1: Curated Engagement Presets */}
+            <div className="ka-timing-panel">
+              <div className="ka-timing-panel-label">
+                <Sparkles size={14} style={{ color: "#6366f1" }} />
+                <span>1. Popular Engagement Presets</span>
+              </div>
+              <select
+                className="ka-preset-dropdown"
+                value={config.posting_time || "10:00"}
+                onChange={(e) => {
+                  if (e.target.value) handleSaveTime(e.target.value);
+                }}
+              >
+                {TIME_PRESETS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+
+              <div className="ka-timing-chips-row">
+                {TIME_PRESETS.slice(0, 5).map((p) => {
+                  const isActive = config.posting_time === p.value;
+                  return (
+                    <button
+                      key={p.value}
+                      type="button"
+                      className={`ka-time-chip ${isActive ? "is-active" : ""}`}
+                      onClick={() => handleSaveTime(p.value)}
+                    >
+                      {p.label.split("—")[0].trim()}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Panel 2: Dynamic Custom Time Picker (User Selects Exact Time) */}
+            <div className="ka-timing-panel">
+              <div className="ka-timing-panel-label">
+                <CalendarClock size={14} style={{ color: "#059669" }} />
+                <span>2. Custom Dynamic Time (Select Exact Time)</span>
+              </div>
+              <div className="ka-picker-container">
+                <input
+                  type="time"
+                  className="ka-native-time-input"
+                  value={customPickerTime}
+                  onChange={(e) => setCustomPickerTime(e.target.value)}
+                />
+                <span className="ka-picker-preview">
+                  {formatSlotTo12h(customPickerTime)}
+                </span>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={busy || !customPickerTime}
+                  onClick={() => handleSaveTime(customPickerTime)}
+                  style={{ fontSize: "0.82rem", padding: "6px 14px", fontWeight: 600 }}
                 >
-                  {p.label}
-                </button>
-              );
-            })}
+                  <Save size={14} /> Save Slot
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={busy || !customPickerTime}
+                  onClick={() => handleAddSlot(customPickerTime)}
+                  style={{ fontSize: "0.82rem", padding: "6px 12px" }}
+                  title="Add this as an extra daily slot alongside existing slots"
+                >
+                  <Plus size={14} /> Add Extra Slot
+                </Button>
+              </div>
+              <span style={{ fontSize: "0.76rem", color: "var(--text-muted, #64748b)" }}>
+                Pick any exact minute (e.g. 07:07, 13:15, 17:45) and click <b>Save Slot</b> or <b>Add Extra Slot</b>.
+              </span>
+            </div>
           </div>
+
+          {/* Active Daily Slots Tray with 1-click removal and explicit Save button */}
+          <div className="ka-active-slots-tray">
+            <span className="ka-slots-label">
+              <Clock size={14} style={{ color: "#4f46e5" }} /> Active Daily Schedule:
+            </span>
+            {(config.posting_time || "10:00")
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+              .map((slot) => (
+                <span key={slot} className="ka-slot-chip">
+                  <span>{formatSlotTo12h(slot)} ({slot})</span>
+                  <button
+                    type="button"
+                    className="ka-slot-remove-btn"
+                    title={`Remove ${formatSlotTo12h(slot)} from daily schedule`}
+                    onClick={() => handleRemoveSlot(slot)}
+                  >
+                    <X size={13} />
+                  </button>
+                </span>
+              ))}
+
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={busy}
+                onClick={() => handleSaveTime(config.posting_time || "10:00")}
+                style={{
+                  background: "#16a34a",
+                  borderColor: "#16a34a",
+                  color: "#ffffff",
+                  fontSize: "0.82rem",
+                  padding: "6px 14px",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  boxShadow: "0 2px 6px rgba(22, 163, 74, 0.25)"
+                }}
+              >
+                <Save size={14} /> Save Schedule
+              </Button>
+              <button
+                type="button"
+                className="ka-slot-chip"
+                style={{ background: "#f1f5f9", borderColor: "#cbd5e1", color: "#64748b", cursor: "pointer" }}
+                onClick={() => handleSaveTime("10:00")}
+                title="Reset to 10:00 AM standard slot"
+              >
+                Reset to 10:00 AM
+              </button>
+            </div>
+          </div>
+
+          {/* Success Notification Alert */}
+          {savedSlotNotice && (
+            <div style={{
+              marginTop: "12px",
+              padding: "10px 16px",
+              borderRadius: "8px",
+              background: "rgba(22, 163, 74, 0.12)",
+              border: "1px solid rgba(22, 163, 74, 0.35)",
+              color: "#15803d",
+              fontSize: "0.85rem",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: "8px"
+            }}>
+              <CheckCircle2 size={16} />
+              {savedSlotNotice}
+            </div>
+          )}
         </div>
       )}
 

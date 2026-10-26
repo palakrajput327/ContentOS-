@@ -360,9 +360,23 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
       if (initialPrompt) {
         setPrompt(initialPrompt);
+      } else if (!prompt && (initialContentText || initialTitle)) {
+        // Automatically populate visual prompt from post content/title
+        void (async () => {
+          try {
+            setIsSuggesting(true);
+            const res = await clipdropApi.suggestPrompt(
+              initialContentText || initialTitle || "Tech & SaaS Innovation",
+              targetPlatform,
+            );
+            if (res?.prompt) setPrompt(res.prompt);
+          } catch {} finally {
+            setIsSuggesting(false);
+          }
+        })();
       }
     }
-  }, [isOpen, targetPlatform, connectedAccounts, initialContentText, captionManuallyEdited, initialPrompt]);
+  }, [isOpen, targetPlatform, connectedAccounts, initialContentText, captionManuallyEdited, initialPrompt, initialTitle]);
 
   if (!isOpen) return null;
 

@@ -29,6 +29,7 @@ import {
   Trash2,
   Wand2,
   ArrowUpRight,
+  Copy,
 } from "lucide-react";
 import { Button, PlatformIcon, StatusBadge } from "../components/ui";
 import { platforms, type Platform, type Snapshot } from "../lib/model";
@@ -115,6 +116,21 @@ export default function AIStudio() {
   const [activePreviewPlatform, setActivePreviewPlatform] = useState<Platform>("LinkedIn");
   const [posterScript, setPosterScript] = useState<{ prompt: string; headline: string } | null>(null);
   const [isGeneratingPosterScript, setIsGeneratingPosterScript] = useState(false);
+  const [posterScripts, setPosterScripts] = useState<Array<{
+    id: string;
+    page: number;
+    concept: string;
+    excerpt: string;
+    knowledgeType: string;
+    sourceImageUrl: string | null;
+    mediaAssetId: string | null;
+    posterPrompt: string;
+    headline: string;
+    caption: string;
+    hashtags: string[];
+  }>>([]);
+  const [loadingScripts, setLoadingScripts] = useState(false);
+  const [copiedScriptId, setCopiedScriptId] = useState<string | null>(null);
 
   // Platform limits mapping
   const platformLimits: Record<Platform, number> = {
@@ -208,6 +224,7 @@ export default function AIStudio() {
         setLoadingKnowledge(false);
         setExtractingKnowledge(false);
         void triggerFastPosterScript(items, activeDoc?.original_filename);
+        void fetchPosterScripts(docId);
         return;
       }
 
@@ -272,6 +289,23 @@ export default function AIStudio() {
       console.warn("Fast poster script generation notice:", err);
     } finally {
       setIsGeneratingPosterScript(false);
+    }
+  }
+
+  async function fetchPosterScripts(docId: string) {
+    if (!docId) return;
+    try {
+      setLoadingScripts(true);
+      const scripts = await documentsApi.listPosterScripts(docId);
+      setPosterScripts(scripts);
+      if (scripts.length > 0 && !posterScript) {
+        setGeneratedTitle(scripts[0].headline);
+        setPosterScript({ prompt: scripts[0].posterPrompt, headline: scripts[0].headline });
+      }
+    } catch (err) {
+      console.warn("Could not load poster scripts:", err);
+    } finally {
+      setLoadingScripts(false);
     }
   }
 
@@ -964,8 +998,10 @@ export default function AIStudio() {
                           onClick={() => {
                             setSelectedDocId(doc.id);
                             setActiveDoc(doc);
-                            setPosterScript(null);
-                            if (doc.status === "READY") fetchKnowledge(doc.id);
+                            if (doc.status === "READY") {
+                              fetchKnowledge(doc.id);
+                              fetchPosterScripts(doc.id);
+                            }
                           }}
                           style={{
                             display: "flex",
@@ -1263,93 +1299,212 @@ export default function AIStudio() {
                 )}
               </div>
 
-              {/* Fast AI Poster Script Card Generated from PDF */}
-              {(posterScript || isGeneratingPosterScript) && (
+              {/* Generated Image Poster Scripts & Prompts Gallery (From PDF & Extracted Images) */}
+              {selectedDocId && (posterScripts.length > 0 || posterScript || loadingScripts || isGeneratingPosterScript) && (
                 <div
                   style={{
-                    marginBottom: "20px",
-                    padding: "18px 22px",
-                    borderRadius: "14px",
-                    background: "linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(168, 85, 247, 0.12) 100%)",
+                    marginBottom: "24px",
+                    padding: "20px 24px",
+                    borderRadius: "16px",
+                    background: "linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%)",
                     border: "1px solid rgba(129, 140, 248, 0.4)",
-                    boxShadow: "0 8px 30px rgba(99, 102, 241, 0.15)",
+                    boxShadow: "0 10px 30px rgba(0, 0, 0, 0.25)",
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "14px", flexWrap: "wrap", marginBottom: "12px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
                     <div>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                        <Sparkles size={18} style={{ color: "#818cf8" }} />
-                        <strong style={{ fontSize: "1.05rem", color: "#f8fafc" }}>
-                          AI Poster Script &amp; Visual Prompt (Generated from PDF)
-                        </strong>
-                        {isGeneratingPosterScript ? (
-                          <span style={{ fontSize: "0.72rem", padding: "2px 8px", borderRadius: "10px", background: "rgba(99, 102, 241, 0.3)", color: "#a5b4fc", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                      <h3 style={{ fontSize: "1.15rem", fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: "8px", color: "#f8fafc" }}>
+                        <Sparkles size={20} style={{ color: "#818cf8" }} />
+                        Generated Poster Prompts &amp; Scripts ({posterScripts.length || (posterScript ? 1 : 0)})
+                        {(loadingScripts || isGeneratingPosterScript) && (
+                          <span style={{ fontSize: "0.75rem", padding: "2px 8px", borderRadius: "10px", background: "rgba(99, 102, 241, 0.25)", color: "#a5b4fc", display: "inline-flex", alignItems: "center", gap: "5px" }}>
                             <RotateCw size={12} className="animate-spin" /> Generating Fast...
                           </span>
-                        ) : (
-                          <span style={{ fontSize: "0.72rem", padding: "2px 8px", borderRadius: "10px", background: "rgba(16, 185, 129, 0.2)", color: "#34d399", fontWeight: 700 }}>
-                            READY TO RENDER
-                          </span>
                         )}
-                      </div>
-                      <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
-                        Automatically crafted high-converting 3D SaaS visual prompt based on PDF insights &amp; diagrams.
+                      </h3>
+                      <p style={{ margin: "4px 0 0", fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
+                        AI combined extracted PDF text concepts + source diagram figures into high-converting 3D SaaS visual prompts and catchy headlines.
                       </p>
                     </div>
 
-                    {posterScript && (
-                      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                        <Button
-                          type="button"
-                          onClick={() => setShowClipdropModal(true)}
-                          style={{
-                            padding: "8px 16px",
-                            fontSize: "0.85rem",
-                            fontWeight: 700,
-                            background: "linear-gradient(135deg, #ec4899, #8b5cf6)",
-                            border: "none",
-                            color: "#fff",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "6px",
-                            boxShadow: "0 4px 14px rgba(236, 72, 153, 0.4)",
-                          }}
-                        >
-                          <Wand2 size={15} /> Render Poster with AI
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          onClick={() => triggerFastPosterScript(knowledgeItems, activeDoc?.original_filename)}
-                          disabled={isGeneratingPosterScript}
-                          style={{ fontSize: "0.85rem", padding: "8px 12px" }}
-                        >
-                          <RotateCw size={14} className={isGeneratingPosterScript ? "animate-spin" : ""} /> Regenerate
-                        </Button>
-                      </div>
-                    )}
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          if (selectedDocId) {
+                            fetchPosterScripts(selectedDocId);
+                            triggerFastPosterScript(knowledgeItems, activeDoc?.original_filename);
+                          }
+                        }}
+                        disabled={loadingScripts || isGeneratingPosterScript}
+                        style={{ fontSize: "0.82rem", padding: "8px 12px" }}
+                      >
+                        <RotateCw size={13} className={loadingScripts ? "animate-spin" : ""} /> Regenerate All
+                      </Button>
+                      <Button
+                        variant="primary"
+                        disabled={autopilotRunning}
+                        onClick={handleTriggerAutoPilot}
+                        style={{
+                          background: "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)",
+                          fontWeight: 700,
+                          padding: "8px 16px",
+                          fontSize: "0.85rem",
+                          border: "none",
+                          boxShadow: "0 4px 14px rgba(99, 102, 241, 0.35)",
+                        }}
+                      >
+                        {autopilotRunning ? "⚡ Auto-Posting…" : "⚡ Auto-Post & Schedule All"}
+                      </Button>
+                    </div>
                   </div>
 
-                  {posterScript && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: "14px", marginTop: "12px", background: "rgba(0, 0, 0, 0.25)", padding: "14px", borderRadius: "10px", border: "1px solid rgba(255, 255, 255, 0.08)" }}>
-                      <div>
-                        <span style={{ fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "#818cf8", fontWeight: 700, display: "block", marginBottom: "4px" }}>
-                          Catchy Poster Headline
-                        </span>
-                        <strong style={{ fontSize: "1rem", color: "#fff", lineHeight: 1.3, display: "block" }}>
-                          {posterScript.headline}
-                        </strong>
+                  {/* List of Poster Scripts Cards */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    {(posterScripts.length > 0 ? posterScripts : posterScript ? [{
+                      id: "ps-main",
+                      page: 1,
+                      concept: generatedTitle || "PDF Core Concept",
+                      excerpt: knowledgeItems[0]?.source_excerpt || "Key takeaway from document",
+                      knowledgeType: "CONCEPT",
+                      sourceImageUrl: null,
+                      mediaAssetId: null,
+                      posterPrompt: posterScript.prompt,
+                      headline: posterScript.headline,
+                      caption: generatedVariants[activePreviewPlatform] || posterScript.headline,
+                      hashtags: ["#SaaS", "#SocialGrowth", "#ContentOS"],
+                    }] : []).map((item, idx) => (
+                      <div
+                        key={item.id || idx}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: item.sourceImageUrl ? "150px 1fr" : "1fr",
+                          gap: "16px",
+                          padding: "16px",
+                          borderRadius: "12px",
+                          background: "var(--surface2, #18182f)",
+                          border: "1px solid rgba(255, 255, 255, 0.08)",
+                          alignItems: "center",
+                        }}
+                      >
+                        {/* Extracted Diagram Thumbnail */}
+                        {item.sourceImageUrl && (
+                          <div style={{ position: "relative", width: "150px", height: "130px", borderRadius: "8px", overflow: "hidden", background: "#000", border: "1px solid rgba(255, 255, 255, 0.1)" }}>
+                            <img
+                              src={item.sourceImageUrl}
+                              alt="Source Diagram"
+                              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            />
+                            <div style={{ position: "absolute", bottom: "4px", left: "4px", background: "rgba(0,0,0,0.75)", color: "#fff", fontSize: "10px", padding: "2px 6px", borderRadius: "4px", fontWeight: 600 }}>
+                              Page {item.page} Diagram
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Content & Script Body */}
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "8px", flexWrap: "wrap" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <span style={{ fontSize: "0.7rem", padding: "2px 8px", borderRadius: "4px", background: "rgba(99, 102, 241, 0.2)", color: "#a5b4fc", fontWeight: 700, textTransform: "uppercase" }}>
+                                {item.knowledgeType || "CONCEPT"} • Page {item.page}
+                              </span>
+                              <strong style={{ fontSize: "1rem", color: "#fff" }}>
+                                {item.headline}
+                              </strong>
+                            </div>
+
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(item.posterPrompt);
+                                  setCopiedScriptId(item.id);
+                                  setTimeout(() => setCopiedScriptId(null), 2000);
+                                  toast.success("Prompt copied to clipboard!");
+                                }}
+                                style={{
+                                  background: "rgba(255, 255, 255, 0.06)",
+                                  border: "1px solid rgba(255, 255, 255, 0.15)",
+                                  color: copiedScriptId === item.id ? "#34d399" : "#cbd5e1",
+                                  padding: "5px 10px",
+                                  borderRadius: "6px",
+                                  fontSize: "0.75rem",
+                                  cursor: "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "5px",
+                                }}
+                              >
+                                {copiedScriptId === item.id ? <Check size={12} /> : <Copy size={12} />}
+                                {copiedScriptId === item.id ? "Copied" : "Copy Prompt"}
+                              </button>
+
+                              <Button
+                                type="button"
+                                onClick={() => {
+                                  setPosterScript({ prompt: item.posterPrompt, headline: item.headline });
+                                  setGeneratedTitle(item.headline);
+                                  setShowClipdropModal(true);
+                                }}
+                                style={{
+                                  padding: "5px 12px",
+                                  fontSize: "0.8rem",
+                                  fontWeight: 700,
+                                  background: "linear-gradient(135deg, #ec4899, #8b5cf6)",
+                                  border: "none",
+                                  color: "#fff",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "5px",
+                                  boxShadow: "0 4px 12px rgba(236, 72, 153, 0.35)",
+                                }}
+                              >
+                                <Wand2 size={13} /> Render Poster
+                              </Button>
+
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => {
+                                  setGeneratedTitle(item.headline);
+                                  setPosterScript({ prompt: item.posterPrompt, headline: item.headline });
+                                  const defaultPlatforms: Platform[] = ["LinkedIn", "Instagram", "Facebook", "Telegram"];
+                                  const newVariants: Partial<Record<Platform, string>> = {};
+                                  for (const p of defaultPlatforms) {
+                                    newVariants[p] = `🚀 ${item.headline}\n\n${item.concept}\n\n"${item.excerpt.slice(0, 220)}"\n\n${item.hashtags.join(" ")}`;
+                                  }
+                                  setGeneratedVariants(newVariants);
+                                  if (item.sourceImageUrl && item.mediaAssetId) {
+                                    setAttachedVisual({ assetId: item.mediaAssetId, url: item.sourceImageUrl, filename: `${item.headline}.webp` });
+                                  }
+                                  toast.success("Loaded into Post Preview!");
+                                }}
+                                style={{ padding: "5px 10px", fontSize: "0.8rem" }}
+                              >
+                                Use in Studio
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* 3D Prompt Script Box */}
+                          <div style={{ background: "rgba(0, 0, 0, 0.35)", padding: "10px 14px", borderRadius: "8px", border: "1px solid rgba(255, 255, 255, 0.08)", marginBottom: "8px" }}>
+                            <span style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "#a855f7", fontWeight: 700, display: "block", marginBottom: "4px" }}>
+                              3D SaaS Visual Poster Prompt:
+                            </span>
+                            <p style={{ margin: 0, fontSize: "0.82rem", color: "#e2e8f0", lineHeight: 1.45, fontStyle: "italic" }}>
+                              &ldquo;{item.posterPrompt}&rdquo;
+                            </p>
+                          </div>
+
+                          {/* Caption Preview */}
+                          <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
+                            <strong>Caption Script:</strong> {item.concept} &mdash; <em>&ldquo;{item.excerpt.slice(0, 100)}...&rdquo;</em>
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <span style={{ fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "#a855f7", fontWeight: 700, display: "block", marginBottom: "4px" }}>
-                          3D SaaS Visual Prompt (Clipdrop / FLUX)
-                        </span>
-                        <p style={{ margin: 0, fontSize: "0.83rem", color: "#e2e8f0", lineHeight: 1.45, fontStyle: "italic" }}>
-                          &ldquo;{posterScript.prompt}&rdquo;
-                        </p>
-                      </div>
-                    </div>
-                  )}
+                    ))}
+                  </div>
                 </div>
               )}
 

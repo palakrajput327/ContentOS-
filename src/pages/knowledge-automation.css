@@ -1282,10 +1282,11 @@
 .ka-timing-section {
   background: var(--surface, #ffffff);
   border: 1px solid var(--border, #e2e8f0);
-  border-radius: 12px;
-  padding: 18px 20px;
+  border-radius: 14px;
+  padding: 20px 22px;
   margin-top: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 22px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 .ka-timing-header {
   display: flex;
@@ -1293,38 +1294,70 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border, #f1f5f9);
 }
 .ka-timing-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--text, #1e293b);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text, #0f172a);
 }
 .ka-timing-active-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: 20px;
   background: rgba(16, 185, 129, 0.12);
   color: #059669;
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   font-weight: 600;
   border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.ka-timing-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+@media (max-width: 860px) {
+  .ka-timing-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.ka-timing-panel {
+  background: var(--surface-secondary, #f8fafc);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ka-timing-panel-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-secondary, #475569);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .ka-timing-chips-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 .ka-time-chip {
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 0.82rem;
+  padding: 6px 11px;
+  border-radius: 7px;
+  font-size: 0.8rem;
   font-weight: 500;
   border: 1px solid var(--border, #cbd5e1);
   background: var(--surface, #ffffff);
@@ -1344,23 +1377,96 @@
   font-weight: 600;
   box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);
 }
-.ka-custom-time-form {
+.ka-preset-dropdown {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 0.83rem;
+  font-weight: 500;
+  border-radius: 7px;
+  border: 1px solid var(--border, #cbd5e1);
+  background: #ffffff;
+  color: var(--text, #1e293b);
+  outline: none;
+  cursor: pointer;
+}
+.ka-preset-dropdown:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+.ka-picker-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ka-native-time-input {
+  padding: 6px 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-radius: 7px;
+  border: 1px solid var(--border, #cbd5e1);
+  background: #ffffff;
+  color: #1e293b;
+  outline: none;
+  cursor: pointer;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+.ka-native-time-input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+.ka-picker-preview {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #4f46e5;
+  background: rgba(99, 102, 241, 0.08);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.ka-active-slots-tray {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(99, 102, 241, 0.03);
+  border: 1px dashed rgba(99, 102, 241, 0.25);
+  border-radius: 9px;
+}
+.ka-slots-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.ka-slot-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
-}
-.ka-custom-input {
-  padding: 6px 12px;
-  font-size: 0.82rem;
+  padding: 4px 10px;
   border-radius: 6px;
-  border: 1px solid var(--border, #cbd5e1);
-  width: 140px;
-  outline: none;
+  background: #ffffff;
+  border: 1px solid #c7d2fe;
+  color: #4338ca;
+  font-size: 0.8rem;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(99, 102, 241, 0.06);
 }
-.ka-custom-input:focus {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+.ka-slot-remove-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+  transition: color 0.15s ease;
+}
+.ka-slot-remove-btn:hover {
+  color: #dc2626;
 }
 
 /* 5-Layer Stepper */
