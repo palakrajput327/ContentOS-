@@ -222,7 +222,7 @@ async function processLockedPDFDocument(
           const generationId=randomUUID();
           await db.query(`INSERT INTO ai_generations(id,workspace_id,actor_id,provider,generation_type,status,input,output)
             VALUES($1,$2,$3,$4,'DOCUMENT_KNOWLEDGE','QUEUED',$5,'{}')`,
-            [generationId,workspaceId,doc.created_by,process.env.LLM_PROVIDER || 'groq',JSON.stringify({documentId,autoTriggered:true})]);
+            [generationId,workspaceId,doc.created_by,process.env.LLM_PROVIDER || 'gemini',JSON.stringify({documentId,autoTriggered:true})]);
           await new PostgresQueue(pool).enqueue('content-generation','extract-knowledge',
             {generationId,documentId,workspaceId},
             {workspaceId,key:generationId,attempts:3,backoff:10000},db);
@@ -254,7 +254,7 @@ async function processLockedPDFDocument(
             generationId,
             workspaceId,
             doc.created_by,
-            process.env.LLM_PROVIDER || "groq",
+            process.env.LLM_PROVIDER || "gemini",
             JSON.stringify({ documentId, autoTriggered: true }),
           ],
         );

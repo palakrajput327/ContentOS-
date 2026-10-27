@@ -65,7 +65,7 @@ export class DashboardController {
       process.env.OPENROUTER_API_KEY
     );
     const aiProvider = process.env.GEMINI_API_KEY
-      ? "Gemini 2.5 Flash"
+      ? `Gemini (${process.env.GEMINI_MODEL || "3.5 Flash"})`
       : process.env.GROQ_API_KEY
         ? "Groq LLaMA 3.3"
         : process.env.OPENROUTER_API_KEY

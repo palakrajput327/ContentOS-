@@ -193,7 +193,7 @@ async function processLockedPDFDocument(documentId, workspaceId, options) {
             if (queueBackend() === 'postgres' && !options?.skipKnowledge) {
                 const generationId = randomUUID();
                 await db.query(`INSERT INTO ai_generations(id,workspace_id,actor_id,provider,generation_type,status,input,output)
-            VALUES($1,$2,$3,$4,'DOCUMENT_KNOWLEDGE','QUEUED',$5,'{}')`, [generationId, workspaceId, doc.created_by, process.env.LLM_PROVIDER || 'groq', JSON.stringify({ documentId, autoTriggered: true })]);
+            VALUES($1,$2,$3,$4,'DOCUMENT_KNOWLEDGE','QUEUED',$5,'{}')`, [generationId, workspaceId, doc.created_by, process.env.LLM_PROVIDER || 'gemini', JSON.stringify({ documentId, autoTriggered: true })]);
                 await new PostgresQueue(pool).enqueue('content-generation', 'extract-knowledge', { generationId, documentId, workspaceId }, { workspaceId, key: generationId, attempts: 3, backoff: 10000 }, db);
             }
             await audit(db, workspaceId, null, "DOCUMENT_PROCESSING_COMPLETED", "document", documentId, doc.original_filename, null, { pageCount, chunkCount: chunks.length, ocrUsed });
@@ -208,7 +208,7 @@ async function processLockedPDFDocument(documentId, workspaceId, options) {
                 generationId,
                 workspaceId,
                 doc.created_by,
-                process.env.LLM_PROVIDER || "groq",
+                process.env.LLM_PROVIDER || "gemini",
                 JSON.stringify({ documentId, autoTriggered: true }),
             ]);
             console.log(`[PDF Worker] Auto-triggering knowledge extraction for document ${documentId}...`);

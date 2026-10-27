@@ -115,7 +115,6 @@ export class KnowledgeAutomationService {
             prompt: suggested.prompt,
             aspectRatio: "1:1",
             headline: suggested.headline || context.title,
-            stylePreset: "3d-render",
             enableOverlay: true,
             idempotencyKey: `autopilot:${context.workspaceId}:${context.topicHash}:${Date.now()}`,
         });
@@ -637,7 +636,7 @@ export class KnowledgeAutomationService {
             for (const document of missing) {
                 const generationId = randomUUID();
                 await this.database.query(`INSERT INTO ai_generations(id,workspace_id,actor_id,provider,generation_type,status,input,output)
-           VALUES($1,$2,$3,$4,'DOCUMENT_KNOWLEDGE','QUEUED',$5,'{}')`, [generationId, workspaceId, actorId, process.env.LLM_PROVIDER || 'groq', JSON.stringify({ documentId: document.id, autoTriggered: true })]);
+           VALUES($1,$2,$3,$4,'DOCUMENT_KNOWLEDGE','QUEUED',$5,'{}')`, [generationId, workspaceId, actorId, process.env.LLM_PROVIDER || 'gemini', JSON.stringify({ documentId: document.id, autoTriggered: true })]);
                 console.log(`[AutoPilot] Extracting missing knowledge for document ${document.id}...`);
                 try {
                     await knowledgeService.processKnowledgeExtraction(generationId, document.id, workspaceId);

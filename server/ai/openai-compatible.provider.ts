@@ -69,6 +69,19 @@ export class OpenAICompatibleProvider implements LLMProvider {
           const isQuotaExceeded = /quota|RESOURCE_EXHAUSTED|limit exceeded|per day/i.test(errText);
           const isRetryable = (status === 429 && !isQuotaExceeded) || (status >= 500 && status !== 501);
 
+          // If Gemini model hits 429 quota or 404, automatically try next working Gemini model
+          if (this.providerName === "gemini") {
+            const geminiModels = [this.model, "gemini-3.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash"].filter((m, i, a) => m && a.indexOf(m) === i);
+            const currentIdx = geminiModels.indexOf(payload.model || this.model);
+            if (currentIdx !== -1 && currentIdx < geminiModels.length - 1) {
+              const nextModel = geminiModels[currentIdx + 1];
+              console.log(`[Gemini] Switching model from ${payload.model} to ${nextModel} due to ${status}`);
+              payload.model = nextModel;
+              attempt++;
+              continue;
+            }
+          }
+
           let suggestedWaitMs = 0;
           const matchWait = errText.match(/try again in (\d+(?:\.\d+)?)s/i);
           if (matchWait) {

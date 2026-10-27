@@ -77,7 +77,7 @@ let KnowledgeController = class KnowledgeController {
                 generationId,
                 w,
                 r.user.id,
-                process.env.LLM_PROVIDER || "groq",
+                process.env.LLM_PROVIDER || "gemini",
                 JSON.stringify({ documentId }),
             ]);
             await contentGenQueue.add("extract-knowledge", {
