@@ -270,7 +270,7 @@ let DocumentsController = class DocumentsController {
          JOIN media_assets m ON m.id = dsm.media_asset_id
          WHERE dsm.document_id = $1 AND dsm.workspace_id = $2 AND m.deleted_at IS NULL
          ORDER BY dsm.page_number ASC`, [documentId, w]),
-            pool.query(`SELECT p.id, p.knowledge_id, p.source_snapshot, p.media_asset_id, c.variants, c.title, c.body
+            pool.query(`SELECT p.id, p.knowledge_id, p.source_snapshot, c.variants, c.title, c.body
          FROM knowledge_content_plans p
          LEFT JOIN content c ON c.id = p.content_id
          WHERE p.workspace_id = $1 AND p.state = 'COMPLETED'`, [w]),
@@ -307,7 +307,7 @@ let DocumentsController = class DocumentsController {
             const visualPrompt = plan?.source_snapshot?.posterPrompt || dynamicPrompt;
             const finalHeadline = plan?.source_snapshot?.headline || headline;
             const imageUrl = plan?.source_snapshot?.mediaUrl || media?.url || null;
-            const assetId = plan?.media_asset_id || media?.assetId || null;
+            const assetId = plan?.source_snapshot?.mediaAssetId || media?.assetId || null;
             const caption = plan?.variants?.LinkedIn?.caption || plan?.body || cleanCaption;
             scripts.push({
                 id: k.id,

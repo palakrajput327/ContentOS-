@@ -28,7 +28,7 @@ export interface LiveAutoPilotPulseProps {
   autopilotRunning?: boolean;
   onSelectPlan?: (plan: any) => void;
   onOpenVisualStudio?: (prompt: string, headline: string) => void;
-  onRefreshPrompt?: (planId: string, headline: string, prompt: string) => Promise<string | void>;
+  onRefreshPrompt?: (planId: string, headline: string, prompt: string) => Promise<{ posterPrompt?: string; mediaUrl?: string; assetId?: string } | string | void>;
 }
 
 export function LiveAutoPilotPulse({
@@ -48,6 +48,7 @@ export function LiveAutoPilotPulse({
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [refreshingPrompt, setRefreshingPrompt] = useState(false);
   const [localPrompts, setLocalPrompts] = useState<Record<string, string>>({});
+  const [localImages, setLocalImages] = useState<Record<string, string>>({});
 
   // Tick every second for the dynamic live countdown
   useEffect(() => {
@@ -145,6 +146,11 @@ export function LiveAutoPilotPulse({
   const isPublished = currentPlan.publish_state === "PUBLISHED" || currentPlan.content_status === "PUBLISHED";
   const isFailed = currentPlan.publish_state === "FAILED" || currentPlan.state === "FAILED";
 
+  // Check if it's currently in the 2-minute dispatch window
+  const isDispatchingNow = isPast && diffMs >= -120000 && !isPublished && !isFailed;
+  // If it's more than 2 minutes in the past, it's ready/queued
+  const isOverdueQueued = isPast && diffMs < -120000 && !isPublished && !isFailed;
+
   // Calculate live countdown string (HH:MM:SS)
   const absDiff = Math.abs(diffMs);
   const hours = Math.floor(absDiff / (1000 * 60 * 60));
@@ -160,6 +166,7 @@ export function LiveAutoPilotPulse({
   const targetPlatform = currentPlan.social_platform || currentPlan.platforms?.[0] || firstVariantKey;
 
   const rawMediaUrl =
+    localImages[currentPlan.id] ||
     primaryVariant.mediaUrl ||
     currentPlan.source_snapshot?.mediaUrl ||
     currentPlan.media_url ||
@@ -235,7 +242,7 @@ export function LiveAutoPilotPulse({
                 height: "100%",
                 width: "100%",
                 borderRadius: "50%",
-                background: isPublished ? "#10b981" : isFailed ? "#ef4444" : "#38bdf8",
+                background: isPublished ? "#10b981" : isFailed ? "#ef4444" : isOverdueQueued ? "#a855f7" : isDispatchingNow ? "#fbbf24" : "#38bdf8",
                 opacity: 0.75,
                 animation: "ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite",
               }}
@@ -247,7 +254,7 @@ export function LiveAutoPilotPulse({
                 borderRadius: "50%",
                 height: "10px",
                 width: "10px",
-                background: isPublished ? "#10b981" : isFailed ? "#ef4444" : "#0284c7",
+                background: isPublished ? "#10b981" : isFailed ? "#ef4444" : isOverdueQueued ? "#a855f7" : isDispatchingNow ? "#f59e0b" : "#0284c7",
               }}
             />
           </span>
@@ -276,26 +283,42 @@ export function LiveAutoPilotPulse({
               alignItems: "center",
               gap: "8px",
               background: "rgba(0, 0, 0, 0.5)",
-              border: "1px solid rgba(56, 189, 248, 0.4)",
+              border: `1px solid ${isPublished ? "rgba(16, 185, 129, 0.4)" : isFailed ? "rgba(239, 68, 68, 0.4)" : isOverdueQueued ? "rgba(168, 85, 247, 0.4)" : "rgba(56, 189, 248, 0.4)"}`,
               padding: "5px 12px",
               borderRadius: "8px",
-              boxShadow: "0 0 10px rgba(56, 189, 248, 0.15)",
+              boxShadow: "0 0 10px rgba(0, 0, 0, 0.2)",
             }}
           >
-            <Clock size={15} style={{ color: "#38bdf8", animation: "spin 8s linear infinite" }} />
+            <Clock size={15} style={{ color: isPublished ? "#34d399" : isFailed ? "#ef4444" : isOverdueQueued ? "#c084fc" : "#38bdf8", animation: "spin 8s linear infinite" }} />
             <span style={{ fontSize: "0.75rem", color: "#94a3b8", fontWeight: 500 }}>
-              {isPublished ? "Published at:" : isPast ? "Dispatching:" : "Time Until Live Post:"}
+              {isPublished
+                ? "Published at:"
+                : isFailed
+                ? "Status:"
+                : isDispatchingNow
+                ? "Dispatching:"
+                : isOverdueQueued
+                ? "Status:"
+                : "Time Until Live Post:"}
             </span>
             <span
               style={{
                 fontFamily: "ui-monospace, monospace",
                 fontSize: "1rem",
                 fontWeight: 800,
-                color: isPublished ? "#34d399" : isPast ? "#fbbf24" : "#38bdf8",
+                color: isPublished ? "#34d399" : isFailed ? "#ef4444" : isDispatchingNow ? "#fbbf24" : isOverdueQueued ? "#c084fc" : "#38bdf8",
                 letterSpacing: "0.05em",
               }}
             >
-              {isPublished ? "LIVE NOW" : isPast ? "POSTING NOW..." : countdownText}
+              {isPublished
+                ? "LIVE NOW"
+                : isFailed
+                ? "FAILED (Retry Available)"
+                : isDispatchingNow
+                ? "POSTING NOW..."
+                : isOverdueQueued
+                ? "READY TO POST"
+                : countdownText}
             </span>
           </div>
 
@@ -382,6 +405,33 @@ export function LiveAutoPilotPulse({
             }}
             onClick={() => resolvedImg && setActiveLightbox(resolvedImg)}
           >
+            {refreshingPrompt && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: "rgba(15, 23, 42, 0.88)",
+                  backdropFilter: "blur(4px)",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                  zIndex: 10,
+                  color: "#e2e8f0",
+                  padding: "10px",
+                  textAlign: "center",
+                }}
+              >
+                <RefreshCw size={24} style={{ animation: "spin 1.5s linear infinite", color: "#c084fc" }} />
+                <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "#d8b4fe" }}>
+                  Generating AI visual from refreshed prompt…
+                </span>
+                <span style={{ fontSize: "0.68rem", color: "#94a3b8" }}>
+                  Translating document concepts dynamically
+                </span>
+              </div>
+            )}
             {resolvedImg ? (
               <>
                 <img
@@ -414,6 +464,7 @@ export function LiveAutoPilotPulse({
                 </div>
               </>
             ) : (
+
               <div
                 style={{
                   height: "100%",
@@ -456,14 +507,22 @@ export function LiveAutoPilotPulse({
                   onClick={async () => {
                     setRefreshingPrompt(true);
                     try {
-                      const newPrompt = await onRefreshPrompt(currentPlan.id, headline, visualPrompt);
-                      if (typeof newPrompt === "string") {
-                        setLocalPrompts((prev) => ({ ...prev, [currentPlan.id]: newPrompt }));
+                      const res = await onRefreshPrompt(currentPlan.id, headline, visualPrompt);
+                      if (res && typeof res === "object") {
+                        if (res.posterPrompt) {
+                          setLocalPrompts((prev) => ({ ...prev, [currentPlan.id]: res.posterPrompt! }));
+                        }
+                        if (res.mediaUrl) {
+                          setLocalImages((prev) => ({ ...prev, [currentPlan.id]: res.mediaUrl! }));
+                        }
+                      } else if (typeof res === "string") {
+                        setLocalPrompts((prev) => ({ ...prev, [currentPlan.id]: res }));
                       }
                     } finally {
                       setRefreshingPrompt(false);
                     }
                   }}
+
                   style={{
                     background: "rgba(168, 85, 247, 0.18)",
                     border: "1px solid rgba(168, 85, 247, 0.4)",
@@ -555,13 +614,26 @@ export function LiveAutoPilotPulse({
                   fontSize: "0.7rem",
                   padding: "2px 7px",
                   borderRadius: "4px",
-                  background: isPublished ? "rgba(16, 185, 129, 0.2)" : "rgba(56, 189, 248, 0.2)",
-                  color: isPublished ? "#34d399" : "#38bdf8",
+                  background: isPublished
+                    ? "rgba(16, 185, 129, 0.2)"
+                    : isFailed
+                    ? "rgba(239, 68, 68, 0.2)"
+                    : isOverdueQueued
+                    ? "rgba(168, 85, 247, 0.2)"
+                    : "rgba(56, 189, 248, 0.2)",
+                  color: isPublished
+                    ? "#34d399"
+                    : isFailed
+                    ? "#f87171"
+                    : isOverdueQueued
+                    ? "#c084fc"
+                    : "#38bdf8",
                   fontWeight: 700,
                 }}
               >
-                {isPublished ? "PUBLISHED" : "ENQUEUED"}
+                {isPublished ? "PUBLISHED" : isFailed ? "FAILED" : isOverdueQueued ? "READY TO POST" : "ENQUEUED"}
               </span>
+
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "0.8rem" }}>

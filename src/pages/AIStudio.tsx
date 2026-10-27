@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { Button, PlatformIcon, StatusBadge } from "../components/ui";
 import { platforms, type Platform, type Snapshot } from "../lib/model";
-import { data, request, documentsApi, resolveMediaUrl, type DocItem, type KnowledgeItem } from "../lib/api";
+import { data, request, documentsApi, clipdropApi, resolveMediaUrl, type DocItem, type KnowledgeItem } from "../lib/api";
 import { useSession } from "../lib/session";
 import { PublishPreviewModal } from "../components/PublishPreviewModal";
 import { ClipdropImageModal } from "../components/ClipdropImageModal";
@@ -422,6 +422,25 @@ export default function AIStudio() {
       );
       if (res?.prompt) {
         setPosterScript({ prompt: res.prompt, headline: res.headline || generatedTitle });
+        try {
+          const imgRes = await clipdropApi.generateImage({
+            prompt: res.prompt,
+            headline: res.headline || generatedTitle,
+            platform: activePreviewPlatform,
+            aspectRatio: "1:1",
+          });
+          if (imgRes?.url) {
+            setAttachedVisual({
+              assetId: imgRes.assetId,
+              url: imgRes.url,
+              filename: `${res.headline || generatedTitle}.png`,
+            });
+            toast.success("✨ Dynamic prompt & fresh visual image generated!");
+            return;
+          }
+        } catch (imgErr) {
+          console.warn("Could not auto-generate visual in studio preview:", imgErr);
+        }
         toast.success("✨ Dynamic visual prompt regenerated!");
       }
     } catch (err: any) {
@@ -430,6 +449,7 @@ export default function AIStudio() {
       setIsRegeneratingSinglePrompt(false);
     }
   };
+
 
   async function handleDeleteDocument(docId: string, e?: React.MouseEvent) {
     if (e) e.stopPropagation();
@@ -1337,16 +1357,24 @@ export default function AIStudio() {
                     }}
                     onRefreshPrompt={async (planId: string, currentHeadline: string) => {
                       try {
-                        const res = await request<{ posterPrompt: string; headline: string }>(
+                        const res = await request<{ posterPrompt: string; headline: string; mediaUrl?: string; assetId?: string }>(
                           `/knowledge-automation/plans/${planId}/refresh-prompt`,
                           "POST"
                         );
                         if (res?.posterPrompt) {
                           setPosterScript({ prompt: res.posterPrompt, headline: res.headline || currentHeadline });
-                          toast.success("✨ Dynamic visual prompt regenerated from PDF!");
+                          if (res.mediaUrl) {
+                            setAttachedVisual({
+                              assetId: res.assetId || "gen-visual",
+                              url: res.mediaUrl,
+                              filename: `${res.headline || currentHeadline}.png`,
+                            });
+                          }
+                          toast.success("✨ Dynamic prompt & fresh visual image generated!");
                           await storedAutoPosts.refetch();
-                          return res.posterPrompt;
+                          return res;
                         }
+
                       } catch (err: any) {
                         try {
                           const res = await request<{ prompt: string; headline: string }>(

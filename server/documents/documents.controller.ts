@@ -411,12 +411,13 @@ export class DocumentsController {
         [documentId, w]
       ),
       pool.query(
-        `SELECT p.id, p.knowledge_id, p.source_snapshot, p.media_asset_id, c.variants, c.title, c.body
+        `SELECT p.id, p.knowledge_id, p.source_snapshot, c.variants, c.title, c.body
          FROM knowledge_content_plans p
          LEFT JOIN content c ON c.id = p.content_id
          WHERE p.workspace_id = $1 AND p.state = 'COMPLETED'`,
         [w]
       ),
+
     ]);
 
     const { provider } = getStorageProvider();
@@ -453,7 +454,7 @@ export class DocumentsController {
       const visualPrompt = plan?.source_snapshot?.posterPrompt || dynamicPrompt;
       const finalHeadline = plan?.source_snapshot?.headline || headline;
       const imageUrl = plan?.source_snapshot?.mediaUrl || media?.url || null;
-      const assetId = plan?.media_asset_id || media?.assetId || null;
+      const assetId = plan?.source_snapshot?.mediaAssetId || media?.assetId || null;
       const caption = plan?.variants?.LinkedIn?.caption || plan?.body || cleanCaption;
 
       scripts.push({

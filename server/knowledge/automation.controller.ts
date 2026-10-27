@@ -428,10 +428,32 @@ export class KnowledgeAutomationController {
       brand,
     });
 
+    let newMediaUrl = snapshot.mediaUrl || null;
+    let newAssetId = snapshot.mediaAssetId || null;
+    try {
+      const imgRes = await clipdropService.generateImage({
+        workspaceId: r.workspace.id,
+        userId: r.user.id,
+        prompt: res.prompt,
+        engine: "clipdrop",
+        headline: res.headline || title,
+        aspectRatio: "1:1",
+        contentId: plan.content_id || undefined,
+      });
+      if (imgRes?.url) {
+        newMediaUrl = imgRes.url;
+        newAssetId = imgRes.assetId;
+      }
+    } catch (imgErr) {
+      console.warn("Could not auto-generate refreshed visual image:", imgErr);
+    }
+
     const updatedSnapshot = {
       ...snapshot,
       posterPrompt: res.prompt,
       headline: res.headline || title,
+      mediaUrl: newMediaUrl,
+      mediaAssetId: newAssetId,
     };
 
     await pool.query(
@@ -441,12 +463,29 @@ export class KnowledgeAutomationController {
       [JSON.stringify(updatedSnapshot), id, r.workspace.id]
     );
 
+    if (plan.content_id && newMediaUrl) {
+      const contentRow = (await pool.query("SELECT variants FROM content WHERE id=$1", [plan.content_id])).rows[0];
+      if (contentRow?.variants) {
+        const variants = typeof contentRow.variants === "string" ? JSON.parse(contentRow.variants) : contentRow.variants;
+        for (const platform of Object.keys(variants)) {
+          if (variants[platform]) {
+            variants[platform].mediaUrl = newMediaUrl;
+            variants[platform].mediaAssetId = newAssetId;
+          }
+        }
+        await pool.query("UPDATE content SET variants=$1::jsonb, updated_at=now() WHERE id=$2", [JSON.stringify(variants), plan.content_id]);
+      }
+    }
+
     return {
       success: true,
       planId: id,
       posterPrompt: res.prompt,
       headline: res.headline || title,
+      mediaUrl: newMediaUrl,
+      assetId: newAssetId,
     };
   }
 }
+
 

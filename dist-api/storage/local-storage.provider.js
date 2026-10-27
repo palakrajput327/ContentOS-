@@ -92,7 +92,7 @@ export class LocalStorageProvider {
             },
         };
     }
-    async getSignedDownloadUrl(bucket, objectKey, expiresInSeconds = 3600) {
+    async getSignedDownloadUrl(bucket, objectKey, expiresInSeconds = 30 * 86400) {
         const { generateStorageSignature } = await import("./signed-url.js");
         const expiresAt = Date.now() + expiresInSeconds * 1000;
         const sig = generateStorageSignature(bucket, objectKey, expiresAt);

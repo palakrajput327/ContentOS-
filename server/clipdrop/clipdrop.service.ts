@@ -392,7 +392,7 @@ Platform: ${opts.platform || "Instagram"}`;
     const filename=`${usedEngine}_visual_${Date.now()}${ext}`;
     await uploadManagedMedia({assetId,workspaceId:opts.workspaceId,userId:opts.userId,provider,bucket,objectKey,body:finalBuffer,mimeType,filename,type:'GENERATED_ASSET',metadata:{idempotency_key:keyHash,prompt:opts.prompt,engine:usedEngine,aspect_ratio:aspectRatio,headline:opts.headline||null,logo_text:opts.logoText||null,cta:opts.cta||null,remaining_credits:remainingCredits,content_id:opts.contentId||null}});
 
-    const downloadUrl = await provider.getSignedDownloadUrl(bucket, objectKey, 3600);
+    const downloadUrl = await provider.getSignedDownloadUrl(bucket, objectKey, 30 * 86400);
 
     // 6. Attach to Content Item & set status to NEEDS_REVIEW
     if (opts.contentId) {
@@ -493,7 +493,7 @@ Platform: ${opts.platform || "Instagram"}`;
     const filename=`nobg_${originalName.replace(/\.[^/.]+$/, "")}.png`;
     await uploadManagedMedia({assetId,workspaceId:opts.workspaceId,userId:opts.userId,provider,bucket,objectKey,body:outBuffer,mimeType,filename,type:'GENERATED_ASSET',metadata:{operation:'remove-background',remaining_credits:remainingCredits}});
 
-    const downloadUrl = await provider.getSignedDownloadUrl(bucket, objectKey, 3600);
+    const downloadUrl = await provider.getSignedDownloadUrl(bucket, objectKey, 30 * 86400);
     return {
       assetId,
       url: downloadUrl,

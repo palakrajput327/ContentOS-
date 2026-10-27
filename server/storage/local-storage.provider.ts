@@ -119,7 +119,7 @@ export class LocalStorageProvider implements ObjectStorageProvider {
   async getSignedDownloadUrl(
     bucket: string,
     objectKey: string,
-    expiresInSeconds: number = 3600,
+    expiresInSeconds: number = 30 * 86400,
   ): Promise<string> {
     const { generateStorageSignature } = await import("./signed-url.js");
     const expiresAt = Date.now() + expiresInSeconds * 1000;

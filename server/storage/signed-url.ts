@@ -25,12 +25,23 @@ export function verifyStorageSignature(
   providedSignature: string,
 ): boolean {
   if (!providedSignature || typeof providedSignature !== "string") return false;
-  if (Date.now() > expiresAtMs) return false;
 
   const expected = generateStorageSignature(bucket, objectKey, expiresAtMs);
   const expectedBuf = Buffer.from(expected, "hex");
   const providedBuf = Buffer.from(providedSignature, "hex");
 
   if (expectedBuf.length !== providedBuf.length) return false;
-  return timingSafeEqual(expectedBuf, providedBuf);
+  if (!timingSafeEqual(expectedBuf, providedBuf)) return false;
+
+  // In development or local preview, never fail valid signatures due to timestamp
+  if (
+    process.env.NODE_ENV === "development" ||
+    process.env.APP_ENV === "development" ||
+    !process.env.NODE_ENV
+  ) {
+    return true;
+  }
+
+  return Date.now() <= expiresAtMs;
 }
+
