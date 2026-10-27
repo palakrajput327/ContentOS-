@@ -444,6 +444,7 @@ export class KnowledgeAutomationController {
         headline: res.headline || title,
         aspectRatio: "1:1",
         contentId: plan.content_id || undefined,
+        idempotencyKey: `refresh:${id}:${Date.now()}`,
       });
       if (imgRes?.url) {
         newMediaUrl = imgRes.url;

@@ -67,49 +67,31 @@ STRICT RULES:
         const safeConcept = typeof opts.knowledgeConcept === "string" ? opts.knowledgeConcept : (opts.knowledgeConcept ? JSON.stringify(opts.knowledgeConcept) : (opts.title || "Core Business Concept"));
         const safeExcerpt = typeof opts.excerpt === "string" ? opts.excerpt : (opts.excerpt ? String(opts.excerpt) : "");
         const safeTitle = typeof opts.title === "string" ? opts.title : (opts.title ? String(opts.title) : "");
-        // Context analysis to detect exact industry domain, brand, and theme
-        const combinedContext = `${opts.documentName || ""} ${safeTitle} ${safeConcept} ${safeExcerpt} ${opts.sourceVisualContext || ""}`.toLowerCase();
-        const isFinCrypto = /redhash|crypto|trading|gold|xau|investment|income|referral|milestone|reward|single\s*leg|turnover|cto|finance|forex|payout|blockchain|token/i.test(combinedContext);
-        const isHealth = /health|medical|biotech|doctor|clinic|fitness|pharma|wellness/i.test(combinedContext);
-        const isRealEstate = /property|real estate|villa|architecture|home|apartment|interior/i.test(combinedContext);
-        let domainGuidance = "Analyze the core theme of the text and choose the most fitting artistic medium: cinematic photography, clean editorial graphic, high-tech digital art, or tangible physical representation.";
-        let defaultColor = "modern vibrant brand colors";
-        if (isFinCrypto) {
-            domainGuidance = "The document is about Financial Markets, Trading, Risk Management & Investment. Deeply analyze the specific topic: If it covers Risk Disclosure or Due Diligence, craft a dramatic cinematic composition with protective shields, crimson market charts, or analytical desk settings. If it covers Gold Trading (XAU/USD), feature authentic gleaming gold bullion bars and live exchange terminals. If it covers Milestone Rewards, feature prestigious trophies or celebration podiums. DO NOT spam repetitive '3D' buzzwords; describe concrete physical textures, lighting, camera angles, and atmospheric composition.";
-            defaultColor = "bold crimson red (#E50914), polished chrome, deep carbon obsidian, and gleaming gold accents";
-        }
-        else if (isHealth) {
-            domainGuidance = "The document is about Healthcare & Wellness. Use high-end medical editorial photography, microscopic bio-imagery, or clean clinical spaces with soft natural light.";
-            defaultColor = "cyan, teal, and clean medical white";
-        }
-        else if (isRealEstate) {
-            domainGuidance = "The document is about Real Estate & Architecture. Use luxurious architectural photography, glass facades, and golden hour sunlight.";
-            defaultColor = "warm terracotta, gold, and slate";
-        }
-        const primaryColor = opts.brand?.primary_color || defaultColor;
-        const systemPrompt = `You are a world-class creative visual director and prompt engineer for top-tier global brands.
-Your job is to read extracted knowledge concepts and context from a document, analyze the underlying meaning, and craft:
-1. A tailored, high-fidelity text-to-image prompt (for FLUX / Midjourney / Clipdrop) that ACCURATELY and visually translates the specific PDF concept into compelling visual art.
-2. A short, punchy 3-6 word visual headline.
+        const primaryColor = opts.brand?.primary_color || "refined, high-contrast brand aesthetics with elegant lighting";
+        const systemPrompt = `You are a world-class creative visual director and prompt engineer (ChatGPT DALL-E 3 & Google Gemini Imagen 3 caliber).
+Your objective: Analyze the extracted knowledge concept, facts, entities, and excerpts from the document, and formulate:
+1. A hyper-accurate, high-fidelity text-to-image prompt (for FLUX / Midjourney / Clipdrop) that translates the EXACT subject matter and concrete meaning of the text into stunning visual art.
+2. A punchy, insightful 3 to 6 word visual headline.
 
-VISUAL DIRECTION:
-${domainGuidance}
-
-STRICT ARTISTIC GUIDELINES:
-1. DYNAMIC & TOPIC-AWARE: Do NOT blindly label everything as '3D' or '3D render'. Determine the optimal style naturally:
-   - For concrete physical subjects (bullion, trophies, shields, hardware): Describe real physical materials (brushed titanium, obsidian carbon fiber, polished gold, refractive crystal).
-   - For market analysis & data: Describe cinematic lighting, holographic interfaces, candlestick graphs, atmospheric rim lighting.
-   - For organizational / abstract concepts: Describe thoughtful visual metaphors with dramatic composition and depth.
-2. NEVER spam the word '3D' repeatedly. Describe the camera shot (close-up hero angle, wide cinematic shot, macro focus), lighting (volumetric rim light, soft diffuse illumination, neon glow), and textures instead.
-3. COLOR HARMONY: Harmonize with: ${primaryColor}.
-4. Do NOT use generic purple SaaS cubes!
-5. Do NOT include filler words like "Create an image of", "Poster of", or quotes.
-6. Length: 35 to 65 evocative visual words.
+CRITICAL ARTISTIC DIRECTIVES:
+1. ACCURATE TO DOCUMENT SUBJECT:
+   - Identify the exact entities, domain, products, mechanisms, or figures in the text (e.g. Gold Bullion & Candlesticks, Multi-Tier Staking, Medical Vaccines, Solar Architecture, Logistics Fleet, Robotic Automation, Corporate Legal).
+   - Render THOSE EXACT subjects with physical authenticity.
+   - Do NOT produce vague, abstract generic art. Ground every element in the concrete meaning of the document.
+2. STRICTLY FORBIDDEN "3D" BUZZWORDS:
+   - NEVER use the words '3D', '3D render', '3D digital render', '3D model', 'octane render', or 'purple SaaS cubes'.
+   - Instead, specify REAL-WORLD materials (brushed titanium, obsidian glass, solid gold, polished marble, carbon fiber, refractive crystal, silk textures), camera optics (85mm f/1.4 lens, macro photography, shallow depth of field, sharp focal plane), and lighting (volumetric god rays, directional rim lighting, golden hour ambient warmth, soft studio diffusion).
+3. DIFFUSION MODEL COMPATIBILITY:
+   - Output must be 40 to 65 words of descriptive visual scene setting following the formula:
+     [Concrete Subject & Action] + [Surrounding Environment] + [Physical Materials & Textures] + [Lighting & Color Harmony] + [Camera Lens, Framing & Photographic Quality].
+   - No conversational filler ("Generate an image of", "A poster showing", quotes).
+4. COLOR HARMONY:
+   - Incorporate: ${primaryColor}.
 
 SCHEMA:
 Return JSON:
 {
-  "prompt": "35-65 words tailored visual prompt",
+  "prompt": "40-65 words tailored visual prompt",
   "headline": "3-6 words bold title"
 }`;
         const userMessage = `Document Name: "${opts.documentName || "Document"}"
@@ -117,7 +99,7 @@ Knowledge Concept: "${safeConcept.slice(0, 1000)}"
 ${safeExcerpt ? `Source Excerpt: "${safeExcerpt.slice(0, 800)}"` : ""}
 ${opts.sourceVisualContext ? `Extracted PDF Visual Context: "${opts.sourceVisualContext}"` : ""}
 ${safeTitle ? `Working Title: "${safeTitle}"` : ""}
-Brand Tone: ${opts.brand?.tone || (isFinCrypto ? "Prestigious, High-Tech Financial" : "Professional, Modern")}
+Brand Tone: ${opts.brand?.tone || "Professional, Premium, Authoritative"}
 Platform: ${opts.platform || "Instagram"}`;
         try {
             if (await provider.validateConfiguration()) {
@@ -144,19 +126,20 @@ Platform: ${opts.platform || "Instagram"}`;
         catch (err) {
             console.warn("[ClipdropService] suggestPosterPrompt LLM warning:", err?.message || err);
         }
-        // Dynamic smart fallback if LLM is offline
-        const cleanSubject = (opts.title || opts.knowledgeConcept || "financial innovation")
+        // Dynamic topic-aware fallback if LLM is offline
+        const cleanSubject = (opts.title || opts.knowledgeConcept || "innovation")
             .replace(/[^a-zA-Z0-9 ]/g, " ")
             .trim()
             .slice(0, 60);
-        if (isFinCrypto) {
+        const isFinance = /gold|xau|crypto|trade|trading|invest|market|income|staking|token/i.test(`${safeTitle} ${safeConcept} ${safeExcerpt}`);
+        if (isFinance) {
             return {
-                prompt: `Cinematic conceptual visual representing ${cleanSubject}. Holographic market indicators, crimson data grid on polished obsidian surface, directional rim lighting, shallow depth of field, high-contrast prestigious financial aesthetic`,
+                prompt: `Macro photograph of gleaming physical gold bullion bars and live market exchange candlestick terminals on dark obsidian slate. Volumetric golden rim lighting, sharp optical reflections, professional executive trading atmosphere, shallow depth of field, 8k resolution`,
                 headline: (opts.title || cleanSubject).slice(0, 40),
             };
         }
         return {
-            prompt: `Editorial conceptual visual representing ${cleanSubject}, minimalist composition, soft directional studio lighting, rich textural contrast, sharp focus, modern premium aesthetic`,
+            prompt: `Cinematic editorial photograph representing ${cleanSubject}, minimalist composition, soft directional studio lighting, rich textural contrast, sharp optical focus, modern premium aesthetic`,
             headline: (opts.title || cleanSubject).slice(0, 40),
         };
     }
@@ -298,22 +281,33 @@ Platform: ${opts.platform || "Instagram"}`;
                 width = 1024;
                 height = 1280;
             }
-            const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&model=flux&nologo=true`;
-            try {
-                const res = await fetch(pollinationsUrl, { signal: AbortSignal.timeout(35000) });
-                if (res.ok) {
-                    const arr = await res.arrayBuffer();
-                    imageBuffer = Buffer.from(new Uint8Array(arr));
-                    mimeType = res.headers.get("content-type") || "image/jpeg";
-                    usedEngine = "flux";
-                    return true;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                const seed = Math.floor(Math.random() * 1000000);
+                // Attempt 0 tries with FLUX; attempts 1-2 try default engine to prevent 503 limits
+                const modelParam = attempt === 0 ? "&model=flux" : "";
+                const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&nologo=true&seed=${seed}${modelParam}`;
+                try {
+                    const res = await fetch(pollinationsUrl, { signal: AbortSignal.timeout(35000) });
+                    if (res.ok) {
+                        const arr = await res.arrayBuffer();
+                        imageBuffer = Buffer.from(new Uint8Array(arr));
+                        mimeType = res.headers.get("content-type") || "image/jpeg";
+                        usedEngine = "flux";
+                        return true;
+                    }
+                    else {
+                        const errText = await res.text().catch(() => "");
+                        console.warn(`FLUX generation attempt ${attempt + 1} status ${res.status}:`, errText.slice(0, 100));
+                        if (res.status === 402 || res.status === 503) {
+                            const match = errText.match(/Retry after (\d+)s/i);
+                            const waitSec = match ? Math.min(parseInt(match[1], 10), 12) : 2;
+                            await new Promise((r) => setTimeout(r, waitSec * 1000));
+                        }
+                    }
                 }
-                else {
-                    console.warn(`FLUX image generation returned HTTP ${res.status}`);
+                catch (err) {
+                    console.warn(`FLUX image generation error (attempt ${attempt + 1}):`, err?.message || err);
                 }
-            }
-            catch (err) {
-                console.warn("FLUX image generation error:", err?.message || err);
             }
             return false;
         };
