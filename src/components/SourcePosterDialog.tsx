@@ -3,7 +3,7 @@ import { useOutletContext, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button, ModalFrame } from "./ui";
-import { data, request } from "../lib/api";
+import { data, request, resolveMediaUrl } from "../lib/api";
 import { type Snapshot, type Platform } from "../lib/model";
 interface Result {
   assetId: string;
@@ -305,7 +305,8 @@ export function SourcePosterDialog({
         </div>
         <div className="source-poster-preview">
           <img
-            src={result?.url || imageUrl}
+            src={resolveMediaUrl(result?.url || imageUrl)}
+            crossOrigin="anonymous"
             alt={result ? "Generated branded poster" : "Original source image"}
           />
           {result && !fresh && (

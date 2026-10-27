@@ -63,9 +63,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
         if (!response.ok) {
           const status = response.status;
-          const isRetryable = status === 429 || status >= 500;
           const errText = await response.text().catch(() => "");
           console.error(`[LLM Provider Error] ${this.providerName} (${status}):`, errText);
+
+          const isQuotaExceeded = /quota|RESOURCE_EXHAUSTED|limit exceeded|per day/i.test(errText);
+          const isRetryable = (status === 429 && !isQuotaExceeded) || (status >= 500 && status !== 501);
 
           let suggestedWaitMs = 0;
           const matchWait = errText.match(/try again in (\d+(?:\.\d+)?)s/i);
@@ -132,7 +134,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       model: this.model,
       messages: input.messages.map(m=>m.images?.length?{role:m.role,content:[{type:'text',text:m.content},...m.images.map(url=>({type:'image_url',image_url:{url}}))]}:{role:m.role,content:m.content}),
       temperature: input.temperature ?? 0.2,
-      max_tokens: input.maxTokens,
+      max_tokens: this.providerName === "groq" ? Math.min(input.maxTokens ?? 800, 800) : input.maxTokens,
     };
 
     const res = await this.fetchWithRetry(endpoint, payload);
@@ -172,7 +174,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       model: this.model,
       messages: messages.map(m=>'images' in m && m.images?.length?{role:m.role,content:[{type:'text',text:m.content},...m.images.map(url=>({type:'image_url',image_url:{url}}))]}:{role:m.role,content:m.content}),
       temperature: input.temperature ?? 0.1,
-      max_tokens: input.maxTokens ?? 2048,
+      max_tokens: this.providerName === "groq" ? Math.min(input.maxTokens ?? 800, 800) : (input.maxTokens ?? 2048),
       response_format: { type: "json_object" },
     };
 
@@ -237,23 +239,27 @@ export class OpenAICompatibleProvider implements LLMProvider {
       }
     }
 
-    const validation = input.schema.safeParse(parsedJson);
-    if (!validation.success) {
-      console.error(
-        `[${this.providerName}] Structured output validation error:`,
-        validation.error.issues,
-        "Received parsed JSON:",
-        JSON.stringify(parsedJson, null, 2),
-      );
-      throw new LLMProviderException(
-        `LLM structured output validation failed: ${validation.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ")}`,
-      );
+    let validatedData: T = parsedJson as T;
+    if (input.schema && typeof (input.schema as any).safeParse === "function") {
+      const validation = (input.schema as any).safeParse(parsedJson);
+      if (!validation.success) {
+        console.error(
+          `[${this.providerName}] Structured output validation error:`,
+          validation.error.issues,
+          "Received parsed JSON:",
+          JSON.stringify(parsedJson, null, 2),
+        );
+        throw new LLMProviderException(
+          `LLM structured output validation failed: ${validation.error.issues.map((i: any) => `${i.path.join(".")}: ${i.message}`).join(", ")}`,
+        );
+      }
+      validatedData = validation.data;
     }
 
     return {
       provider: this.providerName,
       model: this.model,
-      data: validation.data,
+      data: validatedData,
       rawText,
       usage: res.usage
         ? {

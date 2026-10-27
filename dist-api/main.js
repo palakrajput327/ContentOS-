@@ -118,7 +118,9 @@ export async function bootstrap() {
         bodyParser: false,
     });
     app.setGlobalPrefix("api/v1");
-    app.use(helmet());
+    app.use(helmet({
+        crossOriginResourcePolicy: { policy: "cross-origin" },
+    }));
     app.use(express.json({ limit: "256kb" }));
     app.use(cookieParser());
     app.use(async (req, res, next) => {

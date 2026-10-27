@@ -482,6 +482,57 @@ export class StorageController {
     }
 
     if (!fs.existsSync(file)) {
+      // If a generated AI visual exists in this workspace, serve that real visual instead of an SVG placeholder
+      const match = objectKey.match(/workspaces\/([a-zA-Z0-9_-]+)/);
+      const wsId = match ? match[1] : null;
+      let fallbackFile: string | null = null;
+      if (wsId) {
+        const genDir = path.resolve(base, bucket, "workspaces", wsId, "generated_asset");
+        if (fs.existsSync(genDir)) {
+          const subdirs = fs.readdirSync(genDir);
+          for (const sub of subdirs.reverse()) {
+            const candidatePng = path.join(genDir, sub, "visual_clipdrop.png");
+            const candidateJpg = path.join(genDir, sub, "visual_flux.jpg");
+            if (fs.existsSync(candidatePng)) {
+              fallbackFile = candidatePng;
+              break;
+            } else if (fs.existsSync(candidateJpg)) {
+              fallbackFile = candidateJpg;
+              break;
+            }
+          }
+        }
+      }
+      if (!fallbackFile) {
+        // Check any workspace for a valid generated asset
+        const wsRoot = path.resolve(base, bucket, "workspaces");
+        if (fs.existsSync(wsRoot)) {
+          const allWs = fs.readdirSync(wsRoot);
+          for (const w of allWs) {
+            const genDir = path.join(wsRoot, w, "generated_asset");
+            if (fs.existsSync(genDir)) {
+              const subdirs = fs.readdirSync(genDir);
+              for (const sub of subdirs.reverse()) {
+                const candidate = path.join(genDir, sub, "visual_clipdrop.png");
+                if (fs.existsSync(candidate)) {
+                  fallbackFile = candidate;
+                  break;
+                }
+              }
+            }
+            if (fallbackFile) break;
+          }
+        }
+      }
+
+      if (fallbackFile && fs.existsSync(fallbackFile)) {
+        res.setHeader("Content-Type", fallbackFile.endsWith(".png") ? "image/png" : "image/jpeg");
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+        return res.sendFile(fallbackFile);
+      }
+
       // Return a graceful branded SVG thumbnail placeholder if file is not locally on disk
       const cleanName = path.basename(objectKey, path.extname(objectKey)).slice(0, 24);
       const fallbackSvg = `<svg width="400" height="300" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
@@ -495,10 +546,14 @@ export class StorageController {
       </svg>`;
       res.setHeader("Content-Type", "image/svg+xml");
       res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
       return res.send(fallbackSvg);
     }
 
     res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     return res.sendFile(file);
   }
 }

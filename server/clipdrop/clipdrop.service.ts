@@ -4,6 +4,7 @@ import { pool, transaction, audit } from "../db.js";
 import { uploadManagedMedia } from "../storage/managed-media.js";
 import { getStorageProvider } from "../storage/storage.factory.js";
 import { getLLMProvider } from "../ai/llm.service.js";
+import { z } from "zod";
 
 export interface GenerateImageOptions {
   workspaceId: string;
@@ -74,11 +75,9 @@ STRICT RULES:
             { role: "system", content: systemPrompt },
             { role: "user", content: userMessage },
           ],
-          schema: {
-            type: "object",
-            properties: { prompt: { type: "string" } },
-            required: ["prompt"],
-          } as any,
+          schema: z.object({
+            prompt: z.string(),
+          }),
           schemaName: "ImagePromptSuggestion",
         });
         const promptVal = (res.data as any)?.prompt;
@@ -105,6 +104,7 @@ STRICT RULES:
     excerpt?: string;
     sourceVisualContext?: string;
     title?: string;
+    documentName?: string;
     brand?: {
       primary_color?: string;
       secondary_color?: string;
@@ -115,31 +115,57 @@ STRICT RULES:
     platform?: string;
   }): Promise<{ prompt: string; headline: string }> {
     const provider = getLLMProvider();
-    const primaryColor = opts.brand?.primary_color || "vibrant violet and cyan";
-    const systemPrompt = `You are a world-class creative art director and prompt engineer for high-growth tech brands and viral social media visual posters.
+
+    // Context analysis to detect exact industry domain, brand, and theme
+    const combinedContext = `${opts.documentName || ""} ${opts.title || ""} ${opts.knowledgeConcept || ""} ${opts.excerpt || ""} ${opts.sourceVisualContext || ""}`.toLowerCase();
+    const isFinCrypto = /redhash|crypto|trading|gold|xau|investment|income|referral|milestone|reward|single\s*leg|turnover|cto|finance|forex|payout|blockchain|token/i.test(combinedContext);
+    const isHealth = /health|medical|biotech|doctor|clinic|fitness|pharma|wellness/i.test(combinedContext);
+    const isRealEstate = /property|real estate|villa|architecture|home|apartment|interior/i.test(combinedContext);
+
+    let domainGuidance = "Represent the technical idea as a vivid 3D scene matching its specific industry.";
+    let defaultColor = "modern vibrant brand colors";
+
+    if (isFinCrypto) {
+      domainGuidance = "The document is about Financial Trading, Crypto & Investment (such as Redhash, Gold Trading XAU/USD, Multi-Tier Income Structure, Staking Rewards). Translate this concept into tangible financial and tech art: e.g. glowing 3D metallic crypto coin token emblem with laser etched red circuits and holographic globe grid, gleaming solid gold bullion bars (XAU/USD), futuristic 3D candlestick charts, golden championship reward trophies, cash stacks, tiered red glass orbs, dark obsidian carbon fiber backdrop, crimson red laser rim lighting.";
+      defaultColor = "bold crimson red (#E50914), polished metallic chrome/silver, deep carbon, and gleaming gold accents";
+    } else if (isHealth) {
+      domainGuidance = "The document is about Healthcare & Wellness. Use sleek 3D medical visual metaphors, DNA strands, biometric interfaces, clean clinical lighting.";
+      defaultColor = "cyan, teal, and clean medical white";
+    } else if (isRealEstate) {
+      domainGuidance = "The document is about Real Estate & Architecture. Use luxurious 3D modern architectural renders, glass facades, golden hour sunlight.";
+      defaultColor = "warm terracotta, gold, and slate";
+    }
+
+    const primaryColor = opts.brand?.primary_color || defaultColor;
+    const systemPrompt = `You are a world-class creative art director and prompt engineer for high-growth global brands and social media visual posters.
 Your job is to read extracted knowledge facts/concepts from a document, along with any source visual context (diagrams/infographics from the PDF), and craft:
-1. A descriptive, high-quality text-to-image prompt (for FLUX / Midjourney / Clipdrop) that visually represents the core concept as an eye-catching social media poster.
+1. A descriptive, high-quality text-to-image prompt (for FLUX / Midjourney / Clipdrop) that ACCURATELY and visually represents the specific concept from the document as an eye-catching social media poster.
 2. A short, punchy 3-6 word visual headline for the poster.
 
+DOMAIN-SPECIFIC VISUAL DIRECTION:
+${domainGuidance}
+
 STRICT RULES FOR IMAGE PROMPT:
-1. Translate conceptual/technical ideas and source visual themes into tangible visual metaphors: e.g. glowing 3D isometric data structures, sleek futuristic holographic interfaces, minimalist frosted glass cubes, clean studio product podiums, or cinematic atmospheric lighting.
-2. Specify lighting (soft studio rim light, volumetric lighting, bioluminescent glow, subtle neon accents), color palette (harmonious with brand: ${primaryColor}), and style (ultra-modern 3D render, Octane render, 8k resolution, minimalist SaaS aesthetic).
-3. Do NOT copy raw document text or citations into the prompt.
-4. Do NOT include phrases like "Create an image of", "Poster of", or quotes.
-5. Return 35 to 65 words of rich visual keywords.
+1. ACCURATE TO DOCUMENT SUBJECT: Translate the exact concept (${opts.title || opts.knowledgeConcept}) into vivid visual metaphors. If the concept is Gold Trading (XAU/USD), the prompt MUST feature gleaming gold bullion bars and market charts. If it is Rewards & Milestones, it MUST feature 3D golden trophies, gift boxes, and podiums. If it is Package Return/Staking, it MUST feature a glowing 3D crypto coin token and growth metrics.
+2. COLOR PALETTE: Strictly harmonize with: ${primaryColor}.
+3. LIGHTING & RENDER: Specify lighting (volumetric rim lighting, laser glow, soft studio occlusion) and render engine (ultra-detailed 8k Octane 3D render, photorealistic, cinematic composition).
+4. Do NOT use generic purple SaaS cubes unless the document is specifically about a generic SaaS tool!
+5. Do NOT include phrases like "Create an image of", "Poster of", or quotation marks.
+6. Return 35 to 65 words of rich visual keywords.
 
 SCHEMA:
-Return JSON matching schema:
+Return JSON:
 {
   "prompt": "35-65 words image generation prompt",
   "headline": "3-6 words bold title"
 }`;
 
-    const userMessage = `Knowledge Concept: "${opts.knowledgeConcept.slice(0, 1000)}"
+    const userMessage = `Document Name: "${opts.documentName || "Document"}"
+Knowledge Concept: "${opts.knowledgeConcept.slice(0, 1000)}"
 ${opts.excerpt ? `Source Excerpt: "${opts.excerpt.slice(0, 800)}"` : ""}
 ${opts.sourceVisualContext ? `Extracted PDF Visual Context: "${opts.sourceVisualContext}"` : ""}
 ${opts.title ? `Working Title: "${opts.title}"` : ""}
-Brand Tone: ${opts.brand?.tone || "Professional, Modern"}
+Brand Tone: ${opts.brand?.tone || (isFinCrypto ? "Prestigious, High-Tech Financial" : "Professional, Modern")}
 Platform: ${opts.platform || "Instagram"}`;
 
     try {
@@ -149,14 +175,10 @@ Platform: ${opts.platform || "Instagram"}`;
             { role: "system", content: systemPrompt },
             { role: "user", content: userMessage },
           ],
-          schema: {
-            type: "object",
-            properties: {
-              prompt: { type: "string" },
-              headline: { type: "string" },
-            },
-            required: ["prompt", "headline"],
-          } as any,
+          schema: z.object({
+            prompt: z.string(),
+            headline: z.string().optional().default("Key Insight"),
+          }),
           schemaName: "PosterPromptSuggestion",
         });
         const data = res.data as any;
@@ -172,13 +194,20 @@ Platform: ${opts.platform || "Instagram"}`;
     }
 
     // Dynamic smart fallback if LLM is offline
-    const cleanSubject = (opts.title || opts.knowledgeConcept || "innovation")
+    const cleanSubject = (opts.title || opts.knowledgeConcept || "financial innovation")
       .replace(/[^a-zA-Z0-9 ]/g, " ")
       .trim()
       .slice(0, 60);
 
+    if (isFinCrypto) {
+      return {
+        prompt: `Futuristic 3D financial tech poster visual representing ${cleanSubject}, glowing metallic red and silver crypto coin emblem with holographic globe grid, gleaming solid gold bullion bars, fiery crimson neon laser circuits, polished dark carbon podium, cinematic volumetric studio lighting, ultra-detailed 8k octane render`,
+        headline: (opts.title || cleanSubject).slice(0, 40),
+      };
+    }
+
     return {
-      prompt: `Futuristic 3D minimalist tech poster visual representing ${cleanSubject}, floating frosted glass nodes, glowing volumetric violet and cyan lighting, sleek isometric composition, ultra-detailed 8k octane render`,
+      prompt: `Modern 3D premium concept visual representing ${cleanSubject}, polished geometric glass pedestals, ambient rim lighting, sleek studio composition, ultra-detailed 8k octane render`,
       headline: (opts.title || cleanSubject).slice(0, 40),
     };
   }

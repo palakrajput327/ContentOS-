@@ -121,6 +121,15 @@ process.on("uncaughtException", (error) => {
   console.warn("[ContentOS] Handled uncaught exception (server online):", error?.message || error);
 });
 
+process.on("SIGINT", () => {
+  console.log("[ContentOS] Shutting down cleanly...");
+  process.exit(0);
+});
+process.on("SIGTERM", () => {
+  console.log("[ContentOS] Shutting down cleanly...");
+  process.exit(0);
+});
+
 if (!process.env.QUEUE_BACKEND) process.env.QUEUE_BACKEND = "postgres";
 
 const { bootstrap } = await import("./dist-api/phase-main.js");

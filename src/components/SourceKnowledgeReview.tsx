@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { documentsApi, request, type KnowledgeItem } from "../lib/api";
+import { documentsApi, request, resolveMediaUrl, type KnowledgeItem } from "../lib/api";
 import { Button, ModalFrame } from "./ui";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -112,7 +112,8 @@ export function SourceKnowledgeReview({
       <div className="source-review-grid">
         <img
           className="source-evidence-image"
-          src={imageUrl}
+          src={resolveMediaUrl(imageUrl)}
+          crossOrigin="anonymous"
           alt={`Evidence from PDF page ${pageNumber}`}
         />
         <div>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { request } from "../lib/api";
+import { request, resolveMediaUrl } from "../lib/api";
 import { Button, ModalFrame } from "./ui";
 import { SourceKnowledgeReview } from "./SourceKnowledgeReview";
 import { SourcePosterDialog } from "./SourcePosterDialog";
@@ -37,6 +37,8 @@ interface SourceMedia {
     };
   }>;
 }
+
+
 export function DocumentSourceMedia({
   documentId,
   documentStatus,
@@ -250,13 +252,14 @@ export function DocumentSourceMedia({
                 key={`${a.assetId}:${a.pageNumber}:${a.imageIndex}:${a.kind}`}
               >
                 <a
-                  href={a.url}
+                  href={resolveMediaUrl(a.url)}
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label={`View ${a.kind === "PAGE_RENDER" ? "page rendition" : "source image"} from page ${a.pageNumber}`}
                 >
                   <img
-                    src={a.url}
+                    src={resolveMediaUrl(a.url)}
+                    crossOrigin="anonymous"
                     loading="lazy"
                     alt={`PDF ${a.kind === "PAGE_RENDER" ? "page rendition" : "image"} from page ${a.pageNumber}`}
                   />

@@ -126,6 +126,7 @@ export class KnowledgeAutomationService {
       knowledgeValue?: any;
       excerpt?: string;
       sourceVisualContext?: string;
+      documentName?: string;
       brand?: any;
     }) => {
       const { ClipdropService } = await import("../clipdrop/clipdrop.service.js");
@@ -135,10 +136,11 @@ export class KnowledgeAutomationService {
         excerpt: context.excerpt,
         sourceVisualContext: context.sourceVisualContext,
         title: context.title,
+        documentName: context.documentName,
         brand: context.brand,
         platform: "Instagram",
       });
-      return service.generateImage({
+      const genResult = await service.generateImage({
         workspaceId: context.workspaceId,
         userId: context.actorId,
         prompt: suggested.prompt,
@@ -148,6 +150,11 @@ export class KnowledgeAutomationService {
         enableOverlay: true,
         idempotencyKey: `autopilot:${context.workspaceId}:${context.topicHash}:${Date.now()}`,
       });
+      return {
+        ...genResult,
+        posterPrompt: suggested.prompt,
+        headline: suggested.headline || context.title,
+      };
     },
   ) {}
 
@@ -441,7 +448,50 @@ export class KnowledgeAutomationService {
         );
         const safetyResult = validateContentSafety(result.title, result.variants, evidence);
         if (!safetyResult.safe) throw new Error(safetyResult.reason || "Generated post failed source safety checks.");
-        const generatedVisual = null;
+
+        let autoVisualUrl: string | undefined;
+        let autoVisualAssetId: string | undefined;
+        let usedPosterPrompt: string | undefined;
+        let usedHeadline: string | undefined;
+
+        const preferredSourceAssetId =
+          evidence.find((e: any) => e.sourceMediaAssetId)?.sourceMediaAssetId ||
+          reservation.topic.sources?.find((s: any) => s.sourceMediaAssetId)?.sourceMediaAssetId;
+
+        const docId = evidence[0]?.documentId || reservation.topic.sources[0]?.documentId;
+        const pageNum = evidence[0]?.pageStart || reservation.topic.sources[0]?.pageStart;
+
+        let sourceVisualContext: string | undefined;
+        if (preferredSourceAssetId) {
+          sourceVisualContext = `Extracted diagram/figure from PDF (Page ${pageNum || 1})`;
+        }
+
+        // 1. If AI_POSTER mode or in Auto-Pilot, generate high-definition AI poster from prompt OUTSIDE transaction
+        if (reservation.posterStyle === 'AI_POSTER' || reservation.autopilot) {
+          try {
+            const gen = await this.generateVisual({
+              workspaceId,
+              actorId: reservation.actorId,
+              topicHash: reservation.topic.hash,
+              title: result.title,
+              caption: result.variants[reservation.platforms[0]],
+              knowledgeValue: reservation.topic.value,
+              excerpt: evidence[0]?.excerpt || reservation.topic.sources[0]?.excerpt,
+              sourceVisualContext,
+              documentName: reservation.topic.sources?.[0]?.documentName || "Redhash.pdf",
+              brand: reservation.brand,
+            });
+            if (gen) {
+              autoVisualUrl = gen.url;
+              autoVisualAssetId = gen.assetId;
+              usedPosterPrompt = gen.posterPrompt;
+              usedHeadline = gen.headline;
+            }
+          } catch (genErr: any) {
+            console.warn("[ContentOS] AI Visual generation failed, will try source asset fallback:", genErr?.message || genErr);
+          }
+        }
+
         await inTransaction(this.database, async (db) => {
           await db.query("SELECT id FROM workspaces WHERE id=$1 FOR UPDATE", [
             workspaceId,
@@ -489,56 +539,7 @@ export class KnowledgeAutomationService {
           }
           const id = randomUUID();
 
-          // Visual generation / pairing:
-          // 1. If AI_POSTER mode, generate AI poster prompt from knowledge and create custom social poster
-          // 2. If DIRECT mode, prefer extracted PDF image first, fallback to AI Poster
-          // 3. If BRANDED_CANVAS mode, apply brand framing/canvas
-          let autoVisualUrl: string | undefined;
-          let autoVisualAssetId: string | undefined;
-
-          const preferredSourceAssetId =
-            evidence.find((e: any) => e.sourceMediaAssetId)?.sourceMediaAssetId ||
-            reservation.topic.sources?.find((s: any) => s.sourceMediaAssetId)?.sourceMediaAssetId;
-
-          const docId = evidence[0]?.documentId || reservation.topic.sources[0]?.documentId;
-          const pageNum = evidence[0]?.pageStart || reservation.topic.sources[0]?.pageStart;
-
-          let sourceVisualContext: string | undefined;
-          if (preferredSourceAssetId) {
-            sourceVisualContext = `Extracted diagram/figure from PDF (Page ${pageNum || 1})`;
-          } else if (docId) {
-            const hasSourceMedia = (
-              await db.query(
-                `SELECT dsm.page_number, dsm.kind FROM document_source_media dsm
-                 WHERE dsm.document_id = $1 AND dsm.workspace_id = $2
-                 ${pageNum ? 'AND dsm.page_number = $3' : ''}
-                 LIMIT 1`,
-                pageNum ? [docId, workspaceId, pageNum] : [docId, workspaceId]
-              )
-            ).rows[0];
-            if (hasSourceMedia) {
-              sourceVisualContext = `Extracted ${hasSourceMedia.kind === 'PAGE_RENDER' ? 'page layout' : 'diagram/graphic'} from PDF Page ${hasSourceMedia.page_number}`;
-            }
-          }
-
-          if (reservation.posterStyle === 'AI_POSTER') {
-            const gen = await this.generateVisual({
-              workspaceId,
-              actorId: reservation.actorId,
-              topicHash: reservation.topic.hash,
-              title: result.title,
-              caption: result.variants[reservation.platforms[0]],
-              knowledgeValue: reservation.topic.value,
-              excerpt: evidence[0]?.excerpt || reservation.topic.sources[0]?.excerpt,
-              sourceVisualContext,
-              brand: reservation.brand,
-            });
-            if (gen) {
-              autoVisualUrl = gen.url;
-              autoVisualAssetId = gen.assetId;
-            }
-          }
-
+          // 2. If no visual yet and preferredSourceAssetId is available, verify physical file exists
           if (!autoVisualAssetId && preferredSourceAssetId) {
             const imgRow = (
               await db.query(
@@ -549,11 +550,15 @@ export class KnowledgeAutomationService {
             ).rows[0];
             if (imgRow) {
               const { provider } = getStorageProvider();
-              autoVisualUrl = await provider.getSignedDownloadUrl(imgRow.bucket, imgRow.object_key, 7 * 86400);
-              autoVisualAssetId = imgRow.id;
+              const exists = await provider.exists(imgRow.bucket, imgRow.object_key).catch(() => false);
+              if (exists) {
+                autoVisualUrl = await provider.getSignedDownloadUrl(imgRow.bucket, imgRow.object_key, 7 * 86400);
+                autoVisualAssetId = imgRow.id;
+              }
             }
           }
 
+          // 3. If no visual yet and docId is available, verify physical file exists
           if (!autoVisualAssetId && docId) {
             let imgRow;
             if (pageNum) {
@@ -580,26 +585,37 @@ export class KnowledgeAutomationService {
             }
             if (imgRow) {
               const { provider } = getStorageProvider();
-              autoVisualUrl = await provider.getSignedDownloadUrl(imgRow.bucket, imgRow.object_key, 7 * 86400);
-              autoVisualAssetId = imgRow.id;
+              const exists = await provider.exists(imgRow.bucket, imgRow.object_key).catch(() => false);
+              if (exists) {
+                autoVisualUrl = await provider.getSignedDownloadUrl(imgRow.bucket, imgRow.object_key, 7 * 86400);
+                autoVisualAssetId = imgRow.id;
+              }
             }
           }
 
+          // 4. If still no visual, generate real visual via AI
           if (!autoVisualAssetId) {
-            const gen = await this.generateVisual({
-              workspaceId,
-              actorId: reservation.actorId,
-              topicHash: reservation.topic.hash,
-              title: result.title,
-              caption: result.variants[reservation.platforms[0]],
-              knowledgeValue: reservation.topic.value,
-              excerpt: evidence[0]?.excerpt || reservation.topic.sources[0]?.excerpt,
-              sourceVisualContext,
-              brand: reservation.brand,
-            });
-            if (gen) {
-              autoVisualUrl = gen.url;
-              autoVisualAssetId = gen.assetId;
+            try {
+              const gen = await this.generateVisual({
+                workspaceId,
+                actorId: reservation.actorId,
+                topicHash: reservation.topic.hash,
+                title: result.title,
+                caption: result.variants[reservation.platforms[0]],
+                knowledgeValue: reservation.topic.value,
+                excerpt: evidence[0]?.excerpt || reservation.topic.sources[0]?.excerpt,
+                sourceVisualContext,
+                documentName: reservation.topic.sources?.[0]?.documentName || "Redhash.pdf",
+                brand: reservation.brand,
+              });
+              if (gen) {
+                autoVisualUrl = gen.url;
+                autoVisualAssetId = gen.assetId;
+                usedPosterPrompt = gen.posterPrompt;
+                usedHeadline = gen.headline;
+              }
+            } catch (fallbackErr: any) {
+              console.warn("[ContentOS] Fallback AI visual generation error:", fallbackErr?.message || fallbackErr);
             }
           }
 
@@ -655,7 +671,11 @@ export class KnowledgeAutomationService {
           for (const p of reservation.platforms) {
             variants[p] = {
               caption: result.variants[p],
-              metadata: { sourceEvidence: evidence },
+              metadata: {
+                sourceEvidence: evidence,
+                ...(usedPosterPrompt ? { posterPrompt: usedPosterPrompt, imagePrompt: usedPosterPrompt } : {}),
+                ...(usedHeadline ? { headline: usedHeadline } : {}),
+              },
               ...(autoVisualUrl && ["Instagram", "LinkedIn", "Facebook", "Telegram"].includes(p)
                 ? { mediaUrl: autoVisualUrl, mediaType: "image", mediaAssetId: autoVisualAssetId }
                 : {}),
@@ -690,6 +710,8 @@ export class KnowledgeAutomationService {
               content_source: "KNOWLEDGE_AUTOMATION",
               planId: reservation.id,
               safetyCheck: { safe: safety.safe, warnings: safety.warnings, reason: safety.reason },
+              ...(usedPosterPrompt ? { posterPrompt: usedPosterPrompt, imagePrompt: usedPosterPrompt } : {}),
+              ...(usedHeadline ? { headline: usedHeadline } : {}),
             },
           });
 
@@ -709,6 +731,9 @@ export class KnowledgeAutomationService {
             platforms: reservation.platforms,
             variants,
             status: finalStatus,
+            mediaUrl: autoVisualUrl,
+            posterPrompt: usedPosterPrompt,
+            headline: usedHeadline,
           };
           await db.query(
             `INSERT INTO content(id,workspace_id,title,body,platforms,variants,status,scheduled_at,created_by,updated_by,timezone)
@@ -752,8 +777,26 @@ export class KnowledgeAutomationService {
             ],
           );
           await db.query(
-            "UPDATE knowledge_content_plans SET state=CASE WHEN $2='SCHEDULED' THEN 'COMPLETED' ELSE 'REVIEW' END,content_id=$3,lease_token=NULL,lease_until=NULL,error_message=NULL,updated_at=now() WHERE id=$1",
-            [reservation.id, finalStatus, id],
+            `UPDATE knowledge_content_plans 
+             SET state=CASE WHEN $2='SCHEDULED' THEN 'COMPLETED' ELSE 'REVIEW' END,
+                 content_id=$3,
+                 source_snapshot=COALESCE(source_snapshot, '{}'::jsonb) || $4::jsonb,
+                 lease_token=NULL,
+                 lease_until=NULL,
+                 error_message=NULL,
+                 updated_at=now() 
+             WHERE id=$1`,
+            [
+              reservation.id,
+              finalStatus,
+              id,
+              JSON.stringify({
+                posterPrompt: usedPosterPrompt,
+                headline: usedHeadline,
+                mediaUrl: autoVisualUrl,
+                title: result.title,
+              }),
+            ],
           );
           await audit(
             db,
@@ -819,24 +862,30 @@ export class KnowledgeAutomationService {
     await this.database.query(
       `INSERT INTO knowledge_automation_settings(workspace_id, actor_id, enabled, autopilot_enabled, horizon_days, cooldown_days, platforms, poster_style)
        VALUES($1, $2, true, true, 14, 90, '["LinkedIn","Instagram","Facebook","Telegram"]', 'AI_POSTER')
-       ON CONFLICT(workspace_id) DO UPDATE SET enabled=true, autopilot_enabled=true, actor_id=EXCLUDED.actor_id, poster_style=COALESCE(knowledge_automation_settings.poster_style, 'AI_POSTER'), next_run_at=now(), updated_at=now()`,
+       ON CONFLICT(workspace_id) DO UPDATE SET enabled=true, autopilot_enabled=true, actor_id=EXCLUDED.actor_id, poster_style='AI_POSTER', next_run_at=now(), updated_at=now()`,
       [workspaceId, actorId],
     );
     // Recover READY PDFs whose earlier text/knowledge extraction produced no facts.
     const missing = (await this.database.query(`SELECT d.id FROM documents d WHERE d.workspace_id=$1 AND d.status='READY'
       AND ($2::uuid IS NULL OR d.id=$2) AND NOT EXISTS(SELECT 1 FROM document_knowledge k WHERE k.document_id=d.id AND k.workspace_id=d.workspace_id)`,[workspaceId,documentId ?? null])).rows;
     if (missing.length) {
-      const { createQueue } = await import("../queues.js");
-      const queue = createQueue("content-generation",{defaultJobOptions:{attempts:3,backoff:{type:"exponential",delay:10000}}});
-      for (const document of missing) await inTransaction(this.database,async db => {
-        await db.query("SELECT id FROM documents WHERE id=$1 AND workspace_id=$2 FOR UPDATE",[document.id,workspaceId]);
-        const running = await db.query("SELECT id FROM ai_generations WHERE workspace_id=$1 AND generation_type='DOCUMENT_KNOWLEDGE' AND input->>'documentId'=$2 AND status IN ('QUEUED','PROCESSING')",[workspaceId,document.id]);
-        if (running.rowCount) return;
-        const generationId=randomUUID();
-        await db.query(`INSERT INTO ai_generations(id,workspace_id,actor_id,provider,generation_type,status,input,output)
-          VALUES($1,$2,$3,$4,'DOCUMENT_KNOWLEDGE','QUEUED',$5,'{}')`,[generationId,workspaceId,actorId,process.env.LLM_PROVIDER || 'groq',JSON.stringify({documentId:document.id,autoTriggered:true})]);
-        await queue.add('extract-knowledge',{generationId,documentId:document.id,workspaceId,forcePdf:true},{jobId:generationId},db);
-      });
+      const { KnowledgeService } = await import("./knowledge.service.js");
+      const knowledgeService = new KnowledgeService();
+      for (const document of missing) {
+        const generationId = randomUUID();
+        await this.database.query(
+          `INSERT INTO ai_generations(id,workspace_id,actor_id,provider,generation_type,status,input,output)
+           VALUES($1,$2,$3,$4,'DOCUMENT_KNOWLEDGE','QUEUED',$5,'{}')`,
+          [generationId, workspaceId, actorId, process.env.LLM_PROVIDER || 'groq', JSON.stringify({ documentId: document.id, autoTriggered: true })]
+        );
+        console.log(`[AutoPilot] Extracting missing knowledge for document ${document.id}...`);
+        try {
+          await knowledgeService.processKnowledgeExtraction(generationId, document.id, workspaceId);
+          console.log(`[AutoPilot] Knowledge extraction completed for document ${document.id}`);
+        } catch (e: any) {
+          console.warn(`[AutoPilot] Extraction warning:`, e?.message || e);
+        }
+      }
     }
 
     // 2. Enable Festival Auto-Greeting & Auto-Publishing on workspace

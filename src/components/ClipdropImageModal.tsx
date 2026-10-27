@@ -27,7 +27,7 @@ import {
   Crown,
   Edit3,
 } from "lucide-react";
-import { clipdropApi, request } from "../lib/api";
+import { clipdropApi, request, resolveMediaUrl } from "../lib/api";
 import { useSession } from '../lib/session';
 import { ModalFrame } from "./ui";
 import type { Account } from "../lib/model";
@@ -1562,8 +1562,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                 <>
                   <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}>
                     <img
-                      src={generatedAsset.url}
+                      src={resolveMediaUrl(generatedAsset.url)}
                       alt="Generated Visual"
+                      crossOrigin="anonymous"
                       onLoad={() => setImageLoaded(true)}
                       onError={() => setImageError(true)}
                       style={{
@@ -2295,8 +2296,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                 <X size={20} />
               </button>
               <img
-                src={generatedAsset.url}
+                src={resolveMediaUrl(generatedAsset.url)}
                 alt="Fullscreen Preview"
+                crossOrigin="anonymous"
                 style={{
                   maxWidth: "90vw",
                   maxHeight: "90vh",

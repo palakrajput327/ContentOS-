@@ -4,6 +4,17 @@ import { demoSnapshot, type Snapshot, type Post, type Brand } from "./model";
 let demo = demoSnapshot();
 export const apiEnabled = import.meta.env.VITE_API_ENABLED === "true";
 export const apiBase = (import.meta.env.VITE_API_BASE || (typeof window !== "undefined" && window.location.hostname.includes("hidustansocialnetwork") ? "https://api.hidustansocialnetwork.in" : "")) as string;
+
+export function resolveMediaUrl(rawUrl?: string | null): string {
+  if (!rawUrl) return "";
+  if (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) {
+    return rawUrl
+      .replace("https://api.hidustansocialnetwork.in", "")
+      .replace("http://localhost:3001", "")
+      .replace("http://127.0.0.1:3001", "");
+  }
+  return rawUrl;
+}
 export async function request<T>(
   path: string,
   method = "GET",

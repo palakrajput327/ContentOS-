@@ -19,6 +19,7 @@ import {
   type Platform,
   type PlatformVariant,
 } from "../lib/platform-capabilities";
+import { resolveMediaUrl } from "../lib/api";
 
 export interface PublishPreviewModalProps {
   isOpen: boolean;
@@ -461,7 +462,7 @@ export function PublishPreviewModal({
                   </p>
                 )}
                 {!isInstagramAutoPoster && mediaType === "image" && variantObj.mediaUrl && (
-                  <img src={variantObj.mediaUrl} alt={`${currentPlatform} image preview`} style={{ display: "block", maxWidth: "100%", maxHeight: 200, objectFit: "contain", borderRadius: 8, marginTop: 8 }} />
+                  <img src={resolveMediaUrl(variantObj.mediaUrl)} alt={`${currentPlatform} image preview`} crossOrigin="anonymous" style={{ display: "block", maxWidth: "100%", maxHeight: 200, objectFit: "contain", borderRadius: 8, marginTop: 8 }} />
                 )}
               </div>
             </div>

@@ -244,7 +244,6 @@ async function processLockedPDFDocument(
       console.log(`[PDF Worker] Extraction completed successfully for ${documentId}: ${pageCount} pages, ${chunks.length} chunks.`);
 
       // 7. Auto-Extract Knowledge & Facts immediately
-      if(queueBackend()==='postgres')return {pageCount,chunkCount:chunks.length};
       try {
         const generationId = randomUUID();
         await pool.query(

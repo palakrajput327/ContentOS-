@@ -37,9 +37,10 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { request } from "../lib/api";
+import { request, resolveMediaUrl } from "../lib/api";
 import { useSession } from "../lib/session";
 import { Button, Empty, StatusBadge, PlatformIcon } from "../components/ui";
+import { LiveAutoPilotPulse } from "../components/LiveAutoPilotPulse";
 import "./knowledge-automation.css";
 
 type Source = {
@@ -550,6 +551,26 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
         </div>
       </section>
 
+      {/* Real-Time Live Auto-Pilot Pulse & Dynamic Countdown */}
+      {data?.plans && data.plans.length > 0 && (
+        <LiveAutoPilotPulse
+          plans={data.plans}
+          settings={config}
+          timezone={data.workspace?.timezone || "Asia/Kolkata"}
+          autopilotRunning={busy}
+          onTriggerAutoPilot={triggerAutoPilot}
+          onPublishNow={async (planId) => {
+            await action(
+              async () => {
+                await request(`${base}/plans/${planId}/publish-now`, "POST");
+                await query.invalidateQueries({ queryKey: ["knowledge-automation"] });
+              },
+              "🚀 Dispatched post live to social channel!"
+            );
+          }}
+        />
+      )}
+
       {/* Flexible Daily Posting Schedule Strip (Presets + Dynamic Custom Time Picker) */}
       {data && config && (
         <div className="ka-timing-section">
@@ -568,7 +589,6 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <Button
                 variant="primary"
-                size="sm"
                 disabled={busy}
                 onClick={() => handleSaveTime(config.posting_time || "10:00")}
                 style={{
@@ -646,7 +666,6 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
                 </span>
                 <Button
                   variant="primary"
-                  size="sm"
                   disabled={busy || !customPickerTime}
                   onClick={() => handleSaveTime(customPickerTime)}
                   style={{ fontSize: "0.82rem", padding: "6px 14px", fontWeight: 600 }}
@@ -655,7 +674,6 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
                 </Button>
                 <Button
                   variant="secondary"
-                  size="sm"
                   disabled={busy || !customPickerTime}
                   onClick={() => handleAddSlot(customPickerTime)}
                   style={{ fontSize: "0.82rem", padding: "6px 12px" }}
@@ -696,7 +714,6 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
               <Button
                 variant="primary"
-                size="sm"
                 disabled={busy}
                 onClick={() => handleSaveTime(config.posting_time || "10:00")}
                 style={{
@@ -1329,8 +1346,9 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
                       {data.plans.map((p) => {
                         const variants = (p.variants || {}) as Record<string, any>;
                         const tgVariant = variants.Telegram || {};
-                        const firstVariant = Object.values(variants)[0] || {};
-                        const mediaUrl = tgVariant.mediaUrl || firstVariant.mediaUrl || null;
+                        const firstVariant = (Object.values(variants)[0] || {}) as any;
+                        const rawMediaUrl = tgVariant.mediaUrl || firstVariant.mediaUrl || null;
+                        const mediaUrl = rawMediaUrl ? resolveMediaUrl(rawMediaUrl) : null;
                         const captionText = tgVariant.caption || p.body || p.title || "";
                         const targetPlatform = p.social_platform || p.platforms?.[0] || "Telegram";
                         const isPublished = p.publish_state === "PUBLISHED" || p.content_status === "PUBLISHED";
@@ -1444,7 +1462,7 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
                                   </div>
                                   {mediaUrl ? (
                                     <div className="ka-poster-preview-wrap" onClick={() => setActiveLightbox(mediaUrl)}>
-                                      <img src={mediaUrl} alt="AI Poster" className="ka-poster-preview-img" />
+                                      <img src={mediaUrl} alt="AI Poster" className="ka-poster-preview-img" crossOrigin="anonymous" />
                                       <div style={{ position: "absolute", bottom: "6px", right: "6px", background: "rgba(0,0,0,0.65)", color: "#fff", padding: "2px 6px", borderRadius: "4px", fontSize: "10px", display: "flex", alignItems: "center", gap: "4px" }}>
                                         <Eye size={10} /> Click to Expand
                                       </div>
@@ -1513,7 +1531,7 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
       {/* Lightbox Modal for Poster Zoom */}
       {activeLightbox && (
         <div className="ka-lightbox-overlay" onClick={() => setActiveLightbox(null)}>
-          <img src={activeLightbox} alt="Full Resolution Poster" className="ka-lightbox-img" />
+          <img src={activeLightbox} alt="Full Resolution Poster" className="ka-lightbox-img" crossOrigin="anonymous" />
         </div>
       )}
     </div>

@@ -79,8 +79,8 @@ let ClipdropController = class ClipdropController {
         assertPermission(r.workspace.role, "edit");
         const v = suggestPosterPromptSchema.parse(input);
         const { pool } = await import("../db.js");
-        const ws = (await pool.query("SELECT brand_settings FROM workspaces WHERE id=$1", [r.workspace.id])).rows[0];
-        const brand = ws?.brand_settings || {};
+        const brandRow = (await pool.query("SELECT data FROM brand_kits WHERE workspace_id=$1", [r.workspace.id])).rows[0];
+        const brand = brandRow?.data || {};
         return this.clipdropService.suggestPosterPrompt({
             knowledgeConcept: v.knowledgeConcept,
             excerpt: v.excerpt,

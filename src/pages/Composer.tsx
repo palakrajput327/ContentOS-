@@ -34,7 +34,7 @@ import {
 } from "lucide-react";
 import { Button, PlatformIcon, StatusBadge, Modal } from "../components/ui";
 import { platforms, type Platform, type Snapshot } from "../lib/model";
-import { data, request } from "../lib/api";
+import { data, request, resolveMediaUrl } from "../lib/api";
 import { useSession } from "../lib/session";
 import { PublishPreviewModal } from "../components/PublishPreviewModal";
 import { ClipdropImageModal } from "../components/ClipdropImageModal";
@@ -861,9 +861,9 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                 {mediaUrl ? (
                   <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
                     {postType === "image" ? (
-                      <img src={mediaUrl} alt="Attached media" style={{ width: "80px", height: "80px", objectFit: "cover", borderRadius: "8px" }} />
+                      <img src={resolveMediaUrl(mediaUrl)} alt="Attached media" crossOrigin="anonymous" style={{ width: "80px", height: "80px", objectFit: "cover", borderRadius: "8px" }} />
                     ) : (
-                      <video src={mediaUrl} style={{ width: "110px", height: "80px", objectFit: "cover", borderRadius: "8px" }} />
+                      <video src={resolveMediaUrl(mediaUrl)} style={{ width: "110px", height: "80px", objectFit: "cover", borderRadius: "8px" }} />
                     )}
                     <div>
                       <p style={{ margin: "0 0 4px", fontSize: "0.85rem", color: "var(--ink)" }}>Media attached & routed across selected accounts</p>
@@ -1173,7 +1173,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                           {varObj.metadata.sourceEvidence.map((e:any,i:number)=><div key={i}><strong>{String(e.documentName || 'Source document')} · {e.pageStart ? `Page ${e.pageStart}${e.pageEnd && e.pageEnd!==e.pageStart ? `–${e.pageEnd}` : ''}` : 'Page unavailable'}</strong><blockquote>{String(e.excerpt || 'No excerpt available.')}</blockquote></div>)}
                         </details>}
                         <button type="button" className="text-button" disabled={!editable || !canEdit} onClick={()=>setVariants(prev=>{const next={...prev[p]};delete next.caption;delete next.title;delete next.mediaAssetId;delete next.mediaUrl;delete next.mediaType;return{...prev,[p]:next};})}>Use shared caption & media</button>
-                        {varObj.mediaUrl && varObj.mediaType==='image' && <img src={varObj.mediaUrl} alt={`${p} attached image`} style={{width:96,height:96,objectFit:'cover',borderRadius:8}} />}
+                        {varObj.mediaUrl && varObj.mediaType==='image' && <img src={resolveMediaUrl(varObj.mediaUrl)} alt={`${p} attached image`} crossOrigin="anonymous" style={{width:96,height:96,objectFit:'cover',borderRadius:8}} />}
                         {!s.accounts.some(a=>String(a.platform).toLowerCase()===p.toLowerCase()&&a.state?.toLowerCase()==='connected') && <p role="status">{p} is not connected. <a href="/app/channels">Connect in Channels</a></p>}
                         <textarea
                           aria-label={`${p} caption`}
@@ -1296,9 +1296,9 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
             {focusedVariant.mediaUrl && (
               <div style={{ margin: "12px 0", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border)" }}>
                 {focusedVariant.mediaType === "image" ? (
-                  <img src={focusedVariant.mediaUrl} alt="Attached preview" style={{ width: "100%", maxHeight: "280px", objectFit: "cover", display: "block" }} />
+                  <img src={resolveMediaUrl(focusedVariant.mediaUrl)} alt="Attached preview" crossOrigin="anonymous" style={{ width: "100%", maxHeight: "280px", objectFit: "cover", display: "block" }} />
                 ) : (
-                  <video src={focusedVariant.mediaUrl} controls style={{ width: "100%", maxHeight: "280px", display: "block", background: "var(--surface)" }} />
+                  <video src={resolveMediaUrl(focusedVariant.mediaUrl)} controls style={{ width: "100%", maxHeight: "280px", display: "block", background: "var(--surface)" }} />
                 )}
               </div>
             )}

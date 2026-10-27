@@ -33,13 +33,14 @@ import {
 } from "lucide-react";
 import { Button, PlatformIcon, StatusBadge } from "../components/ui";
 import { platforms, type Platform, type Snapshot } from "../lib/model";
-import { data, request, documentsApi, type DocItem, type KnowledgeItem } from "../lib/api";
+import { data, request, documentsApi, resolveMediaUrl, type DocItem, type KnowledgeItem } from "../lib/api";
 import { useSession } from "../lib/session";
 import { PublishPreviewModal } from "../components/PublishPreviewModal";
 import { ClipdropImageModal } from "../components/ClipdropImageModal";
 import { BatchProgressIndicator } from "../components/BatchProgressIndicator";
 import KnowledgeAutomation from './KnowledgeAutomation';
 import { DocumentSourceMedia } from '../components/DocumentSourceMedia';
+import { LiveAutoPilotPulse } from '../components/LiveAutoPilotPulse';
 import './studio-integration.css';
 
 function formatExcerpt(text: string | null | undefined): string {
@@ -62,6 +63,23 @@ function visualEvidence(item:KnowledgeItem) {
   return item.metadata?.origin==='SOURCE_VISUAL'?{sourceMediaAssetId:item.metadata.sourceMediaAssetId,sourceReferenceId:item.metadata.sourceReferenceId,evidenceKind:item.metadata.evidenceKind,originalChecksum:item.metadata.originalChecksum}:{};
 }
 
+function formatPostingTimeSlots(rawTime?: string): string {
+  if (!rawTime || !rawTime.trim()) return "10:00 AM";
+  const slots = rawTime.split(",").map((t) => t.trim()).filter(Boolean);
+  const formatted = slots.map((timeStr) => {
+    const [hStr, mStr] = timeStr.split(":");
+    const h = parseInt(hStr, 10);
+    if (isNaN(h)) return timeStr;
+    const m = mStr ? mStr.padStart(2, "0") : "00";
+    const ampm = h >= 12 ? "PM" : "AM";
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${h12}:${m} ${ampm}`;
+  });
+  if (formatted.length === 1) return formatted[0];
+  if (formatted.length === 2) return `${formatted[0]} & ${formatted[1]}`;
+  return `${formatted.slice(0, -1).join(", ")} & ${formatted[formatted.length - 1]}`;
+}
+
 export default function AIStudio() {
   const s = useOutletContext<Snapshot>();
   const nav = useNavigate();
@@ -71,12 +89,35 @@ export default function AIStudio() {
   const [showClipdropModal, setShowClipdropModal] = useState(false);
   const [showAutoPilotGuide, setShowAutoPilotGuide] = useState(false);
   const [attachedVisual, setAttachedVisual] = useState<{ assetId: string; url: string; filename: string } | null>(null);
+  const [generatedEvidence, setGeneratedEvidence] = useState<any[]>([]);
 
   // Studio Mode: 'topic' | 'pdf'
   const [studioParams, setStudioParams] = useSearchParams();
   const activeTab = studioParams.get('tab') === 'automation' ? 'automation' : studioParams.get('tab') === 'pdf' ? 'pdf' : 'topic';
-  const storedAutoPosts = useQuery({queryKey:["studio-autopilot-posts",s.workspace.id],queryFn:()=>request<{plans:any[]}>("/knowledge-automation"),enabled:!demo && activeTab === "pdf",refetchInterval:15000});
+  const storedAutoPosts = useQuery({
+    queryKey: ["studio-autopilot-posts", s.workspace.id],
+    queryFn: () => request<{ plans: any[]; settings?: any; workspace?: any }>("/knowledge-automation"),
+    enabled: !demo && activeTab === "pdf",
+    refetchInterval: 5000,
+  });
   const setActiveTab = (tab: 'topic' | 'pdf' | 'automation') => setStudioParams({tab});
+
+  const dynamicPostingSlot = formatPostingTimeSlots(
+    storedAutoPosts.data?.settings?.posting_time || (s.workspace as any)?.festival_post_time || "10:00"
+  );
+
+  const nextScheduledPlan = storedAutoPosts.data?.plans?.find(
+    (p: any) => p.publish_state === "ENQUEUED" || p.content_status === "SCHEDULED"
+  );
+  const nextScheduledTimeStr = nextScheduledPlan?.execute_at || nextScheduledPlan?.proposed_at
+    ? new Date(nextScheduledPlan.execute_at || nextScheduledPlan.proposed_at).toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      })
+    : null;
 
   // Topic Mode state
   const [topic, setTopic] = useState("");
@@ -463,16 +504,28 @@ export default function AIStudio() {
         { documentId: selectedDocId }
       );
       toast.success(res.message || "⚡ Auto-Pilot executed successfully!");
+
+      // Actively poll until plans appear
+      const startTime = Date.now();
+      const pollTimer = setInterval(async () => {
+        const updated = await storedAutoPosts.refetch();
+        if ((updated.data?.plans && updated.data.plans.length > 0) || Date.now() - startTime > 45000) {
+          clearInterval(pollTimer);
+          setAutopilotRunning(false);
+        }
+      }, 3000);
+
       await Promise.all([
         query.invalidateQueries({ queryKey: ["documents"] }),
         query.invalidateQueries({ queryKey: ["posts"] }),
         query.invalidateQueries({ queryKey: ["calendar"] }),
         query.invalidateQueries({ queryKey: ["knowledge-automation"] }),
+        query.invalidateQueries({ queryKey: ["studio-autopilot-posts"] }),
         query.invalidateQueries({ queryKey: ["workspace"] }),
+        storedAutoPosts.refetch(),
       ]);
     } catch (err: any) {
       toast.error(err.message || "Auto-Pilot failed to start.");
-    } finally {
       setAutopilotRunning(false);
     }
   }
@@ -1087,19 +1140,63 @@ export default function AIStudio() {
                       flexWrap: "wrap",
                     }}
                   >
-                    <div>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                    <div style={{ flex: 1, minWidth: "280px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
                         <Sparkles size={18} color="#818cf8" />
                         <strong style={{ fontSize: "1rem", color: "#f8fafc" }}>100% Zero-Touch Auto-Pilot</strong>
                         <span style={{ fontSize: "0.7rem", padding: "2px 8px", borderRadius: "10px", background: "#4f46e5", color: "#fff", fontWeight: 700 }}>
                           HANDS-FREE
                         </span>
+                        {/* Dynamic Selected Time Slot Badge */}
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            fontSize: "0.75rem",
+                            padding: "2px 9px",
+                            borderRadius: "8px",
+                            background: "rgba(56, 189, 248, 0.15)",
+                            border: "1px solid rgba(56, 189, 248, 0.4)",
+                            color: "#38bdf8",
+                            fontWeight: 700,
+                            letterSpacing: "0.01em",
+                          }}
+                        >
+                          <Clock size={12} style={{ color: "#38bdf8" }} /> Slot: {dynamicPostingSlot}
+                        </span>
                       </div>
-                      <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
-                        Auto-pairs PDF visuals, creates multi-platform captions & hashtags, schedules posts day-by-day (10:00 AM), and auto-injects festival greetings (Diwali, Holi, Eid, Independence Day).
+                      <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--color-text-muted)", lineHeight: 1.5 }}>
+                        Auto-pairs PDF visuals, creates multi-platform captions & hashtags, schedules posts day-by-day (
+                        <strong style={{ color: "#38bdf8", fontWeight: 700 }}>{dynamicPostingSlot}</strong>
+                        ), and auto-injects festival greetings (Diwali, Holi, Eid, Independence Day).
                       </p>
+                      {nextScheduledTimeStr && (
+                        <div style={{ marginTop: "6px", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "0.78rem", color: "#a5b4fc" }}>
+                          <span style={{ display: "inline-block", width: "6px", height: "6px", borderRadius: "50%", background: "#10b981" }} />
+                          <span>Next auto-post scheduled: <strong style={{ color: "#f8fafc" }}>{nextScheduledTimeStr}</strong> {nextScheduledPlan?.social_platform ? `(${nextScheduledPlan.social_platform})` : ""}</span>
+                        </div>
+                      )}
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                      <Button
+                        variant="secondary"
+                        onClick={() => setActiveTab("automation")}
+                        title="Configure automatic daily posting time slots"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          background: "rgba(56, 189, 248, 0.1)",
+                          border: "1px solid rgba(56, 189, 248, 0.3)",
+                          color: "#38bdf8",
+                          padding: "9px 13px",
+                          fontSize: "0.83rem",
+                          fontWeight: 600,
+                        }}
+                      >
+                        <Clock size={14} /> Change Time Slot
+                      </Button>
                       <Button
                         variant="secondary"
                         onClick={() => setShowAutoPilotGuide(true)}
@@ -1133,6 +1230,26 @@ export default function AIStudio() {
                       </Button>
                     </div>
                   </div>
+                )}
+
+                {/* Real-Time Live Auto-Pilot Pulse & Dynamic Countdown */}
+                {selectedDocId && (
+                  <LiveAutoPilotPulse
+                    plans={storedAutoPosts.data?.plans || []}
+                    settings={storedAutoPosts.data?.settings}
+                    timezone={(s.workspace as any)?.timezone || "Asia/Kolkata"}
+                    autopilotRunning={autopilotRunning}
+                    onTriggerAutoPilot={handleTriggerAutoPilot}
+                    onPublishNow={async (planId: string) => {
+                      try {
+                        await request(`/knowledge-automation/plans/${planId}/publish-now`, "POST");
+                        toast.success("🚀 Dispatched post live to social channel!");
+                        await storedAutoPosts.refetch();
+                      } catch (err: any) {
+                        toast.error(err.message || "Failed to publish post now.");
+                      }
+                    }}
+                  />
                 )}
 
                 {/* Smooth In-App Auto-Pilot Guide Modal */}
@@ -1392,8 +1509,9 @@ export default function AIStudio() {
                         {item.sourceImageUrl && (
                           <div style={{ position: "relative", width: "150px", height: "130px", borderRadius: "8px", overflow: "hidden", background: "#000", border: "1px solid rgba(255, 255, 255, 0.1)" }}>
                             <img
-                              src={item.sourceImageUrl}
+                              src={resolveMediaUrl(item.sourceImageUrl)}
                               alt="Source Diagram"
+                              crossOrigin="anonymous"
                               style={{ width: "100%", height: "100%", objectFit: "cover" }}
                             />
                             <div style={{ position: "absolute", bottom: "4px", left: "4px", background: "rgba(0,0,0,0.75)", color: "#fff", fontSize: "10px", padding: "2px 6px", borderRadius: "4px", fontWeight: 600 }}>
@@ -1865,7 +1983,7 @@ export default function AIStudio() {
             {Object.keys(generatedVariants).length > 0 && <details style={{marginBottom:16}}>
               <summary>Why did AI write this?</summary>
               <p>These inputs were supplied to AI. Review the source before approving any claims.</p>
-              {generatedEvidence.length ? generatedEvidence.map(e=><div key={e.knowledgeId}><strong>{e.documentName} · {e.pageStart ? `Page ${e.pageStart}${e.pageEnd && e.pageEnd!==e.pageStart ? `–${e.pageEnd}` : ''}` : 'Page unavailable'}</strong><blockquote>{e.excerpt || 'No source excerpt available.'}</blockquote></div>) : <p>Generated from your prompt and Brand Kit. No document page evidence was supplied.</p>}
+              {generatedEvidence.length ? generatedEvidence.map((e: any)=><div key={e.knowledgeId}><strong>{e.documentName} · {e.pageStart ? `Page ${e.pageStart}${e.pageEnd && e.pageEnd!==e.pageStart ? `–${e.pageEnd}` : ''}` : 'Page unavailable'}</strong><blockquote>{e.excerpt || 'No source excerpt available.'}</blockquote></div>) : <p>Generated from your prompt and Brand Kit. No document page evidence was supplied.</p>}
             </details>}
             {Object.keys(generatedVariants).length === 0 ? (
               <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px", textAlign: "center", color: "var(--color-text-muted)", border: "1px dashed var(--border)", borderRadius: "10px", gap: "14px" }}>
@@ -1986,8 +2104,9 @@ export default function AIStudio() {
                   {attachedVisual ? (
                     <div style={{ margin: "10px 0", borderRadius: "10px", overflow: "hidden", position: "relative", border: "1px solid var(--border)" }}>
                       <img
-                        src={attachedVisual.url}
+                        src={resolveMediaUrl(attachedVisual.url)}
                         alt="Attached Visual"
+                        crossOrigin="anonymous"
                         style={{ width: "100%", maxHeight: "240px", objectFit: "cover", display: "block" }}
                       />
                       <button

@@ -297,7 +297,9 @@ export async function bootstrap() {
         allowedHeaders: ["Content-Type", "X-Workspace-Id"],
         maxAge: 600,
     });
-    app.use(helmet());
+    app.use(helmet({
+        crossOriginResourcePolicy: { policy: "cross-origin" },
+    }));
     app.use((req, res, next) => {
         const id = randomUUID();
         req.requestId = id;
@@ -454,6 +456,7 @@ export async function bootstrap() {
         catch (error) {
             console.error("Postgres shutdown error:", error);
         }
+        process.exit(0);
     };
     process.once("SIGTERM", () => void close());
     process.once("SIGINT", () => void close());
