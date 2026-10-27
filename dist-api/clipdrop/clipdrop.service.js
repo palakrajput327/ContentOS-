@@ -21,13 +21,13 @@ let ClipdropService = class ClipdropService {
      */
     async suggestPrompt(contentText, platform, contextInfo) {
         const provider = getLLMProvider();
-        const systemPrompt = `You are an elite creative visual director for high-growth tech brands and social media marketing.
+        const systemPrompt = `You are an elite creative visual director.
 Analyze the provided content and formulate a vivid, compelling image generation prompt for modern text-to-image AI (FLUX / Clipdrop / Midjourney).
 
 STRICT RULES:
-1. Extract the primary core concept, visual metaphor, or key message.
-2. Build a cinematic scene description: subject, environment, lighting (soft studio glow, rim light, volumetric lighting), style (clean 3D glassmorphic render, photorealistic, or sleek modern SaaS).
-3. Do NOT copy raw sentences or quote fragments from the post. Turn thoughts into tangible visual art!
+1. Extract the core concept and determine the best visual style (cinematic photography, high-tech conceptual art, or modern editorial illustration).
+2. Do NOT repeatedly use the word '3D'. Instead describe physical materials, lighting (rim light, volumetric rays, soft studio glow), and camera framing.
+3. Turn abstract concepts into tangible, meaningful visual metaphors.
 4. Do NOT include phrases like "Create an image of", "Illustration of", or quotation marks.
 5. Return 35 to 65 words of rich, descriptive visual keywords.`;
         const userMessage = `Content text:\n"${contentText.slice(0, 1500)}"\n${contextInfo ? `Context: ${contextInfo}` : ""}\nTarget Platform: ${platform || "Social Media"}`;
@@ -55,7 +55,7 @@ STRICT RULES:
         // High quality thematic fallbacks if LLM unavailable
         const subject = contentText.split(/[.\n]/)[0]?.replace(/[^a-zA-Z0-9 ]/g, " ").trim().slice(0, 80) || "digital innovation";
         return {
-            prompt: `Futuristic 3D minimalist digital workspace representing ${subject}, glowing holographic data interface, floating geometric glass cubes, sleek violet and cyan studio lighting, ultra-detailed 8k octane render`,
+            prompt: `Cinematic conceptual visual representing ${subject}, dramatic directional lighting, elegant composition, rich textures, high-contrast atmospheric depth, 8k resolution`,
         };
     }
     /**
@@ -68,41 +68,44 @@ STRICT RULES:
         const isFinCrypto = /redhash|crypto|trading|gold|xau|investment|income|referral|milestone|reward|single\s*leg|turnover|cto|finance|forex|payout|blockchain|token/i.test(combinedContext);
         const isHealth = /health|medical|biotech|doctor|clinic|fitness|pharma|wellness/i.test(combinedContext);
         const isRealEstate = /property|real estate|villa|architecture|home|apartment|interior/i.test(combinedContext);
-        let domainGuidance = "Represent the technical idea as a vivid 3D scene matching its specific industry.";
+        let domainGuidance = "Analyze the core theme of the text and choose the most fitting artistic medium: cinematic photography, clean editorial graphic, high-tech digital art, or tangible physical representation.";
         let defaultColor = "modern vibrant brand colors";
         if (isFinCrypto) {
-            domainGuidance = "The document is about Financial Trading, Crypto & Investment (such as Redhash, Gold Trading XAU/USD, Multi-Tier Income Structure, Staking Rewards). Translate this concept into tangible financial and tech art: e.g. glowing 3D metallic crypto coin token emblem with laser etched red circuits and holographic globe grid, gleaming solid gold bullion bars (XAU/USD), futuristic 3D candlestick charts, golden championship reward trophies, cash stacks, tiered red glass orbs, dark obsidian carbon fiber backdrop, crimson red laser rim lighting.";
-            defaultColor = "bold crimson red (#E50914), polished metallic chrome/silver, deep carbon, and gleaming gold accents";
+            domainGuidance = "The document is about Financial Markets, Trading, Risk Management & Investment. Deeply analyze the specific topic: If it covers Risk Disclosure or Due Diligence, craft a dramatic cinematic composition with protective shields, crimson market charts, or analytical desk settings. If it covers Gold Trading (XAU/USD), feature authentic gleaming gold bullion bars and live exchange terminals. If it covers Milestone Rewards, feature prestigious trophies or celebration podiums. DO NOT spam repetitive '3D' buzzwords; describe concrete physical textures, lighting, camera angles, and atmospheric composition.";
+            defaultColor = "bold crimson red (#E50914), polished chrome, deep carbon obsidian, and gleaming gold accents";
         }
         else if (isHealth) {
-            domainGuidance = "The document is about Healthcare & Wellness. Use sleek 3D medical visual metaphors, DNA strands, biometric interfaces, clean clinical lighting.";
+            domainGuidance = "The document is about Healthcare & Wellness. Use high-end medical editorial photography, microscopic bio-imagery, or clean clinical spaces with soft natural light.";
             defaultColor = "cyan, teal, and clean medical white";
         }
         else if (isRealEstate) {
-            domainGuidance = "The document is about Real Estate & Architecture. Use luxurious 3D modern architectural renders, glass facades, golden hour sunlight.";
+            domainGuidance = "The document is about Real Estate & Architecture. Use luxurious architectural photography, glass facades, and golden hour sunlight.";
             defaultColor = "warm terracotta, gold, and slate";
         }
         const primaryColor = opts.brand?.primary_color || defaultColor;
-        const systemPrompt = `You are a world-class creative art director and prompt engineer for high-growth global brands and social media visual posters.
-Your job is to read extracted knowledge facts/concepts from a document, along with any source visual context (diagrams/infographics from the PDF), and craft:
-1. A descriptive, high-quality text-to-image prompt (for FLUX / Midjourney / Clipdrop) that ACCURATELY and visually represents the specific concept from the document as an eye-catching social media poster.
-2. A short, punchy 3-6 word visual headline for the poster.
+        const systemPrompt = `You are a world-class creative visual director and prompt engineer for top-tier global brands.
+Your job is to read extracted knowledge concepts and context from a document, analyze the underlying meaning, and craft:
+1. A tailored, high-fidelity text-to-image prompt (for FLUX / Midjourney / Clipdrop) that ACCURATELY and visually translates the specific PDF concept into compelling visual art.
+2. A short, punchy 3-6 word visual headline.
 
-DOMAIN-SPECIFIC VISUAL DIRECTION:
+VISUAL DIRECTION:
 ${domainGuidance}
 
-STRICT RULES FOR IMAGE PROMPT:
-1. ACCURATE TO DOCUMENT SUBJECT: Translate the exact concept (${opts.title || opts.knowledgeConcept}) into vivid visual metaphors. If the concept is Gold Trading (XAU/USD), the prompt MUST feature gleaming gold bullion bars and market charts. If it is Rewards & Milestones, it MUST feature 3D golden trophies, gift boxes, and podiums. If it is Package Return/Staking, it MUST feature a glowing 3D crypto coin token and growth metrics.
-2. COLOR PALETTE: Strictly harmonize with: ${primaryColor}.
-3. LIGHTING & RENDER: Specify lighting (volumetric rim lighting, laser glow, soft studio occlusion) and render engine (ultra-detailed 8k Octane 3D render, photorealistic, cinematic composition).
-4. Do NOT use generic purple SaaS cubes unless the document is specifically about a generic SaaS tool!
-5. Do NOT include phrases like "Create an image of", "Poster of", or quotation marks.
-6. Return 35 to 65 words of rich visual keywords.
+STRICT ARTISTIC GUIDELINES:
+1. DYNAMIC & TOPIC-AWARE: Do NOT blindly label everything as '3D' or '3D render'. Determine the optimal style naturally:
+   - For concrete physical subjects (bullion, trophies, shields, hardware): Describe real physical materials (brushed titanium, obsidian carbon fiber, polished gold, refractive crystal).
+   - For market analysis & data: Describe cinematic lighting, holographic interfaces, candlestick graphs, atmospheric rim lighting.
+   - For organizational / abstract concepts: Describe thoughtful visual metaphors with dramatic composition and depth.
+2. NEVER spam the word '3D' repeatedly. Describe the camera shot (close-up hero angle, wide cinematic shot, macro focus), lighting (volumetric rim light, soft diffuse illumination, neon glow), and textures instead.
+3. COLOR HARMONY: Harmonize with: ${primaryColor}.
+4. Do NOT use generic purple SaaS cubes!
+5. Do NOT include filler words like "Create an image of", "Poster of", or quotes.
+6. Length: 35 to 65 evocative visual words.
 
 SCHEMA:
 Return JSON:
 {
-  "prompt": "35-65 words image generation prompt",
+  "prompt": "35-65 words tailored visual prompt",
   "headline": "3-6 words bold title"
 }`;
         const userMessage = `Document Name: "${opts.documentName || "Document"}"
@@ -144,12 +147,12 @@ Platform: ${opts.platform || "Instagram"}`;
             .slice(0, 60);
         if (isFinCrypto) {
             return {
-                prompt: `Futuristic 3D financial tech poster visual representing ${cleanSubject}, glowing metallic red and silver crypto coin emblem with holographic globe grid, gleaming solid gold bullion bars, fiery crimson neon laser circuits, polished dark carbon podium, cinematic volumetric studio lighting, ultra-detailed 8k octane render`,
+                prompt: `Cinematic conceptual visual representing ${cleanSubject}. Holographic market indicators, crimson data grid on polished obsidian surface, directional rim lighting, shallow depth of field, high-contrast prestigious financial aesthetic`,
                 headline: (opts.title || cleanSubject).slice(0, 40),
             };
         }
         return {
-            prompt: `Modern 3D premium concept visual representing ${cleanSubject}, polished geometric glass pedestals, ambient rim lighting, sleek studio composition, ultra-detailed 8k octane render`,
+            prompt: `Editorial conceptual visual representing ${cleanSubject}, minimalist composition, soft directional studio lighting, rich textural contrast, sharp focus, modern premium aesthetic`,
             headline: (opts.title || cleanSubject).slice(0, 40),
         };
     }

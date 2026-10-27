@@ -1498,7 +1498,7 @@ export default function AIStudio() {
                         )}
                       </h3>
                       <p style={{ margin: "4px 0 0", fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
-                        AI combined extracted PDF text concepts + source diagram figures into high-converting 3D SaaS visual prompts and catchy headlines.
+                        AI analyzed extracted PDF concepts and formulated tailored visual prompts and engaging multi-platform headlines.
                       </p>
                     </div>
 
@@ -1663,10 +1663,10 @@ export default function AIStudio() {
                             </div>
                           </div>
 
-                          {/* 3D Prompt Script Box */}
+                          {/* Dynamic Prompt Script Box */}
                           <div style={{ background: "rgba(0, 0, 0, 0.35)", padding: "10px 14px", borderRadius: "8px", border: "1px solid rgba(255, 255, 255, 0.08)", marginBottom: "8px" }}>
                             <span style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "#a855f7", fontWeight: 700, display: "block", marginBottom: "4px" }}>
-                              3D SaaS Visual Poster Prompt:
+                              AI Visual Direction Prompt (Dynamic from PDF):
                             </span>
                             <p style={{ margin: 0, fontSize: "0.82rem", color: "#e2e8f0", lineHeight: 1.45, fontStyle: "italic" }}>
                               &ldquo;{item.posterPrompt}&rdquo;
@@ -1675,7 +1675,7 @@ export default function AIStudio() {
 
                           {/* Caption Preview */}
                           <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
-                            <strong>Caption Script:</strong> {item.concept} &mdash; <em>&ldquo;{item.excerpt.slice(0, 100)}...&rdquo;</em>
+                            <strong>Caption Script:</strong> {item.caption || item.concept}
                           </p>
                         </div>
                       </div>

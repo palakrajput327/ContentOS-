@@ -806,7 +806,7 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
               <span className="ka-guide-step-num"><Sparkles size={13} /> Layer 2</span>
               <div className="ka-guide-step-title">AI Prompt Engine</div>
               <p className="ka-guide-step-desc">
-                AI combines extracted text concepts + source visual diagrams into a high-converting 3D SaaS poster prompt.
+                AI analyzes extracted text concepts + source visual context into an accurate, high-converting visual prompt.
               </p>
             </div>
             <div className="ka-guide-step-card">
@@ -844,7 +844,7 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
         <div className="ka-step-card active">
           <span className="ka-step-card-num">Layer 2</span>
           <span className="ka-step-card-name">🧠 AI Prompt Engine</span>
-          <span className="ka-step-card-sub">Dynamic 3D SaaS Visual Prompts</span>
+          <span className="ka-step-card-sub">Dynamic Topic-Driven Prompts</span>
         </div>
         <div className="ka-step-card active">
           <span className="ka-step-card-num">Layer 3</span>
