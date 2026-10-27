@@ -28,6 +28,7 @@ export interface LiveAutoPilotPulseProps {
   autopilotRunning?: boolean;
   onSelectPlan?: (plan: any) => void;
   onOpenVisualStudio?: (prompt: string, headline: string) => void;
+  onRefreshPrompt?: (planId: string, headline: string, prompt: string) => Promise<string | void>;
 }
 
 export function LiveAutoPilotPulse({
@@ -39,11 +40,14 @@ export function LiveAutoPilotPulse({
   autopilotRunning = false,
   onSelectPlan,
   onOpenVisualStudio,
+  onRefreshPrompt,
 }: LiveAutoPilotPulseProps) {
   const [now, setNow] = useState(Date.now());
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [activeLightbox, setActiveLightbox] = useState<string | null>(null);
   const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [refreshingPrompt, setRefreshingPrompt] = useState(false);
+  const [localPrompts, setLocalPrompts] = useState<Record<string, string>>({});
 
   // Tick every second for the dynamic live countdown
   useEffect(() => {
@@ -170,12 +174,13 @@ export function LiveAutoPilotPulse({
   const headline = typeof rawHeadline === "string" ? rawHeadline : JSON.stringify(rawHeadline);
 
   const visualPrompt =
+    localPrompts[currentPlan.id] ||
     currentPlan.source_snapshot?.posterPrompt ||
     primaryVariant.metadata?.posterPrompt ||
     currentPlan.source_snapshot?.visualPrompt ||
     primaryVariant.metadata?.imagePrompt ||
     currentPlan.source_snapshot?.prompt ||
-    `High-definition 3D conceptual visual representing ${headline}, premium composition, dynamic rim lighting, ultra-detailed 8k render.`;
+    `Cinematic conceptual visual artwork representing ${headline}, refined composition, subtle atmospheric lighting, clean editorial aesthetic.`;
 
   const caption = primaryVariant.caption || currentPlan.body || headline;
   const scheduledDateStr = targetTime
@@ -443,10 +448,42 @@ export function LiveAutoPilotPulse({
             <span style={{ fontSize: "0.75rem", color: "#a855f7", fontWeight: 700, display: "flex", alignItems: "center", gap: "6px" }}>
               <Sparkles size={14} /> STEP 2: AI VISUAL PROMPT
             </span>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "0.7rem", color: "#c084fc", fontWeight: 600 }}>
-                AI Script Engine
-              </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              {onRefreshPrompt && (
+                <button
+                  type="button"
+                  disabled={refreshingPrompt}
+                  onClick={async () => {
+                    setRefreshingPrompt(true);
+                    try {
+                      const newPrompt = await onRefreshPrompt(currentPlan.id, headline, visualPrompt);
+                      if (typeof newPrompt === "string") {
+                        setLocalPrompts((prev) => ({ ...prev, [currentPlan.id]: newPrompt }));
+                      }
+                    } finally {
+                      setRefreshingPrompt(false);
+                    }
+                  }}
+                  style={{
+                    background: "rgba(168, 85, 247, 0.18)",
+                    border: "1px solid rgba(168, 85, 247, 0.4)",
+                    color: "#e9d5ff",
+                    fontSize: "0.68rem",
+                    fontWeight: 600,
+                    padding: "3px 8px",
+                    borderRadius: "6px",
+                    cursor: refreshingPrompt ? "not-allowed" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    transition: "all 0.2s ease",
+                  }}
+                  title="Generate a fresh dynamic visual prompt from PDF context"
+                >
+                  <RefreshCw size={11} className={refreshingPrompt ? "animate-spin" : ""} style={{ color: "#d8b4fe" }} />
+                  {refreshingPrompt ? "Refreshing…" : "Refresh Prompt"}
+                </button>
+              )}
               {onOpenVisualStudio && (
                 <button
                   type="button"
@@ -470,6 +507,7 @@ export function LiveAutoPilotPulse({
                 </button>
               )}
             </div>
+
           </div>
 
           <div

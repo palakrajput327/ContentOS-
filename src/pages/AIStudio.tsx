@@ -172,6 +172,8 @@ export default function AIStudio() {
   }>>([]);
   const [loadingScripts, setLoadingScripts] = useState(false);
   const [copiedScriptId, setCopiedScriptId] = useState<string | null>(null);
+  const [refreshingScriptId, setRefreshingScriptId] = useState<string | number | null>(null);
+  const [isRegeneratingSinglePrompt, setIsRegeneratingSinglePrompt] = useState(false);
 
   // Platform limits mapping
   const platformLimits: Record<Platform, number> = {
@@ -402,6 +404,32 @@ export default function AIStudio() {
       setLoadingScripts(false);
     }
   }
+
+  const handleRefreshActivePrompt = async () => {
+    if (!posterScript?.headline && !generatedTitle) return;
+    try {
+      setIsRegeneratingSinglePrompt(true);
+      const res = await request<{ prompt: string; headline: string }>(
+        "/clipdrop/suggest-poster-prompt",
+        "POST",
+        {
+          knowledgeConcept: generatedTitle || posterScript?.headline || "Executive Summary",
+          excerpt: knowledgeItems[0]?.source_excerpt || "",
+          title: generatedTitle || posterScript?.headline,
+          sourceVisualContext: `Extracted from PDF ${activeDoc?.original_filename || "document"}`,
+          platform: activePreviewPlatform,
+        }
+      );
+      if (res?.prompt) {
+        setPosterScript({ prompt: res.prompt, headline: res.headline || generatedTitle });
+        toast.success("✨ Dynamic visual prompt regenerated!");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to regenerate prompt");
+    } finally {
+      setIsRegeneratingSinglePrompt(false);
+    }
+  };
 
   async function handleDeleteDocument(docId: string, e?: React.MouseEvent) {
     if (e) e.stopPropagation();
@@ -1307,7 +1335,42 @@ export default function AIStudio() {
                         toast.error(err.message || "Failed to publish post now.");
                       }
                     }}
+                    onRefreshPrompt={async (planId: string, currentHeadline: string) => {
+                      try {
+                        const res = await request<{ posterPrompt: string; headline: string }>(
+                          `/knowledge-automation/plans/${planId}/refresh-prompt`,
+                          "POST"
+                        );
+                        if (res?.posterPrompt) {
+                          setPosterScript({ prompt: res.posterPrompt, headline: res.headline || currentHeadline });
+                          toast.success("✨ Dynamic visual prompt regenerated from PDF!");
+                          await storedAutoPosts.refetch();
+                          return res.posterPrompt;
+                        }
+                      } catch (err: any) {
+                        try {
+                          const res = await request<{ prompt: string; headline: string }>(
+                            "/clipdrop/suggest-poster-prompt",
+                            "POST",
+                            {
+                              knowledgeConcept: currentHeadline,
+                              title: currentHeadline,
+                              sourceVisualContext: `Extracted from PDF ${activeDoc?.original_filename || "document"}`,
+                              platform: activePreviewPlatform,
+                            }
+                          );
+                          if (res?.prompt) {
+                            setPosterScript({ prompt: res.prompt, headline: res.headline || currentHeadline });
+                            toast.success("✨ Dynamic prompt regenerated!");
+                            return res.prompt;
+                          }
+                        } catch (e: any) {
+                          toast.error(err.message || "Failed to refresh prompt");
+                        }
+                      }
+                    }}
                   />
+
                 )}
 
                 {/* Smooth In-App Auto-Pilot Guide Modal */}
@@ -1615,6 +1678,63 @@ export default function AIStudio() {
                                 {copiedScriptId === item.id ? <Check size={12} /> : <Copy size={12} />}
                                 {copiedScriptId === item.id ? "Copied" : "Copy Prompt"}
                               </button>
+
+                              <button
+                                type="button"
+                                disabled={refreshingScriptId === (item.id || idx)}
+                                onClick={async () => {
+                                  const key = item.id || idx;
+                                  setRefreshingScriptId(key);
+                                  try {
+                                    const res = await request<{ prompt: string; headline: string }>(
+                                      "/clipdrop/suggest-poster-prompt",
+                                      "POST",
+                                      {
+                                        knowledgeConcept: item.concept || item.headline,
+                                        excerpt: item.excerpt || "",
+                                        title: item.headline || item.concept,
+                                        sourceVisualContext: `Extracted from PDF ${activeDoc?.original_filename || "document"}`,
+                                        platform: activePreviewPlatform,
+                                      }
+                                    );
+                                    if (res?.prompt) {
+                                      setPosterScripts((prev) =>
+                                        prev.map((s, i) =>
+                                          (s.id === item.id || i === idx)
+                                            ? { ...s, posterPrompt: res.prompt, headline: res.headline || s.headline }
+                                            : s
+                                        )
+                                      );
+                                      if (posterScript?.headline === item.headline) {
+                                        setPosterScript({ prompt: res.prompt, headline: res.headline || item.headline });
+                                      }
+                                      toast.success("✨ Dynamic prompt regenerated!");
+                                    }
+                                  } catch (err: any) {
+                                    toast.error(err.message || "Failed to regenerate prompt");
+                                  } finally {
+                                    setRefreshingScriptId(null);
+                                  }
+                                }}
+                                style={{
+                                  background: "rgba(168, 85, 247, 0.15)",
+                                  border: "1px solid rgba(168, 85, 247, 0.35)",
+                                  color: "#d8b4fe",
+                                  padding: "5px 10px",
+                                  borderRadius: "6px",
+                                  fontSize: "0.75rem",
+                                  fontWeight: 600,
+                                  cursor: refreshingScriptId === (item.id || idx) ? "not-allowed" : "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "5px",
+                                }}
+                                title="Refresh this visual prompt dynamically from PDF context"
+                              >
+                                <RotateCw size={12} className={refreshingScriptId === (item.id || idx) ? "animate-spin" : ""} />
+                                {refreshingScriptId === (item.id || idx) ? "Refreshing…" : "Refresh Prompt"}
+                              </button>
+
 
                               <Button
                                 type="button"
@@ -2096,7 +2216,31 @@ export default function AIStudio() {
                     <label style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text-muted)" }}>
                       {activePreviewPlatform} Copy Variant
                     </label>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      {posterScript?.prompt && (
+                        <button
+                          type="button"
+                          disabled={isRegeneratingSinglePrompt}
+                          onClick={handleRefreshActivePrompt}
+                          style={{
+                            background: "rgba(168, 85, 247, 0.15)",
+                            border: "1px solid rgba(168, 85, 247, 0.35)",
+                            color: "#d8b4fe",
+                            padding: "4px 8px",
+                            borderRadius: "6px",
+                            fontSize: "0.72rem",
+                            fontWeight: 600,
+                            cursor: isRegeneratingSinglePrompt ? "not-allowed" : "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                          title="Regenerate dynamic visual prompt from PDF"
+                        >
+                          <RotateCw size={11} className={isRegeneratingSinglePrompt ? "animate-spin" : ""} />
+                          {isRegeneratingSinglePrompt ? "Refreshing…" : "Refresh Prompt"}
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setShowClipdropModal(true)}
@@ -2140,7 +2284,48 @@ export default function AIStudio() {
                     }
                     style={{ width: "100%", padding: "10px", fontSize: "0.85rem", lineHeight: 1.5 }}
                   />
+
+                  {posterScript?.prompt && (
+                    <div
+                      style={{
+                        background: "rgba(0, 0, 0, 0.3)",
+                        border: "1px solid rgba(168, 85, 247, 0.25)",
+                        borderRadius: "8px",
+                        padding: "8px 12px",
+                        fontSize: "0.78rem",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                        <span style={{ color: "#c084fc", fontWeight: 700, fontSize: "0.7rem", textTransform: "uppercase", display: "flex", alignItems: "center", gap: "4px" }}>
+                          <Sparkles size={11} /> AI Visual Direction Prompt:
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleRefreshActivePrompt}
+                          disabled={isRegeneratingSinglePrompt}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#d8b4fe",
+                            fontSize: "0.7rem",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            padding: 0,
+                          }}
+                        >
+                          <RotateCw size={10} className={isRegeneratingSinglePrompt ? "animate-spin" : ""} />
+                          Refresh Prompt
+                        </button>
+                      </div>
+                      <p style={{ margin: 0, color: "#cbd5e1", fontStyle: "italic", lineHeight: 1.45 }}>
+                        &ldquo;{posterScript.prompt}&rdquo;
+                      </p>
+                    </div>
+                  )}
                 </div>
+
 
                 {/* Simulated Social Card */}
                 <div className="social-preview" style={{ background: "var(--border-strong)", borderRadius: "10px", padding: "14px", border: "1px solid var(--border)" }}>

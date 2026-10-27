@@ -236,6 +236,55 @@ let KnowledgeAutomationController = class KnowledgeAutomationController {
         await deliverEmails({ limit: 10 });
         return { success: true, count: results.length, results };
     }
+    async refreshPrompt(r, rawId) {
+        assertPermission(r.workspace.role, "edit");
+        const id = z.string().uuid().parse(rawId);
+        const plan = (await pool.query("SELECT * FROM knowledge_content_plans WHERE id = $1 AND workspace_id = $2", [id, r.workspace.id])).rows[0];
+        if (!plan) {
+            throw new NotFoundException("Plan not found in this workspace.");
+        }
+        const { ClipdropService } = await import("../clipdrop/clipdrop.service.js");
+        const clipdropService = new ClipdropService();
+        const brandRow = (await pool.query("SELECT data FROM brand_kits WHERE workspace_id=$1", [r.workspace.id])).rows[0];
+        const brand = brandRow?.data || {};
+        const snapshot = (typeof plan.source_snapshot === "string" ? JSON.parse(plan.source_snapshot) : plan.source_snapshot) || {};
+        let concept = snapshot.concept || snapshot.value || snapshot.key || "";
+        let excerpt = snapshot.excerpt || snapshot.source_excerpt || "";
+        let title = snapshot.headline || snapshot.title || plan.title || "Insight";
+        if (plan.knowledge_id) {
+            const kRow = (await pool.query("SELECT knowledge_key, value, source_excerpt FROM document_knowledge WHERE id = $1", [plan.knowledge_id])).rows[0];
+            if (kRow) {
+                if (!concept)
+                    concept = typeof kRow.value === "string" ? kRow.value : JSON.stringify(kRow.value);
+                if (!excerpt)
+                    excerpt = kRow.source_excerpt || "";
+                if (!title || title === "Insight")
+                    title = kRow.knowledge_key || title;
+            }
+        }
+        if (!concept)
+            concept = title;
+        const res = await clipdropService.suggestPosterPrompt({
+            knowledgeConcept: typeof concept === "string" ? concept : JSON.stringify(concept),
+            excerpt,
+            title,
+            brand,
+        });
+        const updatedSnapshot = {
+            ...snapshot,
+            posterPrompt: res.prompt,
+            headline: res.headline || title,
+        };
+        await pool.query(`UPDATE knowledge_content_plans 
+       SET source_snapshot = $1::jsonb, updated_at = now() 
+       WHERE id = $2 AND workspace_id = $3`, [JSON.stringify(updatedSnapshot), id, r.workspace.id]);
+        return {
+            success: true,
+            planId: id,
+            posterPrompt: res.prompt,
+            headline: res.headline || title,
+        };
+    }
 };
 __decorate([
     Get(),
@@ -291,6 +340,14 @@ __decorate([
     __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", Promise)
 ], KnowledgeAutomationController.prototype, "publishPlanNow", null);
+__decorate([
+    Post("plans/:id/refresh-prompt"),
+    __param(0, Req()),
+    __param(1, Param("id")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], KnowledgeAutomationController.prototype, "refreshPrompt", null);
 KnowledgeAutomationController = __decorate([
     WorkspaceRequired(),
     Controller("knowledge-automation")

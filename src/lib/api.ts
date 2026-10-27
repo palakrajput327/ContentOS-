@@ -417,7 +417,7 @@ export const documentsApi = {
 export const clipdropApi = {
   suggestPrompt: async (contentText: string, platform?: string, contextInfo?: string): Promise<{ prompt: string }> => {
     if (useSession.getState().demo) {
-      return { prompt: `Futuristic 3D minimalist digital workspace representing ${contentText.slice(0, 50)}, glowing holographic data interface, soft studio lighting, 8k resolution` };
+      return { prompt: `Cinematic conceptual visual artwork representing ${contentText.slice(0, 50)}, refined composition, subtle atmospheric lighting, clean editorial aesthetic.` };
     }
     return request("/clipdrop/suggest-prompt", "POST", { contentText, platform, contextInfo });
   },
