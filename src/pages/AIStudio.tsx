@@ -183,6 +183,54 @@ export default function AIStudio() {
     YouTube: 5000,
   };
 
+  function loadPlanIntoStudio(plan: any) {
+    if (!plan) return;
+    const targets = ((plan.platforms as string[]) || ["LinkedIn", "Instagram", "Facebook", "Telegram"]).filter((platform: string) =>
+      ["LinkedIn", "Instagram", "Facebook", "Telegram", "X", "YouTube"].includes(platform)
+    ) as Platform[];
+    setGeneratedTitle(plan.title || plan.source_snapshot?.headline || "AI Post");
+    setSelectedPlatforms(targets);
+    setActivePreviewPlatform(targets[0] || "LinkedIn");
+
+    const variants = (plan.variants || {}) as Record<string, any>;
+    const newVars: Partial<Record<Platform, string>> = {};
+    for (const t of targets) {
+      const v = variants[t];
+      newVars[t] = typeof v === "string" ? v : v?.caption || plan.body || "";
+    }
+    setGeneratedVariants(newVars);
+
+    const visual =
+      targets.map((platform) => variants[platform]).find((variant) => variant?.mediaAssetId && variant?.mediaUrl) ||
+      (plan.source_snapshot?.mediaUrl
+        ? { mediaAssetId: plan.media_asset_id, url: plan.source_snapshot.mediaUrl, filename: "AutoPilot Visual" }
+        : null);
+    setAttachedVisual(
+      visual
+        ? { assetId: visual.mediaAssetId || (visual as any).assetId, url: visual.url || visual.mediaUrl, filename: "AutoPilot Visual" }
+        : null
+    );
+
+    if (plan.source_snapshot?.posterPrompt) {
+      setPosterScript({
+        prompt: plan.source_snapshot.posterPrompt,
+        headline: plan.source_snapshot.headline || plan.title,
+      });
+    }
+  }
+
+  // Auto-sync initial active plan into the right-hand preview panel so user sees real AI output
+  const initialPlanSyncedRef = useRef(false);
+  useEffect(() => {
+    if (activeTab === "pdf" && !initialPlanSyncedRef.current && storedAutoPosts.data?.plans?.length) {
+      const firstWithContent = storedAutoPosts.data.plans.find((p: any) => p.content_id) || storedAutoPosts.data.plans[0];
+      if (firstWithContent) {
+        initialPlanSyncedRef.current = true;
+        loadPlanIntoStudio(firstWithContent);
+      }
+    }
+  }, [activeTab, storedAutoPosts.data?.plans]);
+
   // Load existing documents when PDF tab is active
   useEffect(() => {
     if (activeTab === "pdf") {
@@ -309,16 +357,21 @@ export default function AIStudio() {
         setPosterScript(res);
         setGeneratedTitle(res.headline || title);
 
+        // If plans are already generated, keep the real high quality LLM variants
+        if (storedAutoPosts.data?.plans?.length) {
+          return;
+        }
+
         const defaultPlatforms: Platform[] = ["LinkedIn", "Instagram", "Facebook", "Telegram"];
         const newVariants: Partial<Record<Platform, string>> = {};
-        const hashtags = ["#SaaS", "#Growth", "#Innovation", "#TechTrends"];
+        const hashtags = ["#Finance", "#Trading", "#RiskManagement", "#Redhash", "#Innovation"];
         for (const p of defaultPlatforms) {
           if (p === "LinkedIn") {
-            newVariants[p] = `🚀 ${res.headline || title}\n\n${concept}\n\n"${excerpt.slice(0, 220)}"\n\nKey takeaways from our latest technical breakdown.\n\n${hashtags.join(" ")}`;
+            newVariants[p] = `🚀 ${res.headline || title}\n\n${concept}\n\nKey takeaways from our latest technical breakdown.\n\n${hashtags.join(" ")}`;
           } else if (p === "Instagram") {
-            newVariants[p] = `✨ ${res.headline || title}\n\nSwipe to see how ${concept.slice(0, 100)} transforms operations.\n\n${hashtags.join(" ")}`;
+            newVariants[p] = `✨ ${res.headline || title}\n\n${concept}\n\n${hashtags.join(" ")}`;
           } else if (p === "Telegram") {
-            newVariants[p] = `⚡️ *${res.headline || title}*\n\n${concept}\n\n${excerpt.slice(0, 180)}\n\n${hashtags.join(" ")}`;
+            newVariants[p] = `⚡️ *${res.headline || title}*\n\n${concept}\n\n${hashtags.join(" ")}`;
           } else {
             newVariants[p] = `${res.headline || title}: ${concept}\n\n${hashtags.join(" ")}`;
           }
@@ -1240,6 +1293,11 @@ export default function AIStudio() {
                     timezone={(s.workspace as any)?.timezone || "Asia/Kolkata"}
                     autopilotRunning={autopilotRunning}
                     onTriggerAutoPilot={handleTriggerAutoPilot}
+                    onSelectPlan={loadPlanIntoStudio}
+                    onOpenVisualStudio={(promptText, headlineText) => {
+                      setPosterScript({ prompt: promptText, headline: headlineText });
+                      setShowClipdropModal(true);
+                    }}
                     onPublishNow={async (planId: string) => {
                       try {
                         await request(`/knowledge-automation/plans/${planId}/publish-now`, "POST");

@@ -26,6 +26,8 @@ export interface LiveAutoPilotPulseProps {
   onPublishNow?: (planId: string) => Promise<void>;
   onTriggerAutoPilot?: () => void;
   autopilotRunning?: boolean;
+  onSelectPlan?: (plan: any) => void;
+  onOpenVisualStudio?: (prompt: string, headline: string) => void;
 }
 
 export function LiveAutoPilotPulse({
@@ -35,6 +37,8 @@ export function LiveAutoPilotPulse({
   onPublishNow,
   onTriggerAutoPilot,
   autopilotRunning = false,
+  onSelectPlan,
+  onOpenVisualStudio,
 }: LiveAutoPilotPulseProps) {
   const [now, setNow] = useState(Date.now());
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
@@ -439,9 +443,33 @@ export function LiveAutoPilotPulse({
             <span style={{ fontSize: "0.75rem", color: "#a855f7", fontWeight: 700, display: "flex", alignItems: "center", gap: "6px" }}>
               <Sparkles size={14} /> STEP 2: AI VISUAL PROMPT
             </span>
-            <span style={{ fontSize: "0.7rem", color: "#c084fc", fontWeight: 600 }}>
-              AI Script Engine
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "0.7rem", color: "#c084fc", fontWeight: 600 }}>
+                AI Script Engine
+              </span>
+              {onOpenVisualStudio && (
+                <button
+                  type="button"
+                  onClick={() => onOpenVisualStudio(visualPrompt, headline)}
+                  style={{
+                    background: "rgba(168, 85, 247, 0.2)",
+                    border: "1px solid rgba(168, 85, 247, 0.4)",
+                    color: "#e9d5ff",
+                    fontSize: "0.68rem",
+                    fontWeight: 600,
+                    padding: "3px 8px",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                  }}
+                  title="Generate or iterate this visual in AI Visual Studio"
+                >
+                  <Sparkles size={11} style={{ color: "#d8b4fe" }} /> Open in Studio
+                </button>
+              )}
+            </div>
           </div>
 
           <div
@@ -524,7 +552,10 @@ export function LiveAutoPilotPulse({
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => setSelectedPlanId(p.id)}
+                  onClick={() => {
+                    setSelectedPlanId(p.id);
+                    onSelectPlan?.(p);
+                  }}
                   style={{
                     fontSize: "0.7rem",
                     padding: "3px 8px",

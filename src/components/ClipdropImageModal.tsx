@@ -72,84 +72,71 @@ function analyzePromptForBranding(text: string): {
     };
   }
 
-  // 1. Detect Company / Brand Name if explicitly mentioned in prompt
+  // 1. Detect Company / Brand Name only if explicitly formatted
   let detectedCompany = "";
-  const companyMatch = p.match(/(?:with\s+company\s+(?:name\s+)?|company(?:\s+name)?\s*:\s*|by\s+|from\s+|for\s+|at\s+)([a-zA-Z0-9\s&]{2,45}?(?:pvt|private|limited|ltd|company|corp|solutions|tech|studio|agency|enterprises|ventures|[A-Z][a-zA-Z0-9\s&]{2,30}))/i);
+  const companyMatch = p.match(/(?:with\s+company\s+(?:name\s+)?|company(?:\s+name)?\s*:\s*|brand\s*:\s*)([a-zA-Z0-9\s&]{2,40})/i);
   if (companyMatch) {
     let rawComp = companyMatch[1].trim();
     rawComp = rawComp.replace(/\s+(?:poster|banner|image|graphic|post|with|and)$/i, "").trim();
-    if (rawComp.length >= 2) {
+    const blacklist = ["participants", "users", "clients", "people", "investors", "seeking", "understanding", "technology", "document"];
+    if (rawComp.length >= 2 && !blacklist.some(b => rawComp.toLowerCase().includes(b))) {
       detectedCompany = rawComp.replace(/\b\w/g, (c) => c.toUpperCase());
     }
   }
 
   // 2. Check if user explicitly asked for a Poster, Greeting, Card, Banner, or Announcement
-  const isPosterOrBanner = /(?:poster|banner|flyer|greeting|card|announcement|wishing)/i.test(p);
+  const isPosterOrBanner = /\b(?:festival\s+poster|greeting\s+card|festival\s+banner|wishing\s+card|holiday\s+poster)\b/i.test(p);
 
   // 3. Detect Festivals & Holidays
   if (/diwali|deepavali/i.test(p)) {
-    if (detectedCompany || isPosterOrBanner) {
-      return {
-        isBrandedRequest: true,
-        detectedHeadline: "Happy Diwali",
-        detectedSubtitle: "Wishing joy, prosperity, and radiant light to you and your loved ones!",
-        detectedCompany,
-      };
-    }
+    return {
+      isBrandedRequest: true,
+      detectedHeadline: "Happy Diwali",
+      detectedSubtitle: "Wishing joy, prosperity, and radiant light to you and your loved ones!",
+      detectedCompany,
+    };
   } else if (/new\s*year/i.test(p)) {
-    if (detectedCompany || isPosterOrBanner) {
-      return {
-        isBrandedRequest: true,
-        detectedHeadline: "Happy New Year",
-        detectedSubtitle: "Wishing you 365 days of remarkable innovation, prosperity and inspiring success!",
-        detectedCompany,
-      };
-    }
+    return {
+      isBrandedRequest: true,
+      detectedHeadline: "Happy New Year",
+      detectedSubtitle: "Wishing you 365 days of remarkable innovation, prosperity and inspiring success!",
+      detectedCompany,
+    };
   } else if (/christmas|xmas/i.test(p)) {
-    if (detectedCompany || isPosterOrBanner) {
-      return {
-        isBrandedRequest: true,
-        detectedHeadline: "Merry Christmas",
-        detectedSubtitle: "Wishing you peace, cheer and happiness this holiday season!",
-        detectedCompany,
-      };
-    }
+    return {
+      isBrandedRequest: true,
+      detectedHeadline: "Merry Christmas",
+      detectedSubtitle: "Wishing you peace, cheer and happiness this holiday season!",
+      detectedCompany,
+    };
   } else if (/holi/i.test(p)) {
-    if (detectedCompany || isPosterOrBanner) {
-      return {
-        isBrandedRequest: true,
-        detectedHeadline: "Happy Holi",
-        detectedSubtitle: "May your life be painted with vibrant colors of joy, good health and prosperity!",
-        detectedCompany,
-      };
-    }
+    return {
+      isBrandedRequest: true,
+      detectedHeadline: "Happy Holi",
+      detectedSubtitle: "May your life be painted with vibrant colors of joy, good health and prosperity!",
+      detectedCompany,
+    };
   } else if (/eid/i.test(p)) {
-    if (detectedCompany || isPosterOrBanner) {
-      return {
-        isBrandedRequest: true,
-        detectedHeadline: "Eid Mubarak",
-        detectedSubtitle: "May divine blessings, peace, harmony and happiness fill your home and life!",
-        detectedCompany,
-      };
-    }
+    return {
+      isBrandedRequest: true,
+      detectedHeadline: "Eid Mubarak",
+      detectedSubtitle: "May divine blessings, peace, harmony and happiness fill your home and life!",
+      detectedCompany,
+    };
   } else if (/independence\s*day/i.test(p)) {
-    if (detectedCompany || isPosterOrBanner) {
-      return {
-        isBrandedRequest: true,
-        detectedHeadline: "Happy Independence Day",
-        detectedSubtitle: "Saluting the pride, unity and glorious freedom of our great nation!",
-        detectedCompany,
-      };
-    }
+    return {
+      isBrandedRequest: true,
+      detectedHeadline: "Happy Independence Day",
+      detectedSubtitle: "Saluting the pride, unity and glorious freedom of our great nation!",
+      detectedCompany,
+    };
   } else if (/republic\s*day/i.test(p)) {
-    if (detectedCompany || isPosterOrBanner) {
-      return {
-        isBrandedRequest: true,
-        detectedHeadline: "Happy Republic Day",
-        detectedSubtitle: "Celebrating democracy, unity and sovereignty with pride and dedication!",
-        detectedCompany,
-      };
-    }
+    return {
+      isBrandedRequest: true,
+      detectedHeadline: "Happy Republic Day",
+      detectedSubtitle: "Celebrating democracy, unity and sovereignty with pride and dedication!",
+      detectedCompany,
+    };
   }
 
   // 4. Corporate Announcements (Hiring, Launch, Offer)
@@ -162,7 +149,7 @@ function analyzePromptForBranding(text: string): {
     };
   }
 
-  if (/product\s+launch|launching|announcing/i.test(p) && (isPosterOrBanner || detectedCompany)) {
+  if (/product\s+launch|launching|announcing/i.test(p) && isPosterOrBanner) {
     return {
       isBrandedRequest: true,
       detectedHeadline: "Product Launch Announcement",
@@ -171,7 +158,7 @@ function analyzePromptForBranding(text: string): {
     };
   }
 
-  // 5. Explicit company poster requested
+  // 5. Explicit branded company greeting requested
   if (detectedCompany && isPosterOrBanner) {
     return {
       isBrandedRequest: true,
@@ -181,7 +168,7 @@ function analyzePromptForBranding(text: string): {
     };
   }
 
-  // 6. DEFAULT: Pure visual, object, living being, nature, everything else
+  // 6. DEFAULT: Pure visual, 3D render, tech art, photography, object, living being, etc.
   return {
     isBrandedRequest: false,
     detectedHeadline: "",
@@ -596,7 +583,8 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
           ctx.font = `600 ${Math.round(cardH * 0.12)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
           ctx.fillStyle = "#94a3b8";
           ctx.textAlign = "center";
-          ctx.fillText(`Warm Greetings from ${logoText}`, w / 2, cardY + cardH * 0.86);
+          const isGreeting = /happy|merry|mubarak|wishing|greetings/i.test(headline);
+          ctx.fillText(isGreeting ? `Warm Greetings from ${logoText}` : logoText, w / 2, cardY + cardH * 0.86);
         }
         ctx.restore();
       }
@@ -1662,7 +1650,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                             )}
                             {logoText && (
                               <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--muted)", marginTop: "2px" }}>
-                                Warm Greetings from {logoText}
+                                {/happy|merry|mubarak|wishing|greetings/i.test(headline) ? `Warm Greetings from ${logoText}` : logoText}
                               </div>
                             )}
                           </div>

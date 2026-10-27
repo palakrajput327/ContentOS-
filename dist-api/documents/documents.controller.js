@@ -259,15 +259,22 @@ let DocumentsController = class DocumentsController {
     }
     async getPosterScripts(r, documentId) {
         const w = r.workspace.id;
-        const knowRes = await pool.query(`SELECT id, knowledge_key, knowledge_type, value, page_start, page_end, source_excerpt, confidence
-       FROM document_knowledge
-       WHERE document_id = $1 AND workspace_id = $2
-       ORDER BY page_start ASC, created_at ASC`, [documentId, w]);
-        const mediaRes = await pool.query(`SELECT dsm.id, dsm.page_number, dsm.kind, m.bucket, m.object_key, m.id as asset_id
-       FROM document_source_media dsm
-       JOIN media_assets m ON m.id = dsm.media_asset_id
-       WHERE dsm.document_id = $1 AND dsm.workspace_id = $2 AND m.deleted_at IS NULL
-       ORDER BY dsm.page_number ASC`, [documentId, w]);
+        const [knowRes, mediaRes, planRes] = await Promise.all([
+            pool.query(`SELECT id, knowledge_key, knowledge_type, value, page_start, page_end, source_excerpt, confidence
+         FROM document_knowledge
+         WHERE document_id = $1 AND workspace_id = $2
+           AND knowledge_type NOT IN ('OCR_TEXT', 'RAW_TEXT')
+         ORDER BY page_start ASC, created_at ASC`, [documentId, w]),
+            pool.query(`SELECT dsm.id, dsm.page_number, dsm.kind, m.bucket, m.object_key, m.id as asset_id
+         FROM document_source_media dsm
+         JOIN media_assets m ON m.id = dsm.media_asset_id
+         WHERE dsm.document_id = $1 AND dsm.workspace_id = $2 AND m.deleted_at IS NULL
+         ORDER BY dsm.page_number ASC`, [documentId, w]),
+            pool.query(`SELECT p.id, p.knowledge_id, p.source_snapshot, p.media_asset_id, c.variants, c.title, c.body
+         FROM knowledge_content_plans p
+         LEFT JOIN content c ON c.id = p.content_id
+         WHERE p.workspace_id = $1 AND p.state = 'COMPLETED'`, [w]),
+        ]);
         const { provider } = getStorageProvider();
         const pageImageMap = new Map();
         for (const m of mediaRes.rows) {
@@ -279,6 +286,11 @@ let DocumentsController = class DocumentsController {
                 catch { }
             }
         }
+        const planMap = new Map();
+        for (const row of planRes.rows) {
+            if (row.knowledge_id)
+                planMap.set(row.knowledge_id, row);
+        }
         const firstImage = pageImageMap.values().next().value;
         const scripts = [];
         for (const k of knowRes.rows) {
@@ -286,22 +298,29 @@ let DocumentsController = class DocumentsController {
             const media = pageImageMap.get(pageNum) || firstImage || null;
             const concept = typeof k.value === "string" ? k.value : JSON.stringify(k.value);
             const cleanConcept = concept.replace(/["{}]/g, "").trim();
-            const excerpt = (k.source_excerpt || "").trim();
-            const title = k.knowledge_key || cleanConcept;
-            const visualPrompt = `Futuristic 3D minimalist tech poster visual representing ${cleanConcept}, floating holographic data interface, floating frosted glass cubes, glowing volumetric violet and cyan studio lighting, ultra-detailed 8k octane render`;
-            const headline = cleanConcept.length > 36 ? cleanConcept.slice(0, 34) + "..." : cleanConcept;
+            const cleanTitle = (k.knowledge_key || cleanConcept).replace(/[^\w\s-.,&]/g, "").trim();
+            const headline = cleanTitle.length > 45 ? cleanTitle.slice(0, 42) + "..." : cleanTitle;
+            const promptSubject = cleanConcept.length > 110 ? cleanConcept.slice(0, 107) + "..." : cleanConcept;
+            const dynamicPrompt = `High-end 3D conceptual visual art representing ${cleanTitle}: ${promptSubject}. Premium materials, obsidian carbon surface, floating holographic data layers, dynamic crimson and gold rim lighting, cinematic 8k Octane render, sharp focus, professional financial technology aesthetic.`;
+            const cleanCaption = `🚀 ${headline}\n\n${cleanConcept}\n\nKey takeaways from our latest technical breakdown.\n\n#Finance #Trading #Investment #RiskManagement #Innovation`;
+            const plan = planMap.get(k.id);
+            const visualPrompt = plan?.source_snapshot?.posterPrompt || dynamicPrompt;
+            const finalHeadline = plan?.source_snapshot?.headline || headline;
+            const imageUrl = plan?.source_snapshot?.mediaUrl || media?.url || null;
+            const assetId = plan?.media_asset_id || media?.assetId || null;
+            const caption = plan?.variants?.LinkedIn?.caption || plan?.body || cleanCaption;
             scripts.push({
                 id: k.id,
                 page: pageNum,
                 concept: cleanConcept,
-                excerpt,
+                excerpt: (k.source_excerpt || "").trim(),
                 knowledgeType: k.knowledge_type,
-                sourceImageUrl: media?.url || null,
-                mediaAssetId: media?.assetId || null,
+                sourceImageUrl: imageUrl,
+                mediaAssetId: assetId,
                 posterPrompt: visualPrompt,
-                headline,
-                caption: `🚀 ${headline}\n\n${cleanConcept}\n\n"${excerpt.slice(0, 220)}"\n\n#SaaS #SocialGrowth #TechTrends #ContentOS`,
-                hashtags: ["#SaaS", "#SocialGrowth", "#TechTrends", "#ContentOS"],
+                headline: finalHeadline,
+                caption,
+                hashtags: ["#Finance", "#Trading", "#RiskManagement", "#Redhash", "#Innovation"],
             });
         }
         return { scripts };
