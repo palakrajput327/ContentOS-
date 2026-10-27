@@ -262,12 +262,17 @@ let KnowledgeAutomationController = class KnowledgeAutomationController {
                     title = kRow.knowledge_key || title;
             }
         }
-        if (!concept)
-            concept = title;
+        if (plan.content_id && (!title || title === "Insight")) {
+            const cRow = (await pool.query("SELECT title FROM content WHERE id=$1", [plan.content_id])).rows[0];
+            if (cRow?.title)
+                title = cRow.title;
+        }
+        if (!concept || concept === "Insight")
+            concept = title || "Strategic Business Insight";
         const res = await clipdropService.suggestPosterPrompt({
             knowledgeConcept: typeof concept === "string" ? concept : JSON.stringify(concept),
-            excerpt,
-            title,
+            excerpt: typeof excerpt === "string" ? excerpt : "",
+            title: typeof title === "string" ? title : "Insight",
             brand,
         });
         let newMediaUrl = snapshot.mediaUrl || null;

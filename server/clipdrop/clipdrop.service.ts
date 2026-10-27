@@ -1,5 +1,7 @@
 import { Injectable, BadRequestException, ServiceUnavailableException, NotFoundException } from "@nestjs/common";
 import { randomUUID, createHash } from "node:crypto";
+import * as path from "node:path";
+import * as fs from "node:fs";
 import { pool, transaction, audit } from "../db.js";
 import { uploadManagedMedia } from "../storage/managed-media.js";
 import { getStorageProvider } from "../storage/storage.factory.js";
@@ -66,7 +68,7 @@ STRICT RULES:
 4. Do NOT include phrases like "Create an image of", "Illustration of", or quotation marks.
 5. Return 35 to 65 words of rich, descriptive visual keywords.`;
 
-    const userMessage = `Content text:\n"${contentText.slice(0, 1500)}"\n${contextInfo ? `Context: ${contextInfo}` : ""}\nTarget Platform: ${platform || "Social Media"}`;
+    const userMessage = `Content text:\n"${(contentText || "").slice(0, 1500)}"\n${contextInfo ? `Context: ${contextInfo}` : ""}\nTarget Platform: ${platform || "Social Media"}`;
 
     try {
       if (await provider.validateConfiguration()) {
@@ -116,8 +118,12 @@ STRICT RULES:
   }): Promise<{ prompt: string; headline: string }> {
     const provider = getLLMProvider();
 
+    const safeConcept = typeof opts.knowledgeConcept === "string" ? opts.knowledgeConcept : (opts.knowledgeConcept ? JSON.stringify(opts.knowledgeConcept) : (opts.title || "Core Business Concept"));
+    const safeExcerpt = typeof opts.excerpt === "string" ? opts.excerpt : (opts.excerpt ? String(opts.excerpt) : "");
+    const safeTitle = typeof opts.title === "string" ? opts.title : (opts.title ? String(opts.title) : "");
+
     // Context analysis to detect exact industry domain, brand, and theme
-    const combinedContext = `${opts.documentName || ""} ${opts.title || ""} ${opts.knowledgeConcept || ""} ${opts.excerpt || ""} ${opts.sourceVisualContext || ""}`.toLowerCase();
+    const combinedContext = `${opts.documentName || ""} ${safeTitle} ${safeConcept} ${safeExcerpt} ${opts.sourceVisualContext || ""}`.toLowerCase();
     const isFinCrypto = /redhash|crypto|trading|gold|xau|investment|income|referral|milestone|reward|single\s*leg|turnover|cto|finance|forex|payout|blockchain|token/i.test(combinedContext);
     const isHealth = /health|medical|biotech|doctor|clinic|fitness|pharma|wellness/i.test(combinedContext);
     const isRealEstate = /property|real estate|villa|architecture|home|apartment|interior/i.test(combinedContext);
@@ -164,10 +170,10 @@ Return JSON:
 }`;
 
     const userMessage = `Document Name: "${opts.documentName || "Document"}"
-Knowledge Concept: "${opts.knowledgeConcept.slice(0, 1000)}"
-${opts.excerpt ? `Source Excerpt: "${opts.excerpt.slice(0, 800)}"` : ""}
+Knowledge Concept: "${safeConcept.slice(0, 1000)}"
+${safeExcerpt ? `Source Excerpt: "${safeExcerpt.slice(0, 800)}"` : ""}
 ${opts.sourceVisualContext ? `Extracted PDF Visual Context: "${opts.sourceVisualContext}"` : ""}
-${opts.title ? `Working Title: "${opts.title}"` : ""}
+${safeTitle ? `Working Title: "${safeTitle}"` : ""}
 Brand Tone: ${opts.brand?.tone || (isFinCrypto ? "Prestigious, High-Tech Financial" : "Professional, Modern")}
 Platform: ${opts.platform || "Instagram"}`;
 
@@ -229,24 +235,25 @@ Platform: ${opts.platform || "Instagram"}`;
     const logoText = opts.logoText || extractedCompany;
     const enableOverlay = Boolean(opts.enableOverlay);
 
-    // Style presets modifier
+    // Style presets modifier - only enrich if prompt lacks explicit visual styling
     let finalPrompt = visualPrompt;
-    if (opts.stylePreset) {
+    const hasExistingStyle = /cinematic|photography|photo|render|illustration|cyberpunk|macro|lens|lighting|bokeh|aesthetic|high-contrast/i.test(visualPrompt);
+    if (opts.stylePreset && !hasExistingStyle) {
       switch (opts.stylePreset) {
         case "3d-render":
-          finalPrompt += ", 3D digital render, octane render, smooth glassmorphism, soft ambient occlusion, 8k resolution";
+          finalPrompt += ", 3D digital render, volumetric rim lighting, clean composition";
           break;
         case "cinematic":
-          finalPrompt += ", cinematic photography, 35mm film photograph, dramatic rim lighting, depth of field, photorealistic";
+          finalPrompt += ", cinematic photography, dramatic rim lighting, depth of field";
           break;
         case "minimal-saas":
-          finalPrompt += ", modern SaaS product illustration, minimalist geometric composition, sleek pastel gradients, vector aesthetics";
+          finalPrompt += ", modern minimal vector illustration, sleek pastel gradients";
           break;
         case "cyberpunk":
-          finalPrompt += ", futuristic cyberpunk aesthetic, glowing neon lights, holographic user interface, dark moody atmospheric lighting";
+          finalPrompt += ", futuristic cyberpunk aesthetic, neon lights, dark moody lighting";
           break;
         case "editorial":
-          finalPrompt += ", high-fashion editorial magazine cover visual, bold color contrast, sophisticated minimalist art";
+          finalPrompt += ", high-fashion editorial magazine cover visual, sophisticated art";
           break;
       }
     }
@@ -274,25 +281,40 @@ Platform: ${opts.platform || "Instagram"}`;
     if (existingAssetRes.rowCount) {
       const asset = existingAssetRes.rows[0];
       const { provider } = getStorageProvider();
-      const downloadUrl = await provider.getSignedDownloadUrl(asset.bucket, asset.object_key, 3600);
 
-      if (opts.contentId) {
-        await this.attachAssetToContent(opts.workspaceId, opts.contentId, asset.id, downloadUrl, opts.userId, opts.platform);
+      let fileExists = true;
+      try {
+        const uploadBase = process.env.STORAGE_LOCAL_DIR || path.resolve(process.cwd(), "uploads");
+        const fullLocalPath = path.resolve(uploadBase, asset.bucket, asset.object_key);
+        const fsMod = await import("node:fs");
+        if (!fsMod.existsSync(fullLocalPath)) {
+          fileExists = false;
+        }
+      } catch {
+        fileExists = false;
       }
 
-      return {
-        assetId: asset.id,
-        url: downloadUrl,
-        filename: asset.original_filename,
-        mimeType: asset.mime_type,
-        remainingCredits: asset.metadata?.remaining_credits ?? null,
-        cached: true,
-        engine: asset.metadata?.engine || requestedEngine,
-        contentId: opts.contentId,
-        status: opts.contentId ? "NEEDS_REVIEW" : asset.status,
-        extractedCompany,
-        extractedHeadline,
-      };
+      if (fileExists) {
+        const downloadUrl = await provider.getSignedDownloadUrl(asset.bucket, asset.object_key, 30 * 86400);
+
+        if (opts.contentId) {
+          await this.attachAssetToContent(opts.workspaceId, opts.contentId, asset.id, downloadUrl, opts.userId, opts.platform);
+        }
+
+        return {
+          assetId: asset.id,
+          url: downloadUrl,
+          filename: asset.original_filename,
+          mimeType: asset.mime_type,
+          remainingCredits: asset.metadata?.remaining_credits ?? null,
+          cached: true,
+          engine: asset.metadata?.engine || requestedEngine,
+          contentId: opts.contentId,
+          status: opts.contentId ? "NEEDS_REVIEW" : asset.status,
+          extractedCompany,
+          extractedHeadline,
+        };
+      }
     }
 
     // 2. Execute Image Generation with Bidirectional Fallback
@@ -343,7 +365,7 @@ Platform: ${opts.platform || "Instagram"}`;
 
       const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
         finalPrompt
-      )}?width=${width}&height=${height}&nologo=true`;
+      )}?width=${width}&height=${height}&model=flux&nologo=true`;
 
       try {
         const res = await fetch(pollinationsUrl, { signal: AbortSignal.timeout(35000) });
@@ -670,15 +692,30 @@ Platform: ${opts.platform || "Instagram"}`;
       .replace(/make\s+it\s+real(?:istic)?/gi, "")
       .trim();
 
-    // 4. Enrich specific themes with rich visual metaphors (DALL-E 3 / Midjourney style)
-    // Diffusion models like SDXL produce garbled text when asked to write letters.
-    // Strictly generate pure, ultra-clean, photorealistic visuals with zero text/watermarks.
-    if (/diwali|deepavali/i.test(text)) {
-      visual = "A breathtaking, luxurious Diwali festival celebration, glowing traditional clay diyas with radiant warm flickering golden flames, intricate colorful floral rangoli mandala with fresh marigold petals, glowing floating sky lanterns against deep twilight evening sky, festive golden bokeh lights, warm celebratory Diwali atmosphere, ultra-detailed 8k, cinematic photography, rich vibrant colors, masterpiece, clean image, no text, no words, no letters, no watermark";
-    } else if (/waterfall/i.test(text) && /rainbow/i.test(text)) {
-      visual = "Majestic cascading mountain waterfall, vibrant bright double rainbow arching over crystal turquoise waters, lush green mossy canyon cliffs, sunrays piercing through morning mist, realistic 8k nature photography, ultra-detailed, cinematic lighting, no text, no words";
-    } else {
-      visual += ", clean focused visual composition, volumetric studio lighting, rich colors, 8k resolution, photorealistic, masterpiece, clean background, no text, no words, no letters";
+    // 4. Only expand short greeting headlines into full visual festival scenes if the prompt is brief (<= 6 words)
+    const wordCount = visual.split(/\s+/).filter(Boolean).length;
+    if (wordCount <= 6) {
+      if (/diwali|deepavali/i.test(visual)) {
+        extractedHeadline = "Happy Diwali";
+        visual = "A breathtaking, luxurious Diwali festival celebration, glowing traditional clay diyas with radiant warm flickering golden flames, intricate colorful floral rangoli mandala with fresh marigold petals, glowing floating sky lanterns against deep twilight evening sky, festive golden bokeh lights, warm celebratory Diwali atmosphere, ultra-detailed 8k, cinematic photography, rich vibrant colors, masterpiece, clean image, no text, no words, no letters, no watermark";
+      } else if (/new\s*year/i.test(visual)) {
+        extractedHeadline = "Happy New Year";
+        visual = "Spectacular New Year fireworks illuminating midnight city skyline, sparkling champagne flutes, golden confetti, glamorous celebration atmosphere, cinematic lighting";
+      } else if (/christmas|xmas/i.test(visual)) {
+        extractedHeadline = "Merry Christmas";
+        visual = "Cozy Christmas evening, decorated pine tree with warm glowing fairy lights, fireplace hearth, wrapped luxury gift boxes, soft snow outside window, cinematic warmth";
+      } else if (/eid/i.test(visual)) {
+        extractedHeadline = "Eid Mubarak";
+        visual = "Majestic crescent moon shining over an architectural mosque with illuminated minarets, glowing lanterns, golden arabesque patterns, tranquil night sky, cinematic elegance";
+      } else if (/independence\s*day/i.test(visual)) {
+        extractedHeadline = "Happy Independence Day";
+        visual = "Grand national monuments illuminated with vibrant tri-color patriotic lighting, dramatic sky, celebratory atmosphere, cinematic photography";
+      } else if (/holi/i.test(visual)) {
+        extractedHeadline = "Happy Holi";
+        visual = "Joyful explosion of vibrant colorful gulal powder clouds in slow motion, bright sunlight, energetic festive celebration, high-speed photography";
+      } else if (wordCount <= 3) {
+        visual = `Cinematic visual artwork representing ${visual}, dramatic studio lighting, rich colors, shallow depth of field, award-winning photography`;
+      }
     }
 
     return {

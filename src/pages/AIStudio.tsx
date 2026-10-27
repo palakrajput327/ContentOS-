@@ -173,6 +173,7 @@ export default function AIStudio() {
   const [loadingScripts, setLoadingScripts] = useState(false);
   const [copiedScriptId, setCopiedScriptId] = useState<string | null>(null);
   const [refreshingScriptId, setRefreshingScriptId] = useState<string | number | null>(null);
+  const [activeScriptIndex, setActiveScriptIndex] = useState<number | null>(null);
   const [isRegeneratingSinglePrompt, setIsRegeneratingSinglePrompt] = useState(false);
 
   // Platform limits mapping
@@ -1645,7 +1646,7 @@ export default function AIStudio() {
                         key={item.id || idx}
                         style={{
                           display: "grid",
-                          gridTemplateColumns: item.sourceImageUrl ? "150px 1fr" : "1fr",
+                          gridTemplateColumns: "150px 1fr",
                           gap: "16px",
                           padding: "16px",
                           borderRadius: "12px",
@@ -1654,20 +1655,46 @@ export default function AIStudio() {
                           alignItems: "center",
                         }}
                       >
-                        {/* Extracted Diagram Thumbnail */}
-                        {item.sourceImageUrl && (
-                          <div style={{ position: "relative", width: "150px", height: "130px", borderRadius: "8px", overflow: "hidden", background: "#000", border: "1px solid rgba(255, 255, 255, 0.1)" }}>
+                        {/* Extracted Diagram / AI Visual Thumbnail */}
+                        <div style={{ position: "relative", width: "150px", height: "130px", borderRadius: "8px", overflow: "hidden", background: "#09090b", border: "1px solid rgba(255, 255, 255, 0.12)" }}>
+                          {refreshingScriptId === (item.id || idx) && (
+                            <div style={{
+                              position: "absolute",
+                              inset: 0,
+                              background: "rgba(15, 23, 42, 0.88)",
+                              backdropFilter: "blur(4px)",
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: "6px",
+                              zIndex: 5,
+                              color: "#fff",
+                              textAlign: "center",
+                              padding: "6px",
+                            }}>
+                              <RotateCw size={18} className="animate-spin" style={{ color: "#c084fc" }} />
+                              <span style={{ fontSize: "10px", fontWeight: 700, color: "#d8b4fe" }}>Rendering AI Visual…</span>
+                              <span style={{ fontSize: "8px", color: "#94a3b8" }}>Creating from prompt</span>
+                            </div>
+                          )}
+                          {item.sourceImageUrl ? (
                             <img
                               src={resolveMediaUrl(item.sourceImageUrl)}
-                              alt="Source Diagram"
+                              alt="Generated Visual"
                               crossOrigin="anonymous"
                               style={{ width: "100%", height: "100%", objectFit: "cover" }}
                             />
-                            <div style={{ position: "absolute", bottom: "4px", left: "4px", background: "rgba(0,0,0,0.75)", color: "#fff", fontSize: "10px", padding: "2px 6px", borderRadius: "4px", fontWeight: 600 }}>
-                              Page {item.page} Diagram
+                          ) : (
+                            <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "6px", color: "#64748b", padding: "8px", textAlign: "center" }}>
+                              <Sparkles size={20} style={{ color: "#818cf8" }} />
+                              <span style={{ fontSize: "10px" }}>Ready for AI Visual</span>
                             </div>
+                          )}
+                          <div style={{ position: "absolute", bottom: "4px", left: "4px", background: "rgba(0,0,0,0.75)", color: "#fff", fontSize: "10px", padding: "2px 6px", borderRadius: "4px", fontWeight: 600 }}>
+                            {item.mediaAssetId ? "AI Poster" : `Page ${item.page} Diagram`}
                           </div>
-                        )}
+                        </div>
 
                         {/* Content & Script Body */}
                         <div>
@@ -1714,6 +1741,7 @@ export default function AIStudio() {
                                   const key = item.id || idx;
                                   setRefreshingScriptId(key);
                                   try {
+                                    toast.info("Generating prompt & rendering new AI visual image...");
                                     const res = await request<{ prompt: string; headline: string }>(
                                       "/clipdrop/suggest-poster-prompt",
                                       "POST",
@@ -1726,17 +1754,48 @@ export default function AIStudio() {
                                       }
                                     );
                                     if (res?.prompt) {
+                                      let newImageUrl = item.sourceImageUrl;
+                                      let newAssetId = item.mediaAssetId;
+                                      try {
+                                        const imgRes = await clipdropApi.generateImage({
+                                          prompt: res.prompt,
+                                          headline: res.headline || item.headline,
+                                          platform: activePreviewPlatform,
+                                          aspectRatio: "1:1",
+                                          stylePreset: "3d-render",
+                                        });
+                                        if (imgRes?.url) {
+                                          newImageUrl = imgRes.url;
+                                          newAssetId = imgRes.assetId;
+                                        }
+                                      } catch (imgErr: any) {
+                                        console.warn("Could not auto-generate visual image:", imgErr);
+                                      }
+
                                       setPosterScripts((prev) =>
                                         prev.map((s, i) =>
                                           (s.id === item.id || i === idx)
-                                            ? { ...s, posterPrompt: res.prompt, headline: res.headline || s.headline }
+                                            ? {
+                                                ...s,
+                                                posterPrompt: res.prompt,
+                                                headline: res.headline || s.headline,
+                                                sourceImageUrl: newImageUrl,
+                                                mediaAssetId: newAssetId,
+                                              }
                                             : s
                                         )
                                       );
                                       if (posterScript?.headline === item.headline) {
                                         setPosterScript({ prompt: res.prompt, headline: res.headline || item.headline });
                                       }
-                                      toast.success("✨ Dynamic prompt regenerated!");
+                                      if (newImageUrl && newAssetId) {
+                                        setAttachedVisual({
+                                          assetId: newAssetId,
+                                          url: newImageUrl,
+                                          filename: `${res.headline || item.headline}.png`,
+                                        });
+                                      }
+                                      toast.success("✨ Dynamic prompt & fresh visual image generated!");
                                     }
                                   } catch (err: any) {
                                     toast.error(err.message || "Failed to regenerate prompt");
@@ -1757,16 +1816,16 @@ export default function AIStudio() {
                                   alignItems: "center",
                                   gap: "5px",
                                 }}
-                                title="Refresh this visual prompt dynamically from PDF context"
+                                title="Refresh this visual prompt and re-render visual dynamically"
                               >
                                 <RotateCw size={12} className={refreshingScriptId === (item.id || idx) ? "animate-spin" : ""} />
-                                {refreshingScriptId === (item.id || idx) ? "Refreshing…" : "Refresh Prompt"}
+                                {refreshingScriptId === (item.id || idx) ? "Rendering…" : "Refresh Prompt"}
                               </button>
-
 
                               <Button
                                 type="button"
                                 onClick={() => {
+                                  setActiveScriptIndex(idx);
                                   setPosterScript({ prompt: item.posterPrompt, headline: item.headline });
                                   setGeneratedTitle(item.headline);
                                   setShowClipdropModal(true);
@@ -2496,6 +2555,15 @@ export default function AIStudio() {
         onClose={() => setShowClipdropModal(false)}
         onAttach={(result) => {
           setAttachedVisual(result);
+          if (activeScriptIndex !== null) {
+            setPosterScripts((prev) =>
+              prev.map((s, i) =>
+                i === activeScriptIndex
+                  ? { ...s, sourceImageUrl: result.url, mediaAssetId: result.assetId }
+                  : s
+              )
+            );
+          }
           if (savedContentId) void handleSaveToLibrary(undefined,false,result);
           toast.success("Attached visual to this draft post!");
         }}

@@ -89,7 +89,7 @@ export class KnowledgeService {
                 const result = await provider.generateStructured({
                     messages: [
                         { role: "system", content: SYSTEM_KNOWLEDGE_EXTRACTION_PROMPT },
-                        { role: "user", content: `Extract 2 to 4 key concepts, business rules, financial terms, or core domain takeaways for EACH chunk in this batch (covering all topics, metrics, features, and principles):\n${JSON.stringify(batchContext, null, 2)}` },
+                        { role: "user", content: `Document: "${doc.original_filename}" (Context: Batch ${bIdx + 1} of ${chunkBatches.length})\nExtract 2 to 4 high-value, accurate concepts, business plan rules, financial packages, tiers, trading mechanics, and core takeaways for EACH chunk in this batch:\n${JSON.stringify(batchContext, null, 2)}` },
                     ],
                     schema: knowledgeExtractionOutputSchema,
                     schemaName: "DocumentKnowledgeExtraction",
