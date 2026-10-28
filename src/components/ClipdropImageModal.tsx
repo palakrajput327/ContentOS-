@@ -896,9 +896,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                   {composerMode ? 'Create Post' : targetPlatform}
                 </span>
               </div>
-              <p style={{ margin: "2px 0 0", fontSize: "0.82rem", color: "var(--muted)" }}>
-                {composerMode ? `${attachmentLabel}. Generate a visual, then return to Create Post to review and publish.` : 'Generate visuals, customize brand overlays, and publish to your connected channels.'}
-              </p>
+              
             </div>
           </div>
 
@@ -1037,47 +1035,6 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
               />
             </div>
 
-            {/* Style Presets */}
-            <div>
-              <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--muted)", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
-                <Palette size={14} style={{ color: "var(--accent)" }} /> Visual Art Style Preset
-              </label>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "6px" }}>
-                {[
-                  { id: "3d-render", label: "3D Glass", emoji: "🎨" },
-                  { id: "cinematic", label: "Cinematic", emoji: "📸" },
-                  { id: "minimal-saas", label: "SaaS Minimal", emoji: "💼" },
-                  { id: "cyberpunk", label: "Cyberpunk", emoji: "🌌" },
-                  { id: "editorial", label: "Editorial", emoji: "🖌️" },
-                ].map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setStylePreset((prev) => (prev === s.id ? "" : s.id))}
-                    style={{
-                      padding: "8px 4px",
-                      borderRadius: "8px",
-                      border: stylePreset === s.id ? "1.5px solid #818cf8" : "1px solid var(--border)",
-                      background: stylePreset === s.id ? "rgba(99, 102, 241, 0.25)" : "var(--surface2)",
-                      color: stylePreset === s.id ? "var(--accent)" : "var(--muted)",
-                      fontSize: "0.76rem",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      textAlign: "center",
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      gap: "3px",
-                      transition: "all 0.2s",
-                    }}
-                  >
-                    <span>{s.emoji}</span>
-                    <span>{s.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Aspect Ratio Presets */}
             <div>
               <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--muted)", marginBottom: "8px", display: "block" }}>
@@ -1113,82 +1070,31 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
               </div>
             </div>
 
-            {/* Prompt Quick Inspiration Pills (ChatGPT / Midjourney style) */}
-            <div>
-              <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--muted)", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
-                <Sparkles size={14} style={{ color: "var(--warning)" }} /> Quick Inspiration
-              </label>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                {[
-                  { label: "🦉 Living Being / Animal", example: "A majestic owl with piercing glowing red eyes perched on a mossy ancient branch, cinematic studio lighting" },
-                  { label: "🪔 Festival Poster", example: "Happy Diwali festival celebration poster with company name Palak Private Limited, glowing clay diyas and golden lights" },
-                  { label: "🚗 Modern Object", example: "Sleek aerodynamic cyberpunk sports car drifting through wet neon Tokyo streets at midnight" },
-                  { label: "🏔️ Nature Landscape", example: "Breathtaking mountain waterfall with double rainbow arching over turquoise canyon lake at golden hour" },
-                  { label: "🏙️ Cyberpunk City", example: "Futuristic neon-lit megacity skyline with flying vehicles and glowing holographic billboards" },
-                  { label: "💼 SaaS 3D Icon", example: "Clean minimalist 3D glass isometric cube floating with glowing holographic AI nodes and data flows" },
-                ].map((item, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => setPrompt(item.example)}
-                    style={{
-                      background: "var(--surface2)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "8px",
-                      padding: "6px 10px",
-                      color: "var(--ink)",
-                      fontSize: "0.75rem",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      transition: "all 0.15s",
-                      textAlign: "left",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = "rgba(99, 102, 241, 0.18)";
-                      e.currentTarget.style.borderColor = "rgba(99, 102, 241, 0.4)";
-                      e.currentTarget.style.color = "#fff";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = "rgba(255, 255, 255, 0.04)";
-                      e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
-                      e.currentTarget.style.color = "#cbd5e1";
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Primary Generation Button */}
+            {/* Clean Minimal Generation Button */}
             <button
               type="button"
               onClick={() => handleGenerate(false)}
               disabled={isGenerating}
               style={{
                 marginTop: "auto",
-                padding: "14px",
-                borderRadius: "12px",
+                padding: "12px 18px",
+                borderRadius: "8px",
                 border: "none",
-                background: engine === "flux"
-                  ? "linear-gradient(135deg, #10b981, #059669)"
-                  : "linear-gradient(135deg, #6366f1, #4f46e5)",
-                color: "var(--ink)",
-                fontWeight: 700,
-                fontSize: "0.98rem",
+                background: "#6366f1",
+                color: "#ffffff",
+                fontWeight: 600,
+                fontSize: "0.9rem",
                 cursor: isGenerating ? "wait" : "pointer",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: "10px",
-                boxShadow: "0 8px 20px -4px rgba(99, 102, 241, 0.4)",
-                transition: "all 0.2s",
+                gap: "8px",
+                boxShadow: "none",
+                transition: "all 0.15s ease",
               }}
             >
-              {isGenerating ? <Loader2 size={20} className="animate-spin" /> : <Zap size={20} />}
-              {isGenerating
-                ? `Generating with ${engine === "flux" ? "FLUX.1 Pro" : "Clipdrop AI"}...`
-                : `Generate Visual with ${engine === "flux" ? "FLUX.1 Pro (Free)" : "Clipdrop AI"}`}
+              {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
+              {isGenerating ? "Generating Visual with FLUX.1..." : "Generate Visual with FLUX.1"}
             </button>
           </div>
 

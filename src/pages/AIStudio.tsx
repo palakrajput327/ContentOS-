@@ -30,6 +30,9 @@ import {
   Wand2,
   ArrowUpRight,
   Copy,
+  History,
+  Eye,
+  Pencil,
 } from "lucide-react";
 import { Button, PlatformIcon, StatusBadge } from "../components/ui";
 import { platforms, type Platform, type Snapshot } from "../lib/model";
@@ -39,7 +42,7 @@ import { PublishPreviewModal } from "../components/PublishPreviewModal";
 import { ClipdropImageModal } from "../components/ClipdropImageModal";
 import { BatchProgressIndicator } from "../components/BatchProgressIndicator";
 import KnowledgeAutomation from './KnowledgeAutomation';
-import { DocumentSourceMedia } from '../components/DocumentSourceMedia';
+import { DocumentVisualConceptsHub } from '../components/DocumentVisualConceptsHub';
 import { LiveAutoPilotPulse } from '../components/LiveAutoPilotPulse';
 import './studio-integration.css';
 
@@ -80,6 +83,62 @@ function formatPostingTimeSlots(rawTime?: string): string {
   return `${formatted.slice(0, -1).join(", ")} & ${formatted[formatted.length - 1]}`;
 }
 
+
+export function getPlatformCopyForConcept(
+  concept: any,
+  platform: string,
+  docName?: string
+): { caption: string; hashtags: string[] } {
+  if (!concept) return { caption: "", hashtags: [] };
+  const title = concept.conceptTitle || concept.title || "Business Strategy & Execution";
+  const rawExcerpt = concept.sourceExcerpt || concept.prompt || "";
+  const excerpt = rawExcerpt.replace(/\s+/g, " ").trim();
+  const cleanDoc = (docName || "Business Document").replace(/\.pdf$/i, "").replace(/[-_]/g, " ");
+
+  // Extract clean keywords for hashtags
+  const topicWords = title
+    .split(/\s+/)
+    .map((w: string) => w.replace(/[^a-zA-Z0-9]/g, ""))
+    .filter((w: string) => w.length > 3);
+  const baseTags = [
+    cleanDoc.split(" ")[0] || "Business",
+    ...topicWords.slice(0, 3),
+    "DueDiligence",
+    "Strategy",
+    "Growth",
+  ];
+  const uniqueTags = Array.from(new Set(baseTags.map((t) => `#${t.charAt(0).toUpperCase() + t.slice(1)}`))).slice(0, 5);
+  const tagString = uniqueTags.join(" ");
+
+  if (platform === "LinkedIn") {
+    return {
+      caption: `Strategic Architecture: ${title}\n\nIn modern enterprise governance, foundational clarity and rigorous verification drive sustainable advantage. Core operational principle from our official strategic roadmap:\n\n"${excerpt || "Rigorous diligence and transparent verification systems establish defensible market leadership."}"\n\nExplore our business frameworks, transparent milestones, and complete operational disclosures at www.redhash.world\n\n${tagString}`,
+      hashtags: uniqueTags,
+    };
+  } else if (platform === "Instagram") {
+    return {
+      caption: `✨ ${title.toUpperCase()}\n\nExecution begins with uncompromising standards. Key strategic insight from our corporate documentation:\n\n📌 "${excerpt || "Continuous diligence and precision governance empower long-term value creation."}"\n\nDrop a comment with your perspective below or tap the link in bio for the complete disclosure.\n\n.\n.\n${tagString} #ExecutiveFocus #EnterpriseExcellence`,
+      hashtags: uniqueTags,
+    };
+  } else if (platform === "Telegram") {
+    return {
+      caption: `📊 **${title}**\n\nOfficial Insight Briefing from **${cleanDoc}**:\n\n> "${excerpt || "Comprehensive platform architecture guarantees transparent, verifiable participation."}"\n\n🔗 Official portal & documentation: https://t.me/hindustan_social_network\n\n${tagString}`,
+      hashtags: uniqueTags,
+    };
+  } else if (platform === "Facebook") {
+    return {
+      caption: `${title}\n\nFoundational diligence and operational transparency remain essential in today's digital economy. Here is a highlighted insight from our verified corporate presentation:\n\n"${excerpt || "Strategic clarity and consistent execution build predictable, high-value outcomes."}"\n\nShare this update with your network and follow our page for daily executive insights!\n\n${tagString}`,
+      hashtags: uniqueTags,
+    };
+  } else {
+    // X (Twitter)
+    return {
+      caption: `${title}: "${excerpt ? (excerpt.length > 130 ? excerpt.slice(0, 127) + "..." : excerpt) : "Foundational diligence drives market resilience."}"\n\n${uniqueTags.slice(0, 3).join(" ")}`,
+      hashtags: uniqueTags.slice(0, 3),
+    };
+  }
+}
+
 export default function AIStudio() {
   const s = useOutletContext<Snapshot>();
   const nav = useNavigate();
@@ -104,6 +163,7 @@ export default function AIStudio() {
   });
   const setActiveTab = (tab: 'topic' | 'pdf' | 'automation') => setStudioParams({tab});
 
+  const isAutoPilotActive = Boolean(storedAutoPosts.data?.settings?.enabled);
   const dynamicPostingSlot = formatPostingTimeSlots(
     storedAutoPosts.data?.settings?.posting_time || (s.workspace as any)?.festival_post_time || "10:00"
   );
@@ -148,6 +208,45 @@ export default function AIStudio() {
     currentName: string;
   } | null>(null);
   const [autopilotRunning, setAutopilotRunning] = useState(false);
+  const [activeDispatchConcept, setActiveDispatchConcept] = useState<any | null>(null);
+  const [activeDispatchSlot, setActiveDispatchSlot] = useState<{ slotNumber: number; slotLabel: string; timeStr: string } | null>(null);
+  const [isPostingLiveNow, setIsPostingLiveNow] = useState(false);
+  const [editedDispatchCaptions, setEditedDispatchCaptions] = useState<Record<string, string>>({});
+  const [isEditingDispatchCopy, setIsEditingDispatchCopy] = useState(false);
+  const [dynamicScheduleInfo, setDynamicScheduleInfo] = useState<{
+    slotsText: string;
+    nextPostText: string;
+    activeSlotsCount: number;
+  }>(() => {
+    try {
+      const saved = localStorage.getItem("contentos_dispatch_slots");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const sorted = [...parsed].sort((a: any, b: any) => (a.time || "").localeCompare(b.time || ""));
+          const fmt = (t: string) => {
+            const [hStr, mStr] = (t || "10:00").split(":");
+            let h = parseInt(hStr, 10) || 0;
+            const m = parseInt(mStr, 10) || 0;
+            const period = h >= 12 ? "PM" : "AM";
+            if (h === 0) h = 12;
+            else if (h > 12) h -= 12;
+            return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} ${period}`;
+          };
+          return {
+            slotsText: sorted.map((s: any) => fmt(s.time)).join(", "),
+            nextPostText: `Today at ${fmt(sorted[0].time)}`,
+            activeSlotsCount: sorted.length,
+          };
+        }
+      }
+    } catch {}
+    return {
+      slotsText: "10:00 AM, 02:00 PM, 06:00 PM",
+      nextPostText: "Today at 10:00 AM",
+      activeSlotsCount: 3,
+    };
+  });
 
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
@@ -243,6 +342,15 @@ export default function AIStudio() {
       fetchDocuments();
     }
   }, [activeTab]);
+
+  // Clear concept preview when document is deselected or removed
+  useEffect(() => {
+    if (!selectedDocId || !activeDoc) {
+      setActiveDispatchConcept(null);
+      setActiveDispatchSlot(null);
+      setAttachedVisual(null);
+    }
+  }, [selectedDocId, activeDoc]);
 
   // Poll active document status if QUEUED, PROCESSING, EXTRACTING, CHUNKING
   useEffect(() => {
@@ -445,6 +553,8 @@ export default function AIStudio() {
             headline: res.headline || generatedTitle,
             platform: activePreviewPlatform,
             aspectRatio: "1:1",
+            engine: "flux",
+            enableOverlay: false,
           });
           // Ensure this job is still the active one (prevent race conditions)
           if (currentVisualJobIdRef.current === jobId && imgRes?.url) {
@@ -478,13 +588,28 @@ export default function AIStudio() {
     if (e) e.stopPropagation();
     try {
       await documentsApi.delete(docId);
-      setDocuments((prev) => prev.filter((d) => d.id !== docId));
-      if (selectedDocId === docId) {
-        setSelectedDocId(null);
-        setActiveDoc(null);
-        setKnowledgeItems([]);
-        setSelectedKnowledgeIds([]);
-      }
+      setDocuments((prev) => {
+        const remaining = prev.filter((d) => d.id !== docId);
+        if (selectedDocId === docId) {
+          if (remaining.length > 0) {
+            setSelectedDocId(remaining[0].id);
+            setActiveDoc(remaining[0]);
+            if (remaining[0].status === "READY") {
+              fetchKnowledge(remaining[0].id);
+            }
+          } else {
+            setSelectedDocId(null);
+            setActiveDoc(null);
+            setKnowledgeItems([]);
+            setSelectedKnowledgeIds([]);
+            setActiveDispatchConcept(null);
+            setActiveDispatchSlot(null);
+            setAttachedVisual(null);
+            setEditedDispatchCaptions({});
+          }
+        }
+        return remaining;
+      });
       toast.success("PDF document deleted / canceled");
     } catch (err: any) {
       toast.error(err.message || "Failed to delete PDF document");
@@ -615,29 +740,80 @@ export default function AIStudio() {
     );
   }
 
-  async function handleTriggerAutoPilot() {
+  
+  async function handleDispatchActiveConceptNow() {
+    if (!selectedDocId || !activeDispatchConcept) {
+      toast.error("No active scheduled concept selected to dispatch.");
+      return;
+    }
+    setIsPostingLiveNow(true);
+    try {
+      await request(
+        `/documents/${selectedDocId}/visual-concepts/${activeDispatchConcept.id}/dispatch`,
+        "POST",
+        { channels: selectedPlatforms.length ? selectedPlatforms : ["LinkedIn", "Instagram", "Facebook", "Telegram"] }
+      );
+      toast.success("🚀 Post published successfully to live social channels!");
+      await Promise.all([
+        query.invalidateQueries({ queryKey: ["dispatch-history"] }),
+        query.invalidateQueries({ queryKey: ["knowledge-automation"] }),
+        query.invalidateQueries({ queryKey: ["posts"] }),
+        query.invalidateQueries({ queryKey: ["calendar"] }),
+        query.invalidateQueries({ queryKey: ["documents"] }),
+      ]);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to dispatch post live.");
+    } finally {
+      setIsPostingLiveNow(false);
+    }
+  }
+
+  async function handleToggleAutoPilot() {
     if (!selectedDocId) {
       toast.error("Please select a PDF document first.");
       return;
     }
+    const currentlyActive = Boolean(storedAutoPosts.data?.settings?.enabled);
     setAutopilotRunning(true);
     try {
-      const res = await request<{ success: boolean; generated: number; message: string }>(
-        "/knowledge-automation/auto-pilot",
-        "POST",
-        { documentId: selectedDocId }
-      );
-      toast.success(res.message || "⚡ Auto-Pilot executed successfully!");
+      if (currentlyActive) {
+        // STOP AUTOPILOT
+        const currentSettings = storedAutoPosts.data?.settings || {};
+        await request("/knowledge-automation/settings", "PATCH", {
+          enabled: false,
+          horizonDays: currentSettings.horizon_days || 14,
+          cooldownDays: currentSettings.cooldown_days || 90,
+          platforms: currentSettings.platforms || ["LinkedIn"],
+          postingTime: currentSettings.posting_time || "10:00",
+          posterStyle: currentSettings.poster_style || "AI_POSTER",
+        });
+        toast.success("⏸️ Auto-Pilot stopped! Automatic publishing is now paused.");
+      } else {
+        // START AUTOPILOT
+        const currentSettings = storedAutoPosts.data?.settings || {};
+        await request("/knowledge-automation/settings", "PATCH", {
+          enabled: true,
+          horizonDays: currentSettings.horizon_days || 14,
+          cooldownDays: currentSettings.cooldown_days || 90,
+          platforms: currentSettings.platforms || ["LinkedIn"],
+          postingTime: currentSettings.posting_time || "10:00",
+          posterStyle: currentSettings.poster_style || "AI_POSTER",
+        });
+        const res = await request<{ success: boolean; generated: number; message: string }>(
+          "/knowledge-automation/auto-pilot",
+          "POST",
+          { documentId: selectedDocId }
+        );
+        toast.success(res.message || "⚡ 100% Zero-Touch Auto-Pilot activated!");
 
-      // Actively poll until plans appear
-      const startTime = Date.now();
-      const pollTimer = setInterval(async () => {
-        const updated = await storedAutoPosts.refetch();
-        if ((updated.data?.plans && updated.data.plans.length > 0) || Date.now() - startTime > 45000) {
-          clearInterval(pollTimer);
-          setAutopilotRunning(false);
-        }
-      }, 3000);
+        const startTime = Date.now();
+        const pollTimer = setInterval(async () => {
+          const updated = await storedAutoPosts.refetch();
+          if ((updated.data?.plans && updated.data.plans.length > 0) || Date.now() - startTime > 45000) {
+            clearInterval(pollTimer);
+          }
+        }, 3000);
+      }
 
       await Promise.all([
         query.invalidateQueries({ queryKey: ["documents"] }),
@@ -646,13 +822,17 @@ export default function AIStudio() {
         query.invalidateQueries({ queryKey: ["knowledge-automation"] }),
         query.invalidateQueries({ queryKey: ["studio-autopilot-posts"] }),
         query.invalidateQueries({ queryKey: ["workspace"] }),
-        storedAutoPosts.refetch(),
       ]);
+      await storedAutoPosts.refetch();
     } catch (err: any) {
-      toast.error(err.message || "Auto-Pilot failed to start.");
+      toast.error(err.message || "Auto-Pilot action failed.");
+    } finally {
       setAutopilotRunning(false);
     }
   }
+
+  // Backward compatibility alias
+  const handleTriggerAutoPilot = handleToggleAutoPilot;
 
   async function handleGeneratePosts() {
     try {
@@ -881,47 +1061,24 @@ export default function AIStudio() {
         />
       )}
 
-            <div className="page-heading">
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
-            <span
-              className="badge"
-              style={{
-                background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(16, 185, 129, 0.2))",
-                color: "var(--accent)",
-                border: "1px solid rgba(99, 102, 241, 0.3)",
-                fontWeight: 600,
-                fontSize: "0.75rem",
-                letterSpacing: "0.05em",
-                padding: "4px 10px",
-                borderRadius: "20px",
-              }}
-            >
-              <Sparkles size={13} style={{ display: "inline", marginRight: "4px" }} /> AI STUDIO + KNOWLEDGE
-            </span>
-          </div>
-          <h1 style={{ fontSize: "1.75rem", fontWeight: 700, margin: "0 0 6px" }}>
-            AI Studio
-          </h1>
-          <p style={{ color: "var(--color-text-muted, var(--muted))", margin: 0 }}>
-            Add your business knowledge, create content, and keep your calendar active. Every generated post goes to your approval queue.
-          </p>
-        </div>
+      <div className="page-heading" style={{ marginBottom: "16px" }}>
+        <h1 style={{ fontSize: "1.6rem", fontWeight: 700, margin: 0, letterSpacing: "-0.02em" }}>
+          AI Studio
+        </h1>
       </div>
 
-      {/* Mode Selector Tabs */}
-      {/* Mode Selector Tabs */}
+      {/* Premium Segmented Navigation Tabs */}
       <div
-        className="studio-tabs"
         style={{
-          display: "flex",
-          gap: "6px",
-          marginBottom: "20px",
-          background: "var(--surface2)",
-          padding: "5px",
-          borderRadius: "12px",
-          border: "1px solid var(--border)",
-          width: "fit-content",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "4px",
+          padding: "4px",
+          borderRadius: "10px",
+          background: "rgba(255, 255, 255, 0.03)",
+          border: "1px solid rgba(255, 255, 255, 0.08)",
+          marginBottom: "14px",
+          flexWrap: "wrap",
         }}
       >
         <button
@@ -930,114 +1087,109 @@ export default function AIStudio() {
           className={activeTab === 'topic' ? 'active' : ''}
           aria-pressed={activeTab === 'topic'}
           style={{
-            display: "flex",
+            display: "inline-flex",
             alignItems: "center",
-            gap: "8px",
-            padding: "9px 18px",
-            borderRadius: "8px",
-            border: "none",
-            background: activeTab === "topic" ? "var(--color-accent, #6366f1)" : "transparent",
-            color: activeTab === "topic" ? "#fff" : "var(--color-text-muted, #94a3b8)",
-            fontWeight: 600,
-            fontSize: "0.88rem",
+            gap: "7px",
+            padding: "7px 15px",
+            borderRadius: "7px",
+            border: activeTab === "topic" ? "1px solid rgba(255, 255, 255, 0.12)" : "1px solid transparent",
+            background: activeTab === "topic" ? "rgba(255, 255, 255, 0.08)" : "transparent",
+            color: activeTab === "topic" ? "#ffffff" : "var(--color-text-muted, #94a3b8)",
+            fontWeight: activeTab === "topic" ? 600 : 500,
+            fontSize: "0.82rem",
             cursor: "pointer",
-            transition: "all 0.2s ease",
+            whiteSpace: "nowrap",
+            transition: "all 0.15s ease",
+            boxShadow: activeTab === "topic" ? "0 1px 3px rgba(0, 0, 0, 0.3)" : "none",
           }}
         >
-          <FileText size={16} />
+          <FileText size={14} style={{ opacity: activeTab === "topic" ? 1 : 0.7 }} />
           Create content
         </button>
+
         <button
           type="button"
           onClick={() => setActiveTab("pdf")}
           className={activeTab === 'pdf' ? 'active' : ''}
           aria-pressed={activeTab === 'pdf'}
           style={{
-            display: "flex",
+            display: "inline-flex",
             alignItems: "center",
-            gap: "8px",
-            padding: "9px 18px",
-            borderRadius: "8px",
-            border: "none",
-            background: activeTab === "pdf" ? "var(--color-accent, #6366f1)" : "transparent",
-            color: activeTab === "pdf" ? "#fff" : "var(--color-text-muted, #94a3b8)",
-            fontWeight: 600,
-            fontSize: "0.88rem",
+            gap: "7px",
+            padding: "7px 15px",
+            borderRadius: "7px",
+            border: activeTab === "pdf" ? "1px solid rgba(255, 255, 255, 0.12)" : "1px solid transparent",
+            background: activeTab === "pdf" ? "rgba(255, 255, 255, 0.08)" : "transparent",
+            color: activeTab === "pdf" ? "#ffffff" : "var(--color-text-muted, #94a3b8)",
+            fontWeight: activeTab === "pdf" ? 600 : 500,
+            fontSize: "0.82rem",
             cursor: "pointer",
-            transition: "all 0.2s ease",
+            whiteSpace: "nowrap",
+            transition: "all 0.15s ease",
+            boxShadow: activeTab === "pdf" ? "0 1px 3px rgba(0, 0, 0, 0.3)" : "none",
           }}
         >
-          <BookOpen size={16} />
+          <BookOpen size={14} style={{ opacity: activeTab === "pdf" ? 1 : 0.7 }} />
           Business knowledge
           <span
             style={{
-              background: activeTab === "pdf" ? "rgba(255, 255, 255, 0.25)" : "rgba(16, 185, 129, 0.15)",
-              color: activeTab === "pdf" ? "#fff" : "var(--success, #10b981)",
-              fontSize: "0.68rem",
-              padding: "2px 7px",
-              borderRadius: "10px",
+              background: activeTab === "pdf" ? "rgba(99, 102, 241, 0.25)" : "rgba(255, 255, 255, 0.06)",
+              color: activeTab === "pdf" ? "#c7d2fe" : "var(--color-text-muted, #94a3b8)",
+              border: activeTab === "pdf" ? "1px solid rgba(129, 140, 248, 0.35)" : "1px solid rgba(255, 255, 255, 0.08)",
+              fontSize: "0.65rem",
+              padding: "1px 6px",
+              borderRadius: "4px",
               fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.4px",
             }}
           >
-            PDFs
+            PDF
           </span>
         </button>
+
         <button
           type="button"
           onClick={() => setActiveTab("automation")}
           className={activeTab === 'automation' ? 'active' : ''}
           aria-pressed={activeTab === 'automation'}
           style={{
-            display: "flex",
+            display: "inline-flex",
             alignItems: "center",
-            gap: "8px",
-            padding: "9px 18px",
-            borderRadius: "8px",
-            border: "none",
-            background: activeTab === "automation" ? "var(--color-accent, #6366f1)" : "transparent",
-            color: activeTab === "automation" ? "#fff" : "var(--color-text-muted, #94a3b8)",
-            fontWeight: 600,
-            fontSize: "0.88rem",
+            gap: "7px",
+            padding: "7px 15px",
+            borderRadius: "7px",
+            border: activeTab === "automation" ? "1px solid rgba(255, 255, 255, 0.12)" : "1px solid transparent",
+            background: activeTab === "automation" ? "rgba(255, 255, 255, 0.08)" : "transparent",
+            color: activeTab === "automation" ? "#ffffff" : "var(--color-text-muted, #94a3b8)",
+            fontWeight: activeTab === "automation" ? 600 : 500,
+            fontSize: "0.82rem",
             cursor: "pointer",
-            transition: "all 0.2s ease",
+            whiteSpace: "nowrap",
+            transition: "all 0.15s ease",
+            boxShadow: activeTab === "automation" ? "0 1px 3px rgba(0, 0, 0, 0.3)" : "none",
           }}
         >
-          <Clock size={16} />
-          Automate content
+          <History size={14} style={{ opacity: activeTab === "automation" ? 1 : 0.7 }} />
+          Autopilot History
           <span
             style={{
-              background: activeTab === "automation" ? "rgba(255, 255, 255, 0.25)" : "rgba(99, 102, 241, 0.15)",
-              color: activeTab === "automation" ? "#fff" : "var(--accent, #6366f1)",
-              fontSize: "0.68rem",
-              padding: "2px 7px",
-              borderRadius: "10px",
+              background: activeTab === "automation" ? "rgba(16, 185, 129, 0.2)" : "rgba(255, 255, 255, 0.06)",
+              color: activeTab === "automation" ? "#34d399" : "var(--color-text-muted, #94a3b8)",
+              border: activeTab === "automation" ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid rgba(255, 255, 255, 0.08)",
+              fontSize: "0.65rem",
+              padding: "1px 6px",
+              borderRadius: "4px",
               fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.4px",
             }}
           >
-            Auto
+            10 Days
           </span>
         </button>
       </div>
 
-      <div className="studio-workflow-strip">
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "0.82rem", color: "var(--color-text-muted, #94a3b8)" }}>
-          <span>Business knowledge</span>
-          <ChevronRight size={13} style={{ opacity: 0.5 }} />
-          <span>AI Content</span>
-          <ChevronRight size={13} style={{ opacity: 0.5 }} />
-          <span>Approval Queue</span>
-          <ChevronRight size={13} style={{ opacity: 0.5 }} />
-          <span style={{ color: "var(--accent, #6366f1)", fontWeight: 600 }}>Scheduled Publishing</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <Link to="/app/approvals" style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.82rem", fontWeight: 600, color: "var(--color-text-muted, #94a3b8)", textDecoration: "none" }}>
-            Approvals <ArrowUpRight size={13} />
-          </Link>
-          <Link to="/app/calendar" style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.82rem", fontWeight: 600, color: "var(--color-text-muted, #94a3b8)", textDecoration: "none" }}>
-            Calendar <ArrowUpRight size={13} />
-          </Link>
-        </div>
-      </div>
       {activeTab === 'automation' && <KnowledgeAutomation embedded />}
       <div className="composer-grid studio-creation-grid" style={{ display: activeTab === 'automation' ? 'none' : "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 420px)", gap: "24px" }}>
         {/* Main Creation Column */}
@@ -1091,66 +1243,221 @@ export default function AIStudio() {
               </div>
             </div>
           ) : (
-            /* PDF MODE PANEL */
-            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-              {/* PDF Upload & Document Selector Panel */}
-              <div className="panel" style={{ padding: "24px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                  <div>
-                    <h2 style={{ fontSize: "1.15rem", fontWeight: 600, margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
-                      <BookOpen size={18} style={{ color: "var(--success)" }} />
-                Your business knowledge
-                    </h2>
-                    <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", margin: "4px 0 0" }}>
-                      Upload whitepapers, research reports, or specs to extract verifiable claims and insights.
-                    </p>
+            /* REAL-WORLD MINIMAL SAAS PDF WORKSPACE */
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {/* 1. Sleek Document Toolbar Header (shown when active document exists) */}
+              {activeDoc && (
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "12px",
+                  padding: "10px 14px",
+                  borderRadius: "10px",
+                  background: "rgba(255, 255, 255, 0.025)",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
+                    <div style={{
+                      width: "30px",
+                      height: "30px",
+                      borderRadius: "6px",
+                      background: "rgba(99, 102, 241, 0.12)",
+                      border: "1px solid rgba(99, 102, 241, 0.25)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}>
+                      <FileText size={15} color="#818cf8" />
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flexWrap: "wrap" }}>
+                      <strong style={{ fontSize: "0.88rem", color: "#f8fafc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {activeDoc.original_filename}
+                      </strong>
+                      <span style={{
+                        fontSize: "0.68rem",
+                        fontWeight: 700,
+                        padding: "1px 7px",
+                        borderRadius: "4px",
+                        background: activeDoc.status === "READY" ? "rgba(16, 185, 129, 0.12)" : "rgba(245, 158, 11, 0.12)",
+                        color: activeDoc.status === "READY" ? "#34d399" : "#fbbf24",
+                        border: `1px solid ${activeDoc.status === "READY" ? "rgba(16, 185, 129, 0.25)" : "rgba(245, 158, 11, 0.25)"}`,
+                      }}>
+                        {activeDoc.status}
+                      </span>
+                      {Boolean(activeDoc.page_count && activeDoc.page_count > 0) && (
+                        <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
+                          {activeDoc.page_count} pages
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                    {documents.length > 1 && (
+                      <select
+                        value={selectedDocId || ""}
+                        onChange={(e) => {
+                          const doc = documents.find((d) => d.id === e.target.value);
+                          if (doc) {
+                            setSelectedDocId(doc.id);
+                            setActiveDoc(doc);
+                            if (doc.status === "READY") {
+                              fetchKnowledge(doc.id);
+                              fetchPosterScripts(doc.id);
+                            }
+                          }
+                        }}
+                        style={{
+                          height: "30px",
+                          boxSizing: "border-box",
+                          background: "rgba(255, 255, 255, 0.04)",
+                          border: "1px solid rgba(255, 255, 255, 0.1)",
+                          color: "#f8fafc",
+                          borderRadius: "6px",
+                          padding: "0 8px",
+                          fontSize: "0.75rem",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {documents.map((d) => (
+                          <option key={d.id} value={d.id} style={{ background: "#0f172a" }}>
+                            {d.original_filename} ({d.status})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    {(activeDoc.status === "READY" || activeDoc.status === "FAILED") && (
+                      <button
+                        type="button"
+                        onClick={handleTriggerKnowledgeExtract}
+                        disabled={extractingKnowledge || loadingKnowledge}
+                        title="Re-extract knowledge claims"
+                        style={{
+                          height: "30px",
+                          boxSizing: "border-box",
+                          background: "rgba(255, 255, 255, 0.04)",
+                          border: "1px solid rgba(255, 255, 255, 0.1)",
+                          color: "var(--color-text-muted)",
+                          borderRadius: "6px",
+                          padding: "0 10px",
+                          fontSize: "0.75rem",
+                          fontWeight: 500,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          lineHeight: 1,
+                          margin: 0,
+                        }}
+                      >
+                        <RotateCw size={12} className={extractingKnowledge ? "animate-spin" : ""} />
+                        {extractingKnowledge ? "Extracting..." : "Re-extract"}
+                      </button>
+                    )}
+
+                    <label style={{
+                      height: "30px",
+                      boxSizing: "border-box",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "6px",
+                      padding: "0 12px",
+                      borderRadius: "6px",
+                      background: "rgba(99, 102, 241, 0.15)",
+                      border: "1px solid rgba(99, 102, 241, 0.3)",
+                      color: "#c7d2fe",
+                      fontSize: "0.75rem",
+                      fontWeight: 600,
+                      cursor: uploadingPdf ? "wait" : "pointer",
+                      transition: "all 0.15s ease",
+                      lineHeight: 1,
+                      margin: 0,
+                      userSelect: "none",
+                    }}>
+                      <Upload size={12} />
+                      {uploadingPdf ? "Uploading..." : "Add / Replace PDF"}
+                      <input
+                        type="file"
+                        multiple
+                        accept=".pdf,application/pdf"
+                        style={{ display: "none" }}
+                        disabled={uploadingPdf}
+                        onChange={handleFileUpload}
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      title="Delete document"
+                      onClick={(e) => handleDeleteDocument(activeDoc.id, e)}
+                      style={{
+                        height: "30px",
+                        width: "30px",
+                        boxSizing: "border-box",
+                        background: "rgba(239, 68, 68, 0.08)",
+                        border: "1px solid rgba(239, 68, 68, 0.2)",
+                        color: "#f87171",
+                        borderRadius: "6px",
+                        padding: 0,
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        lineHeight: 1,
+                        margin: 0,
+                      }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
                 </div>
+              )}
 
-                {/* Upload Dropzone */}
+              {/* Batch upload progress indicator if active */}
+              {batchProgress && (
+                <div style={{ background: "rgba(255, 255, 255, 0.03)", borderRadius: "6px", padding: "8px 12px", border: "1px solid rgba(255, 255, 255, 0.08)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", marginBottom: "4px" }}>
+                    <span style={{ color: "var(--accent)", fontWeight: 600 }}>Processing: {batchProgress.completed}/{batchProgress.total}</span>
+                    <span style={{ color: "var(--color-text-muted)" }}>{batchProgress.currentName}</span>
+                  </div>
+                  <div style={{ height: "3px", background: "rgba(255, 255, 255, 0.08)", borderRadius: "2px", overflow: "hidden" }}>
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${(batchProgress.completed / batchProgress.total) * 100}%`,
+                        background: "#6366f1",
+                        transition: "width 0.3s ease",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Fallback clean dropzone only when no document uploaded */}
+              {!activeDoc && (
                 <div
                   style={{
-                    border: "2px dashed var(--border)",
-                    borderRadius: "12px",
-                    padding: "24px",
+                    border: "1px dashed rgba(255, 255, 255, 0.15)",
+                    borderRadius: "10px",
+                    padding: "24px 16px",
                     textAlign: "center",
-                    background: "var(--surface2)",
-                    marginBottom: "20px",
-                    transition: "all 0.2s ease",
+                    background: "rgba(255, 255, 255, 0.015)",
                   }}
                 >
-                  <Upload size={32} style={{ color: "#6366f1", marginBottom: "10px" }} />
-                  <h4 style={{ margin: "0 0 6px", fontSize: "0.95rem" }}>Upload PDF Document(s)</h4>
-                  <p style={{ margin: "0 0 14px", fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-                    Supports batch uploading multiple PDFs up to 50MB each. Fast parallel extraction with AI evidence.
+                  <Upload size={24} style={{ color: "#818cf8", marginBottom: "8px" }} />
+                  <h4 style={{ margin: "0 0 4px", fontSize: "0.9rem", color: "#f8fafc" }}>Upload PDF Document(s)</h4>
+                  <p style={{ margin: "0 0 12px", fontSize: "0.76rem", color: "var(--color-text-muted)" }}>
+                    Supports batch PDF upload up to 50MB. AI extracts verifiable concepts & generates daily visual schedule.
                   </p>
-                  
-                  {batchProgress && (
-                    <div style={{ margin: "0 auto 14px", maxWidth: "320px", background: "var(--border)", borderRadius: "8px", padding: "10px", border: "1px solid var(--border)" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", marginBottom: "6px" }}>
-                        <span style={{ color: "var(--accent)", fontWeight: 600 }}>Batch Processing: {batchProgress.completed}/{batchProgress.total}</span>
-                        <span style={{ color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "150px", whiteSpace: "nowrap" }}>
-                          {batchProgress.currentName}
-                        </span>
-                      </div>
-                      <div style={{ height: "4px", background: "var(--border)", borderRadius: "2px", overflow: "hidden" }}>
-                        <div
-                          style={{
-                            height: "100%",
-                            width: `${(batchProgress.completed / batchProgress.total) * 100}%`,
-                            background: "linear-gradient(90deg, #6366f1, #10b981)",
-                            transition: "width 0.3s ease",
-                          }}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  <label className="button primary" style={{ cursor: uploadingPdf ? "wait" : "pointer", display: "inline-flex", gap: "8px" }}>
-                    <Upload size={15} />
-                    {uploadingPdf
-                      ? (batchProgress ? `Uploading (${batchProgress.completed}/${batchProgress.total})...` : "Uploading & Initializing...")
-                      : "Select PDF File(s)"}
+                  <label className="button primary" style={{ cursor: uploadingPdf ? "wait" : "pointer", display: "inline-flex", gap: "6px", padding: "6px 14px", fontSize: "0.8rem" }}>
+                    <Upload size={13} />
+                    {uploadingPdf ? "Uploading..." : "Select PDF File"}
                     <input
                       type="file"
                       multiple
@@ -1161,838 +1468,264 @@ export default function AIStudio() {
                     />
                   </label>
                 </div>
+              )}
 
-                {/* Documents List */}
-                {documents.length > 0 && (
-                  <div>
-                    <label style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text-muted)", marginBottom: "8px", display: "block" }}>
-                      Workspace PDF Documents ({documents.length})
-                    </label>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "200px", overflowY: "auto" }}>
-                      {documents.map((doc) => (
-                        <div
-                          key={doc.id}
-                          onClick={() => {
-                            setSelectedDocId(doc.id);
-                            setActiveDoc(doc);
-                            if (doc.status === "READY") {
-                              fetchKnowledge(doc.id);
-                              fetchPosterScripts(doc.id);
-                            }
-                          }}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            padding: "10px 14px",
-                            borderRadius: "8px",
-                            background: selectedDocId === doc.id ? "rgba(99, 102, 241, 0.15)" : "var(--surface2)",
-                            border: selectedDocId === doc.id ? "1px solid rgba(99, 102, 241, 0.4)" : "1px solid var(--border)",
-                            cursor: "pointer",
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
-                            <FileText size={18} style={{ color: "#6366f1", flexShrink: 0 }} />
-                            <span style={{ fontSize: "0.85rem", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {doc.original_filename}
-                            </span>
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
-                            <span
-                              style={{
-                                fontSize: "0.75rem",
-                                padding: "2px 8px",
-                                borderRadius: "12px",
-                                background:
-                                  doc.status === "READY"
-                                    ? "rgba(16, 185, 129, 0.15)"
-                                    : doc.status === "FAILED"
-                                    ? "rgba(239, 68, 68, 0.15)"
-                                    : "rgba(245, 158, 11, 0.15)",
-                                color:
-                                  doc.status === "READY"
-                                    ? "#34d399"
-                                    : doc.status === "FAILED"
-                                    ? "#f87171"
-                                    : "#fbbf24",
-                              }}
-                            >
-                              {doc.status}
-                            </span>
-                            {Boolean(doc.page_count && doc.page_count > 0) && (
-                              <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-                                {doc.page_count} pages
-                              </span>
-                            )}
-                            <button
-                              type="button"
-                              title="Delete / Cancel document"
-                              onClick={(e) => handleDeleteDocument(doc.id, e)}
-                              style={{
-                                background: "transparent",
-                                border: "none",
-                                color: "var(--danger)",
-                                cursor: "pointer",
-                                padding: "4px",
-                                borderRadius: "4px",
-                                display: "flex",
-                                alignItems: "center",
-                              }}
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* 100% Zero-Touch Auto-Pilot Mode Banner */}
-                {selectedDocId && (
-                  <div
-                    style={{
-                      margin: "16px 0",
-                      padding: "16px 20px",
-                      borderRadius: "12px",
-                      background: "linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(168, 85, 247, 0.15) 100%)",
-                      border: "1px solid rgba(129, 140, 248, 0.4)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: "16px",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: "280px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
-                        <Sparkles size={18} color="#818cf8" />
-                        <strong style={{ fontSize: "1rem", color: "#f8fafc" }}>100% Zero-Touch Auto-Pilot</strong>
-                        <span style={{ fontSize: "0.7rem", padding: "2px 8px", borderRadius: "10px", background: "#4f46e5", color: "#fff", fontWeight: 700 }}>
-                          HANDS-FREE
-                        </span>
-                        {/* Dynamic Selected Time Slot Badge */}
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "5px",
-                            fontSize: "0.75rem",
-                            padding: "2px 9px",
-                            borderRadius: "8px",
-                            background: "rgba(56, 189, 248, 0.15)",
-                            border: "1px solid rgba(56, 189, 248, 0.4)",
-                            color: "#38bdf8",
-                            fontWeight: 700,
-                            letterSpacing: "0.01em",
-                          }}
-                        >
-                          <Clock size={12} style={{ color: "#38bdf8" }} /> Slot: {dynamicPostingSlot}
-                        </span>
-                      </div>
-                      <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--color-text-muted)", lineHeight: 1.5 }}>
-                        Auto-pairs PDF visuals, creates multi-platform captions & hashtags, schedules posts day-by-day (
-                        <strong style={{ color: "#38bdf8", fontWeight: 700 }}>{dynamicPostingSlot}</strong>
-                        ), and auto-injects festival greetings (Diwali, Holi, Eid, Independence Day).
-                      </p>
-                      {nextScheduledTimeStr && (
-                        <div style={{ marginTop: "6px", display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "0.78rem", color: "#a5b4fc" }}>
-                          <span style={{ display: "inline-block", width: "6px", height: "6px", borderRadius: "50%", background: "#10b981" }} />
-                          <span>Next auto-post scheduled: <strong style={{ color: "#f8fafc" }}>{nextScheduledTimeStr}</strong> {nextScheduledPlan?.social_platform ? `(${nextScheduledPlan.social_platform})` : ""}</span>
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                      <Button
-                        variant="secondary"
-                        onClick={() => setActiveTab("automation")}
-                        title="Configure automatic daily posting time slots"
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          background: "rgba(56, 189, 248, 0.1)",
-                          border: "1px solid rgba(56, 189, 248, 0.3)",
-                          color: "#38bdf8",
-                          padding: "9px 13px",
-                          fontSize: "0.83rem",
-                          fontWeight: 600,
-                        }}
-                      >
-                        <Clock size={14} /> Change Time Slot
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        onClick={() => setShowAutoPilotGuide(true)}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          background: "rgba(255, 255, 255, 0.08)",
-                          border: "1px solid rgba(255, 255, 255, 0.2)",
-                          color: "#e2e8f0",
-                          padding: "9px 14px",
-                          fontSize: "0.85rem",
-                        }}
-                      >
-                        <BookOpen size={15} /> How It Works
-                      </Button>
-                      <Button
-                        variant="primary"
-                        disabled={autopilotRunning}
-                        onClick={handleTriggerAutoPilot}
-                        style={{
-                          background: "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)",
-                          fontWeight: 700,
-                          padding: "9px 18px",
-                          fontSize: "0.9rem",
-                          border: "none",
-                          boxShadow: "0 4px 14px rgba(99, 102, 241, 0.35)",
-                        }}
-                      >
-                        {autopilotRunning ? "⚡ Running Auto-Pilot…" : "⚡ Start Auto-Pilot"}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Real-Time Live Auto-Pilot Pulse & Dynamic Countdown */}
-                {selectedDocId && (
-                  <LiveAutoPilotPulse
-                    plans={storedAutoPosts.data?.plans || []}
-                    settings={storedAutoPosts.data?.settings}
-                    timezone={(s.workspace as any)?.timezone || "Asia/Kolkata"}
-                    autopilotRunning={autopilotRunning}
-                    onTriggerAutoPilot={handleTriggerAutoPilot}
-                    onSelectPlan={loadPlanIntoStudio}
-                    onOpenVisualStudio={(promptText, headlineText, planId) => {
-                      setPosterScript({ prompt: promptText, headline: headlineText });
-                      setActivePlanForStudio(planId || null);
-                      setShowClipdropModal(true);
-                    }}
-                    onPublishNow={async (planId: string) => {
-                      try {
-                        await request(`/knowledge-automation/plans/${planId}/publish-now`, "POST");
-                        toast.success("🚀 Dispatched post live to social channel!");
-                        await storedAutoPosts.refetch();
-                      } catch (err: any) {
-                        toast.error(err.message || "Failed to publish post now.");
-                      }
-                    }}
-                    onRefreshPrompt={async (planId: string, currentHeadline: string) => {
-                      try {
-                        const res = await request<{ posterPrompt: string; headline: string; mediaUrl?: string; assetId?: string }>(
-                          `/knowledge-automation/plans/${planId}/refresh-prompt`,
-                          "POST"
-                        );
-                        if (res?.posterPrompt) {
-                          setPosterScript({ prompt: res.posterPrompt, headline: res.headline || currentHeadline });
-                          if (res.mediaUrl) {
-                            setAttachedVisual({
-                              assetId: res.assetId || "gen-visual",
-                              url: res.mediaUrl,
-                              filename: `${res.headline || currentHeadline}.png`,
-                            });
-                          }
-                          toast.success("✨ Dynamic prompt & fresh visual image generated!");
-                          await storedAutoPosts.refetch();
-                          return res;
-                        }
-
-                      } catch (err: any) {
-                        try {
-                          const res = await request<{ prompt: string; headline: string }>(
-                            "/clipdrop/suggest-poster-prompt",
-                            "POST",
-                            {
-                              knowledgeConcept: currentHeadline,
-                              title: currentHeadline,
-                              sourceVisualContext: `Extracted from PDF ${activeDoc?.original_filename || "document"}`,
-                              platform: activePreviewPlatform,
-                            }
-                          );
-                          if (res?.prompt) {
-                            setPosterScript({ prompt: res.prompt, headline: res.headline || currentHeadline });
-                            toast.success("✨ Dynamic prompt regenerated!");
-                            return res.prompt;
-                          }
-                        } catch (e: any) {
-                          toast.error(err.message || "Failed to refresh prompt");
-                        }
-                      }
-                    }}
-                  />
-
-                )}
-
-                {/* Smooth In-App Auto-Pilot Guide Modal */}
-                {showAutoPilotGuide && (
-                  <div
-                    style={{
-                      position: "fixed",
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      background: "rgba(0, 0, 0, 0.8)",
-                      backdropFilter: "blur(6px)",
-                      zIndex: 9999,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      padding: "20px",
-                    }}
-                    onClick={() => setShowAutoPilotGuide(false)}
-                  >
-                    <div
-                      style={{
-                        background: "#13132b",
-                        border: "1px solid rgba(129, 140, 248, 0.4)",
-                        borderRadius: "16px",
-                        maxWidth: "600px",
-                        width: "100%",
-                        padding: "28px",
-                        boxShadow: "0 24px 48px rgba(0, 0, 0, 0.6)",
-                        color: "#f8fafc",
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                          <Sparkles size={24} color="#818cf8" />
-                          <h2 style={{ fontSize: "1.2rem", margin: 0, fontWeight: 700 }}>How PDF Post Automation Works</h2>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowAutoPilotGuide(false)}
-                          style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "1.5rem", cursor: "pointer", lineHeight: 1 }}
-                        >
-                          ×
-                        </button>
-                      </div>
-
-                      <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                        <div style={{ display: "flex", gap: "14px", alignItems: "flex-start", background: "rgba(255,255,255,0.04)", padding: "14px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.06)" }}>
-                          <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#6366f1", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.85rem", flexShrink: 0 }}>1</div>
-                          <div>
-                            <strong style={{ display: "block", fontSize: "0.92rem", color: "#fff" }}>Upload Your Business PDF</strong>
-                            <p style={{ margin: "4px 0 0", fontSize: "0.82rem", color: "#94a3b8", lineHeight: 1.45 }}>
-                              Upload any brochure, research report, or product catalog. The engine extracts text insights and image previews.
-                            </p>
-                          </div>
-                        </div>
-
-                        <div style={{ display: "flex", gap: "14px", alignItems: "flex-start", background: "rgba(255,255,255,0.04)", padding: "14px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.06)" }}>
-                          <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#a855f7", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.85rem", flexShrink: 0 }}>2</div>
-                          <div>
-                            <strong style={{ display: "block", fontSize: "0.92rem", color: "#fff" }}>Click "⚡ Start Auto-Pilot"</strong>
-                            <p style={{ margin: "4px 0 0", fontSize: "0.82rem", color: "#94a3b8", lineHeight: 1.45 }}>
-                              Zero manual work: AI auto-pairs PDF visuals, creates platform-specific copy & hashtags, and assigns posts day-by-day (Day 1, Day 2...).
-                            </p>
-                          </div>
-                        </div>
-
-                        <div style={{ display: "flex", gap: "14px", alignItems: "flex-start", background: "rgba(255,255,255,0.04)", padding: "14px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.06)" }}>
-                          <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#10b981", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.85rem", flexShrink: 0 }}>3</div>
-                          <div>
-                            <strong style={{ display: "block", fontSize: "0.92rem", color: "#fff" }}>Autonomous Publishing & Dual Alerts</strong>
-                            <p style={{ margin: "4px 0 0", fontSize: "0.82rem", color: "#94a3b8", lineHeight: 1.45 }}>
-                              Posts go live automatically at designated slot times. You receive real-time notifications inside ContentOS and directly in your registered Gmail.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{ marginTop: "20px", display: "flex", justifyContent: "flex-end" }}>
-                        <Button variant="primary" onClick={() => setShowAutoPilotGuide(false)}>
-                          Got it, Let's Automate!
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Active Document Status & Knowledge Extract Action */}
-                {selectedDocId && activeDoc && <DocumentSourceMedia key={selectedDocId} documentId={selectedDocId} documentStatus={activeDoc.status} canExtract={['Owner','Admin','Content Manager','Editor'].includes(s.workspace.role)} selectedAssetId={attachedVisual?.assetId} onKnowledgeChanged={id=>{if(selectedDocRef.current===id)void fetchKnowledge(id);}} onSelectVisual={visual => setAttachedVisual(visual)} />}
-                {activeDoc && (
-                  <div
-                    style={{
-                      marginTop: "16px",
-                      padding: "14px",
-                      borderRadius: "8px",
-                      background: "var(--surface2)",
-                      border: "1px solid var(--border)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                    }}
-                  >
-                    <div>
-                      <strong style={{ fontSize: "0.9rem", display: "block" }}>{activeDoc.original_filename}</strong>
-                      <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-                        Status: <strong>{activeDoc.status}</strong> {activeDoc.page_count ? `• ${activeDoc.page_count} pages` : ""}
-                      </span>
-                    </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      {activeDoc.status === "READY" || activeDoc.status === "FAILED" ? (
-                        <Button
-                          onClick={handleTriggerKnowledgeExtract}
-                          disabled={extractingKnowledge || loadingKnowledge}
-                          style={{
-                            fontSize: "0.85rem",
-                            padding: "6px 14px",
-                            background: activeDoc.status === "FAILED" ? "rgba(239, 68, 68, 0.2)" : undefined,
-                            border: activeDoc.status === "FAILED" ? "1px solid rgba(239, 68, 68, 0.4)" : undefined,
-                            color: activeDoc.status === "FAILED" ? "#fca5a5" : undefined,
-                          }}
-                        >
-                          <RotateCw size={14} className={extractingKnowledge ? "animate-spin" : ""} />
-                          {extractingKnowledge ? "Extracting..." : activeDoc.status === "FAILED" ? "Retry Extraction" : "Re-extract Knowledge"}
-                        </Button>
-                      ) : (
-                        <>
-                          <span style={{ fontSize: "0.8rem", color: "var(--warning)", display: "flex", alignItems: "center", gap: "6px" }}>
-                            <Clock size={14} className="animate-spin" /> Processing PDF...
-                          </span>
-                          <Button
-                            variant="secondary"
-                            onClick={() => handleFastTrack(activeDoc.id)}
-                            style={{ fontSize: "0.8rem", padding: "4px 10px", border: "1px solid rgba(16, 185, 129, 0.4)", color: "var(--success)", background: "rgba(16, 185, 129, 0.1)" }}
-                          >
-                            <Sparkles size={14} /> Fast-Track to READY
-                          </Button>
-                        </>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={(e) => handleDeleteDocument(activeDoc.id, e)}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          background: "rgba(239, 68, 68, 0.15)",
-                          border: "1px solid rgba(239, 68, 68, 0.3)",
-                          color: "var(--danger)",
-                          fontSize: "0.8rem",
-                          padding: "6px 12px",
-                          borderRadius: "6px",
-                          cursor: "pointer",
-                        }}
-                      >
-                        <Trash2 size={14} />
-                        {activeDoc.status === "QUEUED" || activeDoc.status === "PROCESSING" ? "Cancel & Delete" : "Delete"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Generated Image Poster Scripts & Prompts Gallery (From PDF & Extracted Images) */}
-              {selectedDocId && (posterScripts.length > 0 || posterScript || loadingScripts || isGeneratingPosterScript) && (
+              {/* 2. Sleek Minimal Auto-Pilot Status Toolbar */}
+              {selectedDocId && (
                 <div
                   style={{
-                    marginBottom: "24px",
-                    padding: "20px 24px",
-                    borderRadius: "16px",
-                    background: "linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%)",
-                    border: "1px solid rgba(129, 140, 248, 0.4)",
-                    boxShadow: "0 10px 30px rgba(0, 0, 0, 0.25)",
+                    padding: "8px 14px",
+                    borderRadius: "10px",
+                    background: "rgba(255, 255, 255, 0.02)",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                    flexWrap: "wrap",
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
-                    <div>
-                      <h3 style={{ fontSize: "1.15rem", fontWeight: 700, margin: 0, display: "flex", alignItems: "center", gap: "8px", color: "#f8fafc" }}>
-                        <Sparkles size={20} style={{ color: "#818cf8" }} />
-                        Generated Poster Prompts &amp; Scripts ({posterScripts.length || (posterScript ? 1 : 0)})
-                        {(loadingScripts || isGeneratingPosterScript) && (
-                          <span style={{ fontSize: "0.75rem", padding: "2px 8px", borderRadius: "10px", background: "rgba(99, 102, 241, 0.25)", color: "#a5b4fc", display: "inline-flex", alignItems: "center", gap: "5px" }}>
-                            <RotateCw size={12} className="animate-spin" /> Generating Fast...
-                          </span>
-                        )}
-                      </h3>
-                      <p style={{ margin: "4px 0 0", fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
-                        AI analyzed extracted PDF concepts and formulated tailored visual prompts and engaging multi-platform headlines.
-                      </p>
-                    </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "5px",
+                        fontSize: "0.72rem",
+                        padding: "2px 8px",
+                        borderRadius: "100px",
+                        background: isAutoPilotActive ? "rgba(16, 185, 129, 0.12)" : "rgba(255, 255, 255, 0.05)",
+                        color: isAutoPilotActive ? "#34d399" : "var(--color-text-muted)",
+                        border: `1px solid ${isAutoPilotActive ? "rgba(16, 185, 129, 0.25)" : "rgba(255, 255, 255, 0.1)"}`,
+                        fontWeight: 600,
+                      }}
+                    >
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: isAutoPilotActive ? "#10b981" : "#64748b", display: "inline-block" }} />
+                      {isAutoPilotActive ? "Auto-Pilot Active" : "Auto-Pilot Paused"}
+                    </span>
 
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => {
-                          if (selectedDocId) {
-                            fetchPosterScripts(selectedDocId);
-                            triggerFastPosterScript(knowledgeItems, activeDoc?.original_filename);
-                          }
-                        }}
-                        disabled={loadingScripts || isGeneratingPosterScript}
-                        style={{ fontSize: "0.82rem", padding: "8px 12px" }}
-                      >
-                        <RotateCw size={13} className={loadingScripts ? "animate-spin" : ""} /> Regenerate All
-                      </Button>
-                      <Button
-                        variant="primary"
-                        disabled={autopilotRunning}
-                        onClick={handleTriggerAutoPilot}
-                        style={{
-                          background: "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)",
-                          fontWeight: 700,
-                          padding: "8px 16px",
-                          fontSize: "0.85rem",
-                          border: "none",
-                          boxShadow: "0 4px 14px rgba(99, 102, 241, 0.35)",
-                        }}
-                      >
-                        {autopilotRunning ? "⚡ Auto-Posting…" : "⚡ Auto-Post & Schedule All"}
-                      </Button>
-                    </div>
+                    <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
+                      Slots ({dynamicScheduleInfo.activeSlotsCount}/day): <strong style={{ color: "#38bdf8" }}>{dynamicScheduleInfo.slotsText}</strong>
+                      {isAutoPilotActive ? ` • Next: ${dynamicScheduleInfo.nextPostText}` : ""}
+                    </span>
                   </div>
 
-                  {/* List of Poster Scripts Cards */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                    {(posterScripts.length > 0 ? posterScripts : posterScript ? [{
-                      id: "ps-main",
-                      page: 1,
-                      concept: generatedTitle || "PDF Core Concept",
-                      excerpt: knowledgeItems[0]?.source_excerpt || "Key takeaway from document",
-                      knowledgeType: "CONCEPT",
-                      sourceImageUrl: null,
-                      mediaAssetId: null,
-                      posterPrompt: posterScript.prompt,
-                      headline: posterScript.headline,
-                      caption: generatedVariants[activePreviewPlatform] || posterScript.headline,
-                      hashtags: ["#SaaS", "#SocialGrowth", "#ContentOS"],
-                    }] : []).map((item, idx) => (
-                      <div
-                        key={item.id || idx}
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "150px 1fr",
-                          gap: "16px",
-                          padding: "16px",
-                          borderRadius: "12px",
-                          background: "var(--surface2, #18182f)",
-                          border: "1px solid rgba(255, 255, 255, 0.08)",
-                          alignItems: "center",
-                        }}
-                      >
-                        {/* Extracted Diagram / AI Visual Thumbnail */}
-                        <div style={{ position: "relative", width: "150px", height: "130px", borderRadius: "8px", overflow: "hidden", background: "#09090b", border: "1px solid rgba(255, 255, 255, 0.12)" }}>
-                          {refreshingScriptId === (item.id || idx) && (
-                            <div style={{
-                              position: "absolute",
-                              inset: 0,
-                              background: "rgba(15, 23, 42, 0.88)",
-                              backdropFilter: "blur(4px)",
-                              display: "flex",
-                              flexDirection: "column",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              gap: "6px",
-                              zIndex: 5,
-                              color: "#fff",
-                              textAlign: "center",
-                              padding: "6px",
-                            }}>
-                              <RotateCw size={18} className="animate-spin" style={{ color: "#c084fc" }} />
-                              <span style={{ fontSize: "10px", fontWeight: 700, color: "#d8b4fe" }}>Rendering AI Visual…</span>
-                              <span style={{ fontSize: "8px", color: "#94a3b8" }}>Creating from prompt</span>
-                            </div>
-                          )}
-                          {item.sourceImageUrl ? (
-                            <img
-                              src={resolveMediaUrl(item.sourceImageUrl)}
-                              alt="Generated Visual"
-                              crossOrigin="anonymous"
-                              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                            />
-                          ) : (
-                            <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "6px", color: "#64748b", padding: "8px", textAlign: "center" }}>
-                              <Sparkles size={20} style={{ color: "#818cf8" }} />
-                              <span style={{ fontSize: "10px" }}>Ready for AI Visual</span>
-                            </div>
-                          )}
-                          <div style={{ position: "absolute", bottom: "4px", left: "4px", background: "rgba(0,0,0,0.75)", color: "#fff", fontSize: "10px", padding: "2px 6px", borderRadius: "4px", fontWeight: 600 }}>
-                            {item.mediaAssetId ? "AI Poster" : `Page ${item.page} Diagram`}
-                          </div>
-                        </div>
-
-                        {/* Content & Script Body */}
-                        <div>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "8px", flexWrap: "wrap" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                              <span style={{ fontSize: "0.7rem", padding: "2px 8px", borderRadius: "4px", background: "rgba(99, 102, 241, 0.2)", color: "#a5b4fc", fontWeight: 700, textTransform: "uppercase" }}>
-                                {item.knowledgeType || "CONCEPT"} • Page {item.page}
-                              </span>
-                              <strong style={{ fontSize: "1rem", color: "#fff" }}>
-                                {item.headline}
-                              </strong>
-                            </div>
-
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(item.posterPrompt);
-                                  setCopiedScriptId(item.id);
-                                  setTimeout(() => setCopiedScriptId(null), 2000);
-                                  toast.success("Prompt copied to clipboard!");
-                                }}
-                                style={{
-                                  background: "rgba(255, 255, 255, 0.06)",
-                                  border: "1px solid rgba(255, 255, 255, 0.15)",
-                                  color: copiedScriptId === item.id ? "#34d399" : "#cbd5e1",
-                                  padding: "5px 10px",
-                                  borderRadius: "6px",
-                                  fontSize: "0.75rem",
-                                  cursor: "pointer",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "5px",
-                                }}
-                              >
-                                {copiedScriptId === item.id ? <Check size={12} /> : <Copy size={12} />}
-                                {copiedScriptId === item.id ? "Copied" : "Copy Prompt"}
-                              </button>
-
-                              <button
-                                type="button"
-                                disabled={refreshingScriptId === (item.id || idx)}
-                                onClick={async () => {
-                                  const key = item.id || idx;
-                                  setRefreshingScriptId(key);
-                                  try {
-                                    toast.info("Generating prompt & rendering new AI visual image...");
-                                    const res = await request<{ prompt: string; headline: string }>(
-                                      "/clipdrop/suggest-poster-prompt",
-                                      "POST",
-                                      {
-                                        knowledgeConcept: item.concept || item.headline,
-                                        excerpt: item.excerpt || "",
-                                        title: item.headline || item.concept,
-                                        sourceVisualContext: `Extracted from PDF ${activeDoc?.original_filename || "document"}`,
-                                        platform: activePreviewPlatform,
-                                      }
-                                    );
-                                    if (res?.prompt) {
-                                      let newImageUrl = item.sourceImageUrl;
-                                      let newAssetId = item.mediaAssetId;
-                                      try {
-                                        const imgRes = await clipdropApi.generateImage({
-                                          prompt: res.prompt,
-                                          headline: res.headline || item.headline,
-                                          platform: activePreviewPlatform,
-                                          aspectRatio: "1:1",
-                                          stylePreset: "3d-render",
-                                        });
-                                        if (imgRes?.url) {
-                                          newImageUrl = imgRes.url;
-                                          newAssetId = imgRes.assetId;
-                                        }
-                                      } catch (imgErr: any) {
-                                        console.warn("Could not auto-generate visual image:", imgErr);
-                                      }
-
-                                      setPosterScripts((prev) =>
-                                        prev.map((s, i) =>
-                                          (s.id === item.id || i === idx)
-                                            ? {
-                                                ...s,
-                                                posterPrompt: res.prompt,
-                                                headline: res.headline || s.headline,
-                                                sourceImageUrl: newImageUrl,
-                                                mediaAssetId: newAssetId,
-                                              }
-                                            : s
-                                        )
-                                      );
-                                      if (posterScript?.headline === item.headline) {
-                                        setPosterScript({ prompt: res.prompt, headline: res.headline || item.headline });
-                                      }
-                                      if (newImageUrl && newAssetId) {
-                                        setAttachedVisual({
-                                          assetId: newAssetId,
-                                          url: newImageUrl,
-                                          filename: `${res.headline || item.headline}.png`,
-                                        });
-                                      }
-                                      toast.success("✨ Dynamic prompt & fresh visual image generated!");
-                                    }
-                                  } catch (err: any) {
-                                    toast.error(err.message || "Failed to regenerate prompt");
-                                  } finally {
-                                    setRefreshingScriptId(null);
-                                  }
-                                }}
-                                style={{
-                                  background: "rgba(168, 85, 247, 0.15)",
-                                  border: "1px solid rgba(168, 85, 247, 0.35)",
-                                  color: "#d8b4fe",
-                                  padding: "5px 10px",
-                                  borderRadius: "6px",
-                                  fontSize: "0.75rem",
-                                  fontWeight: 600,
-                                  cursor: refreshingScriptId === (item.id || idx) ? "not-allowed" : "pointer",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "5px",
-                                }}
-                                title="Refresh this visual prompt and re-render visual dynamically"
-                              >
-                                <RotateCw size={12} className={refreshingScriptId === (item.id || idx) ? "animate-spin" : ""} />
-                                {refreshingScriptId === (item.id || idx) ? "Rendering…" : "Refresh Prompt"}
-                              </button>
-
-                              <Button
-                                type="button"
-                                onClick={() => {
-                                  setActiveScriptIndex(idx);
-                                  setPosterScript({ prompt: item.posterPrompt, headline: item.headline });
-                                  setGeneratedTitle(item.headline);
-                                  setShowClipdropModal(true);
-                                }}
-                                style={{
-                                  padding: "5px 12px",
-                                  fontSize: "0.8rem",
-                                  fontWeight: 700,
-                                  background: "linear-gradient(135deg, #ec4899, #8b5cf6)",
-                                  border: "none",
-                                  color: "#fff",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "5px",
-                                  boxShadow: "0 4px 12px rgba(236, 72, 153, 0.35)",
-                                }}
-                              >
-                                <Wand2 size={13} /> Render Poster
-                              </Button>
-
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                onClick={() => {
-                                  setGeneratedTitle(item.headline);
-                                  setPosterScript({ prompt: item.posterPrompt, headline: item.headline });
-                                  const defaultPlatforms: Platform[] = ["LinkedIn", "Instagram", "Facebook", "Telegram"];
-                                  const newVariants: Partial<Record<Platform, string>> = {};
-                                  for (const p of defaultPlatforms) {
-                                    newVariants[p] = `🚀 ${item.headline}\n\n${item.concept}\n\n"${item.excerpt.slice(0, 220)}"\n\n${item.hashtags.join(" ")}`;
-                                  }
-                                  setGeneratedVariants(newVariants);
-                                  if (item.sourceImageUrl && item.mediaAssetId) {
-                                    setAttachedVisual({ assetId: item.mediaAssetId, url: item.sourceImageUrl, filename: `${item.headline}.webp` });
-                                  }
-                                  toast.success("Loaded into Post Preview!");
-                                }}
-                                style={{ padding: "5px 10px", fontSize: "0.8rem" }}
-                              >
-                                Use in Studio
-                              </Button>
-                            </div>
-                          </div>
-
-                          {/* Dynamic Prompt Script Box */}
-                          <div style={{ background: "rgba(0, 0, 0, 0.35)", padding: "10px 14px", borderRadius: "8px", border: "1px solid rgba(255, 255, 255, 0.08)", marginBottom: "8px" }}>
-                            <span style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "#a855f7", fontWeight: 700, display: "block", marginBottom: "4px" }}>
-                              AI Visual Direction Prompt (Dynamic from PDF):
-                            </span>
-                            <p style={{ margin: 0, fontSize: "0.82rem", color: "#e2e8f0", lineHeight: 1.45, fontStyle: "italic" }}>
-                              &ldquo;{item.posterPrompt}&rdquo;
-                            </p>
-                          </div>
-
-                          {/* Caption Preview */}
-                          <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
-                            <strong>Caption Script:</strong> {item.caption || item.concept}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("automation")}
+                      title="View 10-day autopilot history"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        background: "rgba(255, 255, 255, 0.04)",
+                        border: "1px solid rgba(255, 255, 255, 0.08)",
+                        color: "var(--color-text-muted)",
+                        padding: "5px 10px",
+                        borderRadius: "6px",
+                        fontSize: "0.74rem",
+                        fontWeight: 500,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <History size={12} /> History
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAutoPilotGuide(true)}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        background: "rgba(255, 255, 255, 0.04)",
+                        border: "1px solid rgba(255, 255, 255, 0.08)",
+                        color: "var(--color-text-muted)",
+                        padding: "5px 10px",
+                        borderRadius: "6px",
+                        fontSize: "0.74rem",
+                        fontWeight: 500,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <BookOpen size={12} /> Guide
+                    </button>
+                    <button
+                      type="button"
+                      disabled={autopilotRunning}
+                      onClick={handleToggleAutoPilot}
+                      style={{
+                        background: isAutoPilotActive ? "rgba(239, 68, 68, 0.12)" : "#4f46e5",
+                        color: isAutoPilotActive ? "#f87171" : "#ffffff",
+                        border: isAutoPilotActive ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid #6366f1",
+                        fontWeight: 600,
+                        padding: "5px 12px",
+                        borderRadius: "6px",
+                        fontSize: "0.76rem",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "5px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {autopilotRunning ? "Processing..." : isAutoPilotActive ? "⏸ Pause Auto-Pilot" : "⚡ Start Auto-Pilot"}
+                    </button>
                   </div>
                 </div>
               )}
 
-              {/* Extracted Knowledge & Evidence Panel */}
-              <div className="panel" style={{ padding: "24px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                  <div>
-                    <h3 style={{ fontSize: "1.1rem", fontWeight: 600, margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
-                      <Quote size={18} style={{ color: "var(--success)" }} />
-                      Extracted Knowledge & Evidence ({knowledgeItems.length})
-                      {(activeDoc?.status === "EXTRACTING" || activeDoc?.status === "PROCESSING" || activeDoc?.status === "CHUNKING" || extractingKnowledge) && (
-                        <span style={{ fontSize: "0.75rem", padding: "3px 9px", borderRadius: "12px", background: "rgba(16, 185, 129, 0.15)", color: "var(--success)", border: "1px solid rgba(16, 185, 129, 0.3)", display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                          <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#10b981", display: "inline-block", boxShadow: "0 0 8px #10b981" }} />
-                          Live Streaming Facts...
-                        </span>
-                      )}
-                    </h3>
-                    <p style={{ fontSize: "0.8rem", color: "var(--color-text-muted)", margin: "4px 0 0" }}>
-                      Select the verified claims, statistics, or summaries to feed into your social post generator.
-                    </p>
-                  </div>
-                  {knowledgeItems.length > 0 && (
-                    <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              {/* Guide Modal */}
+              {showAutoPilotGuide && (
+                <div
+                  style={{
+                    position: "fixed",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: "rgba(0, 0, 0, 0.75)",
+                    backdropFilter: "blur(6px)",
+                    zIndex: 9999,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "20px",
+                  }}
+                  onClick={() => setShowAutoPilotGuide(false)}
+                >
+                  <div
+                    style={{
+                      background: "#0f172a",
+                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      borderRadius: "14px",
+                      maxWidth: "560px",
+                      width: "100%",
+                      padding: "22px",
+                      color: "#f8fafc",
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <Sparkles size={18} color="#818cf8" />
+                        <h2 style={{ fontSize: "1.05rem", margin: 0, fontWeight: 700 }}>How PDF Auto-Pilot Works</h2>
+                      </div>
                       <button
                         type="button"
-                        className="text-button"
-                        style={{ fontSize: "0.8rem" }}
-                        onClick={() => {
-                          if (selectedKnowledgeIds.length === knowledgeItems.length) {
-                            setSelectedKnowledgeIds([]);
-                          } else {
-                            setSelectedKnowledgeIds(knowledgeItems.map((k) => k.id));
-                          }
-                        }}
+                        onClick={() => setShowAutoPilotGuide(false)}
+                        style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "1.4rem", cursor: "pointer", lineHeight: 1 }}
                       >
-                        {selectedKnowledgeIds.length === knowledgeItems.length ? "Deselect All" : "Select All"}
-                      </button>
-                      <button
-                        type="button"
-                        className="text-button"
-                        style={{ fontSize: "0.8rem", color: "var(--danger)" }}
-                        onClick={async () => {
-                          if (!selectedDocId) return;
-                          try {
-                            await documentsApi.clearAllKnowledge(selectedDocId);
-                            setKnowledgeItems([]);
-                            setSelectedKnowledgeIds([]);
-                            toast.success("All knowledge claims cleared.");
-                          } catch {
-                            toast.error("Failed to clear knowledge claims");
-                          }
-                        }}
-                      >
-                        Clear All
+                        ×
                       </button>
                     </div>
-                  )}
-                </div>
 
-                {loadingKnowledge && knowledgeItems.length === 0 ? (
-                  <div style={{ padding: "32px", textAlign: "center", color: "var(--color-text-muted)" }}>
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                      <RotateCw size={18} className="animate-spin" style={{ color: "var(--success)" }} />
-                      <span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>Extracting knowledge & claims in real-time...</span>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                      <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                        <div style={{ width: "22px", height: "22px", borderRadius: "50%", background: "#4f46e5", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.75rem", flexShrink: 0 }}>1</div>
+                        <div>
+                          <strong style={{ display: "block", fontSize: "0.85rem", color: "#fff" }}>Upload Your Business Document</strong>
+                          <p style={{ margin: "2px 0 0", fontSize: "0.76rem", color: "#94a3b8", lineHeight: 1.4 }}>
+                            Upload PDF reports or decks. Core storytelling concepts and images are extracted automatically.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                        <div style={{ width: "22px", height: "22px", borderRadius: "50%", background: "#7c3aed", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.75rem", flexShrink: 0 }}>2</div>
+                        <div>
+                          <strong style={{ display: "block", fontSize: "0.85rem", color: "#fff" }}>Set Daily Dispatch Schedule</strong>
+                          <p style={{ margin: "2px 0 0", fontSize: "0.76rem", color: "#94a3b8", lineHeight: 1.4 }}>
+                            Choose 1, 2, or 3 slots/day. Posts are assigned sequentially and dynamically scheduled.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                        <div style={{ width: "22px", height: "22px", borderRadius: "50%", background: "#059669", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.75rem", flexShrink: 0 }}>3</div>
+                        <div>
+                          <strong style={{ display: "block", fontSize: "0.85rem", color: "#fff" }}>Autonomous Publishing & Updates</strong>
+                          <p style={{ margin: "2px 0 0", fontSize: "0.76rem", color: "#94a3b8", lineHeight: 1.4 }}>
+                            At designated slot times, posts are dispatched to selected channels and archived in History.
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                    <p style={{ margin: "4px 0 0", fontSize: "0.85rem" }}>
-                      Facts and verified citations stream in below as AI processes document chunks.
-                    </p>
+
+                    <div style={{ marginTop: "16px", display: "flex", justifyContent: "flex-end" }}>
+                      <Button variant="primary" onClick={() => setShowAutoPilotGuide(false)} style={{ fontSize: "0.8rem", padding: "6px 14px" }}>
+                        Got it!
+                      </Button>
+                    </div>
                   </div>
-                ) : knowledgeItems.length === 0 ? (
-                  <div style={{ padding: "30px", textAlign: "center", color: "var(--color-text-muted)", border: "1px dashed var(--border)", borderRadius: "8px" }}>
-                    <Info size={24} style={{ marginBottom: "8px", opacity: 0.7 }} />
-                    <p style={{ margin: 0 }}>
-                      {activeDoc?.status === "FAILED"
-                        ? "Extraction encountered an issue. Click 'Retry Extraction' above to retry instantly."
-                        : (activeDoc?.status === "EXTRACTING" || activeDoc?.status === "PROCESSING")
-                          ? "Reading PDF pages and extracting claims in real time... Claims will pop up here shortly."
-                          : "No knowledge extracted yet. Upload a PDF or click Re-extract Knowledge above."}
-                    </p>
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "380px", overflowY: "auto" }}>
+                </div>
+              )}
+
+              {/* 3. Primary Workspace: Document Visual Storytelling Hub */}
+              {selectedDocId && activeDoc && (
+                <DocumentVisualConceptsHub
+                  key={selectedDocId}
+                  documentId={selectedDocId}
+                  documentName={activeDoc.original_filename}
+                  selectedAssetId={attachedVisual?.assetId}
+                  activeConceptId={activeDispatchConcept?.id}
+                  onActiveConceptSelect={(concept, slotInfo) => {
+                    setActiveDispatchConcept(concept);
+                    if (slotInfo) setActiveDispatchSlot(slotInfo);
+                    if (concept.imageUrl) {
+                      setAttachedVisual({
+                        assetId: concept.assetId || `concept-${concept.id}`,
+                        url: concept.imageUrl,
+                        headline: concept.conceptTitle,
+                        prompt: concept.prompt,
+                        engine: "flux",
+                      });
+                    }
+                  }}
+                  onSelectVisual={(visual) => {
+                    setAttachedVisual({
+                      assetId: visual.assetId,
+                      url: visual.url,
+                      headline: visual.headline,
+                      prompt: visual.prompt,
+                      engine: "flux",
+                    });
+                  }}
+                  onScheduleUpdate={(info) => {
+                    setDynamicScheduleInfo({
+                      slotsText: info.slotsText,
+                      nextPostText: info.nextPostText,
+                      activeSlotsCount: info.activeSlotsCount,
+                    });
+                  }}
+                />
+              )}
+
+              {/* 4. Collapsible Document Citations & Claims */}
+              {knowledgeItems.length > 0 && (
+                <details style={{
+                  borderRadius: "10px",
+                  background: "rgba(255, 255, 255, 0.02)",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  padding: "10px 14px",
+                }}>
+                  <summary style={{
+                    cursor: "pointer",
+                    fontSize: "0.82rem",
+                    fontWeight: 600,
+                    color: "var(--color-text-muted)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    userSelect: "none",
+                  }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <Quote size={14} style={{ color: "var(--success)" }} />
+                      Extracted Document Citations & Claims ({knowledgeItems.length})
+                    </span>
+                    <span style={{ fontSize: "0.72rem", color: "#818cf8" }}>View Citations ▾</span>
+                  </summary>
+
+                  <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "8px", maxHeight: "280px", overflowY: "auto" }}>
                     {knowledgeItems.map((item) => {
                       const isSelected = selectedKnowledgeIds.includes(item.id);
                       return (
@@ -2000,603 +1733,632 @@ export default function AIStudio() {
                           key={item.id}
                           onClick={() => toggleKnowledgeSelect(item.id)}
                           style={{
-                            padding: "14px",
-                            borderRadius: "10px",
-                            background: isSelected ? "rgba(16, 185, 129, 0.08)" : "var(--surface2)",
-                            border: isSelected ? "1px solid rgba(16, 185, 129, 0.35)" : "1px solid var(--border)",
+                            padding: "10px 12px",
+                            borderRadius: "8px",
+                            background: isSelected ? "rgba(99, 102, 241, 0.08)" : "rgba(255, 255, 255, 0.02)",
+                            border: isSelected ? "1px solid rgba(99, 102, 241, 0.3)" : "1px solid rgba(255, 255, 255, 0.05)",
                             cursor: "pointer",
-                            transition: "all 0.15s ease",
+                            fontSize: "0.78rem",
                           }}
                         >
-                          <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
-                            <div style={{ paddingTop: "2px", color: isSelected ? "var(--success)" : "var(--color-text-muted)" }}>
-                              {isSelected ? <CheckSquare size={18} /> : <Square size={18} />}
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
+                            <div style={{ paddingTop: "1px", color: isSelected ? "#818cf8" : "var(--color-text-muted)" }}>
+                              {isSelected ? <CheckSquare size={14} /> : <Square size={14} />}
                             </div>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                                <span
-                                  style={{
-                                    textTransform: "uppercase",
-                                    fontSize: "0.65rem",
-                                    fontWeight: 700,
-                                    letterSpacing: "0.05em",
-                                    padding: "2px 6px",
-                                    borderRadius: "4px",
-                                    background:
-                                      item.knowledge_type === "statistic"
-                                        ? "rgba(99, 102, 241, 0.2)"
-                                        : item.knowledge_type === "claim"
-                                        ? "rgba(245, 158, 11, 0.2)"
-                                        : "rgba(16, 185, 129, 0.2)",
-                                    color:
-                                      item.knowledge_type === "statistic"
-                                        ? "#a5b4fc"
-                                        : item.knowledge_type === "claim"
-                                        ? "#fbbf24"
-                                        : "#34d399",
-                                  }}
-                                >
-                                  {item.knowledge_type}
-                                </span>
-                                {item.page_start && (
-                                  <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", background: "var(--border)", padding: "1px 6px", borderRadius: "4px" }}>
-                                    Page {item.page_start}{item.page_end && item.page_end !== item.page_start ? `–${item.page_end}` : ""}
-                                  </span>
-                                )}
-                                {item.confidence && (
-                                  <span style={{ fontSize: "0.75rem", color: "var(--success)", marginLeft: "auto" }}>
-                                    {Math.round(item.confidence * 100)}% confidence
-                                  </span>
-                                )}
-                              </div>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px", margin: "0 0 6px" }}>
-                                <strong style={{ fontSize: "0.95rem", color: "var(--accent)", display: "block", marginBottom: "4px" }}>
-                                  {item.knowledge_key}
-                                </strong>
-                                <p style={{ margin: 0, fontSize: "0.88rem", fontWeight: 400, lineHeight: 1.5, color: "var(--ink)" }}>
-                                  {typeof item.value === "string" ? item.value : JSON.stringify(item.value)}
-                                </p>
-                                <button
-                                  type="button"
-                                  title="Remove this extracted claim"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    if (!selectedDocId) return;
-                                    try {
-                                      await documentsApi.deleteKnowledge(selectedDocId, item.id);
-                                      setKnowledgeItems((prev) => prev.filter((k) => k.id !== item.id));
-                                      setSelectedKnowledgeIds((prev) => prev.filter((id) => id !== item.id));
-                                      toast.success("Claim removed.");
-                                    } catch {
-                                      toast.error("Failed to remove claim");
-                                    }
-                                  }}
-                                  style={{
-                                    background: "transparent",
-                                    border: "none",
-                                    color: "var(--color-text-muted)",
-                                    cursor: "pointer",
-                                    padding: "2px 4px",
-                                    borderRadius: "4px",
-                                    flexShrink: 0,
-                                    display: "flex",
-                                    alignItems: "center",
-                                  }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
-                                  onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              </div>
-                              {item.source_excerpt && formatExcerpt(item.source_excerpt) && (
-                                <blockquote
-                                  style={{
-                                    margin: 0,
-                                    padding: "6px 10px",
-                                    borderLeft: "2px solid var(--border-strong)",
-                                    background: "var(--surface2)",
-                                    borderRadius: "0 4px 4px 0",
-                                    fontSize: "0.8rem",
-                                    fontStyle: "italic",
-                                    color: "var(--color-text-muted)",
-                                    lineHeight: 1.4,
-                                  }}
-                                >
-                                  "{formatExcerpt(item.source_excerpt)}"
-                                </blockquote>
-                              )}
-                              <div className="studio-fact-approval">
-                                {item.metadata?.origin==='SOURCE_VISUAL'&&<p style={{fontSize:12,color:'var(--muted)'}}>{item.metadata.evidenceKind==='OCR_TEXT'?'OCR text from source image':'AI visual interpretation · verify against the source image'}</p>}
-                                <span>{['CONFIRMED','LOCKED'].includes(item.status) ? 'Approved for automatic content' : 'Approve this fact to use it in automatic content'}</span>
-                                {!demo && ['Owner','Admin','Content Manager','Editor'].includes(s.workspace.role) && !['CONFIRMED','LOCKED'].includes(item.status) && <Button disabled={!item.source_excerpt?.trim()} onClick={async(e)=>{e.stopPropagation();if(!selectedDocId)return;try{await request(`/documents/${selectedDocId}/knowledge/${item.id}`,'PATCH',{status:'CONFIRMED'});await fetchKnowledge(selectedDocId);await query.invalidateQueries({queryKey:['knowledge-automation']});toast.success('Fact approved. Automation can now use it.');}catch(error:any){toast.error(error.message || 'Could not approve fact.');}}}>Approve fact</Button>}
-                              </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <strong style={{ color: "#f8fafc", display: "block" }}>{item.knowledge_key}</strong>
+                              <p style={{ margin: "2px 0 0", color: "#cbd5e1", fontSize: "0.76rem", lineHeight: 1.35 }}>
+                                {typeof item.value === "string" ? item.value : JSON.stringify(item.value)}
+                              </p>
                             </div>
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                )}
-              </div>
+                </details>
+              )}
+
+              {/* 5. Collapsible Manual Generation Tool (Flat & Non-glowing) */}
+              <details style={{
+                borderRadius: "10px",
+                background: "rgba(255, 255, 255, 0.02)",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                padding: "10px 14px",
+              }}>
+                <summary style={{
+                  cursor: "pointer",
+                  fontSize: "0.82rem",
+                  fontWeight: 600,
+                  color: "var(--color-text-muted)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  userSelect: "none",
+                }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Sliders size={14} />
+                    Manual Post Generation & Overrides (Optional)
+                  </span>
+                  <span style={{ fontSize: "0.72rem", color: "#818cf8" }}>Show Controls ▾</span>
+                </summary>
+
+                <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                    {platforms.map((p) => {
+                      const isSel = selectedPlatforms.includes(p);
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => togglePlatform(p)}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            padding: "5px 10px",
+                            borderRadius: "6px",
+                            border: isSel ? "1px solid #6366f1" : "1px solid rgba(255, 255, 255, 0.08)",
+                            background: isSel ? "rgba(99, 102, 241, 0.2)" : "rgba(255, 255, 255, 0.03)",
+                            color: isSel ? "#fff" : "var(--color-text-muted)",
+                            cursor: "pointer",
+                            fontSize: "0.75rem",
+                          }}
+                        >
+                          <PlatformIcon platform={p} />
+                          {p}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                    <Button
+                      variant="primary"
+                      onClick={handleGeneratePosts}
+                      disabled={isGenerating || (activeTab === "pdf" && !selectedKnowledgeIds.length)}
+                      style={{
+                        padding: "8px 12px",
+                        fontSize: "0.8rem",
+                        fontWeight: 600,
+                        background: "#4f46e5",
+                        border: "1px solid #6366f1",
+                        boxShadow: "none",
+                      }}
+                    >
+                      <Sparkles size={14} />
+                      {isGenerating ? "Generating..." : `Generate Post (${selectedKnowledgeIds.length} items)`}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      onClick={() => setShowClipdropModal(true)}
+                      style={{
+                        padding: "8px 12px",
+                        fontSize: "0.8rem",
+                        fontWeight: 600,
+                        background: "rgba(255, 255, 255, 0.05)",
+                        border: "1px solid rgba(255, 255, 255, 0.12)",
+                        color: "#f8fafc",
+                        boxShadow: "none",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      <Wand2 size={14} />
+                      Custom Visual Generator
+                    </Button>
+                  </div>
+                </div>
+              </details>
             </div>
           )}
-
-          {/* Platform Selector & Action Bar */}
-          <div className="panel" style={{ padding: "20px 24px" }}>
-            <label style={{ fontWeight: "600", fontSize: "0.9rem", marginBottom: "10px", display: "block" }}>
-              Target Social Platforms
-            </label>
-            <div className="platform-select" style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "20px" }}>
-              {platforms.map((p) => {
-                const isSel = selectedPlatforms.includes(p);
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    className={isSel ? "selected" : ""}
-                    onClick={() => togglePlatform(p)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      padding: "8px 14px",
-                      borderRadius: "8px",
-                      border: isSel ? "1px solid #6366f1" : "1px solid var(--border)",
-                      background: isSel ? "rgba(99, 102, 241, 0.2)" : "var(--surface2)",
-                      color: isSel ? "#fff" : "var(--color-text-muted)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <PlatformIcon platform={p} />
-                    {p}
-                  </button>
-                );
-              })}
-            </div>
-
-            {error && (
-              <div className="error-box" role="alert" style={{ marginBottom: "16px", padding: "10px 14px", background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.3)", borderRadius: "8px", color: "var(--danger)", fontSize: "0.85rem" }}>
-                <AlertCircle size={15} style={{ display: "inline", marginRight: "6px" }} />
-                {error}
-              </div>
-            )}
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", gap: "10px" }}>
-                <Button
-                  variant="primary"
-                  onClick={handleGeneratePosts}
-                  disabled={isGenerating || (activeTab === "pdf" && !selectedKnowledgeIds.length)}
-                  style={{ width: "100%", padding: "12px", fontSize: "0.92rem", fontWeight: 700 }}
-                >
-                  <Sparkles size={17} />
-                  {isGenerating
-                    ? "Generating Platform Posts..."
-                    : activeTab === "pdf"
-                    ? `Generate Post (${selectedKnowledgeIds.length} items)`
-                    : "Generate Social Posts"}
-                </Button>
-
-                <Button
-                  type="button"
-                  onClick={() => setShowClipdropModal(true)}
-                  style={{
-                    width: "100%",
-                    padding: "12px",
-                    fontSize: "0.9rem",
-                    fontWeight: 700,
-                    background: "linear-gradient(135deg, #ec4899, #8b5cf6)",
-                    border: "none",
-                    color: "var(--ink)",
-                    boxShadow: "0 4px 15px rgba(236, 72, 153, 0.35)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "6px",
-                  }}
-                >
-                  <Wand2 size={17} />
-                  🎨 Generate Visual / Image
-                </Button>
-              </div>
-
-              {activeTab === "pdf" && selectedKnowledgeIds.length > 1 && (
-                <Button
-                  variant="secondary"
-                  onClick={handleBatchGenerateFromKnowledge}
-                  disabled={isGenerating}
-                  style={{ width: "100%", padding: "10px", fontSize: "0.88rem", background: "rgba(99, 102, 241, 0.15)", border: "1px solid rgba(99, 102, 241, 0.35)", color: "var(--accent)" }}
-                >
-                  <Layers size={16} />
-                  Batch Generate Posts for Each Selected Knowledge ({selectedKnowledgeIds.length} Independent Posts)
-                </Button>
-              )}
-            </div>
-          </div>
         </section>
 
         {/* Preview & Variant Editing Column */}
-        <aside className="preview-column" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          <div className="panel" style={{ padding: "20px", display: "flex", flexDirection: "column", height: "100%" }}>
-            <div className="preview-heading" style={{ marginBottom: "14px" }}>
-              <h2 style={{ fontSize: "1.1rem", fontWeight: 600, margin: 0 }}>Generated Post Variants</h2>
-              <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Preview & refine copy for each platform</span>
-            </div>
-            {activeTab === "pdf" && <details className="studio-stored-posts" open>
-              <summary>Stored Auto-pilot posts ({storedAutoPosts.data?.plans.filter(post=>post.content_id).length || 0})</summary>
-              <p>Generated posts stay saved here and in Content library. Scheduled does not mean published.</p>
-              {storedAutoPosts.isError ? <p role="alert">Unable to load stored posts. Refresh to retry.</p> : storedAutoPosts.data?.plans.filter(post=>post.content_id).length ? <div style={{maxHeight:260,overflowY:"auto"}}>{storedAutoPosts.data.plans.filter(post=>post.content_id).map(post=><button type="button" key={post.id} onClick={()=>{
-                const targets=(post.platforms || []).filter((platform:string)=>["LinkedIn","Instagram","Facebook","Telegram","X","YouTube"].includes(platform)) as Platform[];
-                setGeneratedTitle(post.title || "Saved post");setSelectedPlatforms(targets);setActivePreviewPlatform(targets[0] || "LinkedIn");
-                setGeneratedVariants(Object.fromEntries(targets.map(platform=>[platform,typeof post.variants?.[platform] === "string" ? post.variants[platform] : post.variants?.[platform]?.caption || ""])));
-                const visual=targets.map(platform=>post.variants?.[platform]).find(variant=>variant?.mediaAssetId && variant?.mediaUrl);
-                setAttachedVisual(visual ? {assetId:visual.mediaAssetId,url:visual.mediaUrl,filename:"Saved autopilot visual"} : null);
-              }}><strong>{post.title}</strong><small>{post.content_status} · {post.scheduled_at ? new Date(post.scheduled_at).toLocaleString() : "Not scheduled"}</small></button>)}</div> : <p>No Auto-pilot posts stored yet. Generation history will show why work is pending or failed.</p>}
-              <Link to="/app/library">Open all stored posts →</Link>
-            </details>}
-
-            {/* Platform Variant Tabs */}
-            <div className="preview-tabs" style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "16px", paddingBottom: "4px" }}>
-              {selectedPlatforms.map((p) => {
-                const isActive = activePreviewPlatform === p;
-                const hasVariant = !!generatedVariants[p];
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    className={isActive ? "active" : ""}
-                    onClick={() => setActivePreviewPlatform(p)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      padding: "6px 12px",
-                      borderRadius: "6px",
-                      border: "none",
-                      background: isActive ? "#6366f1" : "var(--surface2)",
-                      color: isActive ? "#fff" : "var(--color-text-muted)",
-                      cursor: "pointer",
-                      fontSize: "0.8rem",
-                    }}
-                  >
-                    <PlatformIcon platform={p} />
-                    {p}
-                    {hasVariant && <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981" }} />}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Editor & Preview Area */}
-            {Object.keys(generatedVariants).length > 0 && <details style={{marginBottom:16}}>
-              <summary>Why did AI write this?</summary>
-              <p>These inputs were supplied to AI. Review the source before approving any claims.</p>
-              {generatedEvidence.length ? generatedEvidence.map((e: any)=><div key={e.knowledgeId}><strong>{e.documentName} · {e.pageStart ? `Page ${e.pageStart}${e.pageEnd && e.pageEnd!==e.pageStart ? `–${e.pageEnd}` : ''}` : 'Page unavailable'}</strong><blockquote>{e.excerpt || 'No source excerpt available.'}</blockquote></div>) : <p>Generated from your prompt and Brand Kit. No document page evidence was supplied.</p>}
-            </details>}
-            {Object.keys(generatedVariants).length === 0 ? (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px", textAlign: "center", color: "var(--color-text-muted)", border: "1px dashed var(--border)", borderRadius: "10px", gap: "14px" }}>
-                <Sparkles size={38} style={{ color: "var(--accent)", opacity: 0.8 }} />
-                <div>
-                  <h3 style={{ margin: "0 0 6px", fontSize: "1.05rem", color: "var(--ink)", fontWeight: 700 }}>Ready for Generation</h3>
-                  <p style={{ margin: 0, fontSize: "0.85rem", maxWidth: "290px", lineHeight: 1.5 }}>
-                    {activeTab === "pdf"
-                      ? "Select extracted claims from your PDF and click Generate to produce channel-specific copy."
-                      : "Fill in your topic prompt and generate text posts, or design high-converting visual imagery directly!"}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowClipdropModal(true)}
-                  style={{
-                    background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))",
-                    border: "1px solid rgba(168, 85, 247, 0.5)",
-                    color: "#d8b4fe",
-                    fontWeight: 600,
-                    fontSize: "0.88rem",
-                    padding: "10px 18px",
-                    borderRadius: "10px",
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    boxShadow: "0 4px 12px rgba(168, 85, 247, 0.15)",
-                  }}
-                >
-                  <Wand2 size={16} /> 🎨 Create AI Visual & Image First
-                </button>
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
-                {/* Variant Title */}
-                <div>
-                  <label style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text-muted)", marginBottom: "4px", display: "block" }}>
-                    Internal Title
-                  </label>
-                  <input
-                    type="text"
-                    value={generatedTitle}
-                    onChange={(e) => setGeneratedTitle(e.target.value)}
-                    style={{ width: "100%", padding: "8px 12px", fontSize: "0.85rem" }}
-                  />
-                </div>
-
-                {/* Editable Variant Body */}
-                <div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                    <label style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text-muted)" }}>
-                      {activePreviewPlatform} Copy Variant
-                    </label>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      {posterScript?.prompt && (
-                        <button
-                          type="button"
-                          disabled={isRegeneratingSinglePrompt}
-                          onClick={handleRefreshActivePrompt}
-                          style={{
-                            background: "rgba(168, 85, 247, 0.15)",
-                            border: "1px solid rgba(168, 85, 247, 0.35)",
-                            color: "#d8b4fe",
-                            padding: "4px 8px",
-                            borderRadius: "6px",
-                            fontSize: "0.72rem",
-                            fontWeight: 600,
-                            cursor: isRegeneratingSinglePrompt ? "not-allowed" : "pointer",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "4px",
-                          }}
-                          title="Regenerate dynamic visual prompt from PDF"
-                        >
-                          <RotateCw size={11} className={isRegeneratingSinglePrompt ? "animate-spin" : ""} />
-                          {isRegeneratingSinglePrompt ? "Refreshing…" : "Refresh Prompt"}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setShowClipdropModal(true)}
-                        style={{
-                          background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))",
-                          border: "1px solid rgba(168, 85, 247, 0.4)",
-                          color: "var(--accent)",
-                          padding: "4px 10px",
-                          borderRadius: "6px",
-                          fontSize: "0.75rem",
-                          fontWeight: 600,
-                          cursor: "pointer",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "5px",
-                        }}
-                      >
-                        <Wand2 size={13} /> 🎨 Generate Visual
-                      </button>
-                      <span
-                        style={{
-                          fontSize: "0.75rem",
-                          color:
-                            (generatedVariants[activePreviewPlatform]?.length || 0) > platformLimits[activePreviewPlatform]
-                              ? "#ef4444"
-                              : "var(--color-text-muted)",
-                        }}
-                      >
-                        {generatedVariants[activePreviewPlatform]?.length || 0} / {platformLimits[activePreviewPlatform]} chars
-                      </span>
-                    </div>
-                  </div>
-                  <textarea
-                    rows={8}
-                    value={generatedVariants[activePreviewPlatform] || ""}
-                    onChange={(e) =>
-                      setGeneratedVariants((prev) => ({
-                        ...prev,
-                        [activePreviewPlatform]: e.target.value,
-                      }))
-                    }
-                    style={{ width: "100%", padding: "10px", fontSize: "0.85rem", lineHeight: 1.5 }}
-                  />
-
-                  {posterScript?.prompt && (
-                    <div
-                      style={{
-                        background: "rgba(0, 0, 0, 0.3)",
-                        border: "1px solid rgba(168, 85, 247, 0.25)",
-                        borderRadius: "8px",
-                        padding: "8px 12px",
-                        fontSize: "0.78rem",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                        <span style={{ color: "#c084fc", fontWeight: 700, fontSize: "0.7rem", textTransform: "uppercase", display: "flex", alignItems: "center", gap: "4px" }}>
-                          <Sparkles size={11} /> AI Visual Direction Prompt:
-                        </span>
-                        <button
-                          type="button"
-                          onClick={handleRefreshActivePrompt}
-                          disabled={isRegeneratingSinglePrompt}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "#d8b4fe",
-                            fontSize: "0.7rem",
-                            cursor: "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "4px",
-                            padding: 0,
-                          }}
-                        >
-                          <RotateCw size={10} className={isRegeneratingSinglePrompt ? "animate-spin" : ""} />
-                          Refresh Prompt
-                        </button>
-                      </div>
-                      <p style={{ margin: 0, color: "#cbd5e1", fontStyle: "italic", lineHeight: 1.45 }}>
-                        &ldquo;{posterScript.prompt}&rdquo;
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-
-                {/* Simulated Social Card */}
-                <div className="social-preview" style={{ background: "var(--border-strong)", borderRadius: "10px", padding: "14px", border: "1px solid var(--border)" }}>
-                  <div className="social-profile" style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
-                    <span className="workspace-avatar" style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#6366f1", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: "0.8rem" }}>
-                      {s?.brand?.name?.[0] || "C"}
+        <aside className="preview-column" style={{ display: "flex", flexDirection: "column", gap: "12px", minWidth: 0 }}>
+          <div className="panel" style={{ padding: "14px", display: "flex", flexDirection: "column" }}>
+            {activeTab === "pdf" && activeDoc && activeDispatchConcept ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", flex: 1 }}>
+                {/* Compact Header */}
+                <div style={{
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  background: "linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(168, 85, 247, 0.08) 100%)",
+                  border: "1px solid rgba(129, 140, 248, 0.25)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "3px"
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" }}>
+                    <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "#818cf8", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                      ⚡ NEXT UPCOMING POST
                     </span>
-                    <div>
-                      <strong style={{ fontSize: "0.85rem", display: "block" }}>{s?.brand?.name || s?.workspace?.name}</strong>
-                      <small style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-                        {activePreviewPlatform} • Just now
-                      </small>
-                    </div>
-                  </div>
-                  <p style={{ fontSize: "0.85rem", whiteSpace: "pre-wrap", margin: "0 0 12px", lineHeight: 1.45 }}>
-                    {generatedVariants[activePreviewPlatform] || "No content for this platform variant yet."}
-                  </p>
-
-                  {isGeneratingVisual ? (
-                    <div style={{
-                      margin: "10px 0",
-                      borderRadius: "10px",
-                      padding: "30px 20px",
-                      background: "linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(168, 85, 247, 0.08))",
-                      border: "1px dashed rgba(168, 85, 247, 0.4)",
-                      textAlign: "center",
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      gap: "10px"
+                    <span style={{
+                      fontSize: "0.7rem",
+                      fontWeight: 700,
+                      color: "#38bdf8",
+                      background: "rgba(56, 189, 248, 0.12)",
+                      border: "1px solid rgba(56, 189, 248, 0.25)",
+                      padding: "1px 7px",
+                      borderRadius: "5px",
                     }}>
-                      <RotateCw size={24} className="animate-spin" style={{ color: "#c084fc" }} />
-                      <div>
-                        <strong style={{ fontSize: "0.85rem", color: "#e2e8f0", display: "block" }}>
-                          Generating Brand-Aware Visual...
-                        </strong>
-                        <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-                          Synthesizing physical composition from verified document facts
-                        </span>
-                      </div>
-                    </div>
-                  ) : attachedVisual ? (
-                    <div style={{ margin: "10px 0", borderRadius: "10px", overflow: "hidden", position: "relative", border: "1px solid var(--border)" }}>
-                      <img
-                        src={resolveMediaUrl(attachedVisual.url)}
-                        alt="Attached Visual"
-                        crossOrigin="anonymous"
-                        style={{ width: "100%", maxHeight: "240px", objectFit: "cover", display: "block" }}
-                      />
-                      <div style={{
-                        position: "absolute",
-                        top: "8px",
-                        left: "8px",
-                        background: "rgba(15, 23, 42, 0.75)",
-                        backdropFilter: "blur(4px)",
-                        border: "1px solid rgba(148, 163, 184, 0.2)",
-                        borderRadius: "6px",
-                        padding: "3px 8px",
-                        fontSize: "0.68rem",
-                        color: "#38bdf8",
-                        fontWeight: 600,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "4px"
-                      }}>
-                        <Sparkles size={11} /> Grounded in Document Concept
-                      </div>
+                      Slot #{activeDispatchSlot?.slotNumber || 1} • {activeDispatchSlot?.timeStr || "10:30 AM"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px" }}>
+                    <h4 style={{ margin: 0, fontSize: "0.92rem", fontWeight: 700, color: "#f8fafc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {activeDispatchConcept.conceptTitle}
+                    </h4>
+                    <span style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", flexShrink: 0 }}>
+                      Pg {activeDispatchConcept.sourcePage || 1}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Compact Platform Variant Chips */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
+                  {["LinkedIn", "Instagram", "Facebook", "Telegram", "X"].map((p) => {
+                    const isActive = activePreviewPlatform === p;
+                    return (
                       <button
+                        key={p}
                         type="button"
-                        onClick={() => setShowClipdropModal(true)}
+                        onClick={() => setActivePreviewPlatform(p as Platform)}
                         style={{
-                          position: "absolute",
-                          bottom: "8px",
-                          right: "8px",
-                          background: "var(--surface2)",
-                          border: "1px solid var(--border-strong)",
-                          color: "var(--ink)",
-                          fontSize: "0.75rem",
-                          fontWeight: 600,
-                          padding: "5px 12px",
-                          borderRadius: "8px",
-                          cursor: "pointer",
-                          backdropFilter: "blur(6px)",
                           display: "flex",
                           alignItems: "center",
                           gap: "5px",
+                          padding: "4px 9px",
+                          borderRadius: "6px",
+                          border: isActive ? "1px solid #6366f1" : "1px solid rgba(255, 255, 255, 0.08)",
+                          background: isActive ? "rgba(99, 102, 241, 0.25)" : "rgba(255, 255, 255, 0.03)",
+                          color: isActive ? "#ffffff" : "var(--color-text-muted)",
+                          cursor: "pointer",
+                          fontSize: "0.75rem",
+                          fontWeight: isActive ? 700 : 500,
+                          transition: "all 0.15s ease",
                         }}
                       >
-                        <Wand2 size={13} /> Edit / Change Visual
+                        <PlatformIcon platform={p} />
+                        {p}
                       </button>
+                    );
+                  })}
+                </div>
+
+                {/* Interactive Social Feed Card (Unified Preview + Edit) */}
+                <div style={{
+                  background: "rgba(15, 23, 42, 0.65)",
+                  border: "1px solid rgba(255, 255, 255, 0.09)",
+                  borderRadius: "10px",
+                  padding: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                }}>
+                  {/* Channel Header + Controls */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                      <div style={{
+                        width: "28px",
+                        height: "28px",
+                        borderRadius: "50%",
+                        background: "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#fff",
+                        fontWeight: 800,
+                        fontSize: "0.78rem",
+                        flexShrink: 0,
+                      }}>
+                        {s?.brand?.name?.[0] || s?.workspace?.name?.[0] || "C"}
+                      </div>
+                      <div style={{ minWidth: 0, overflow: "hidden" }}>
+                        <strong style={{ fontSize: "0.8rem", color: "#f8fafc", display: "block", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                          {s?.brand?.name || s?.workspace?.name || "ContentOS"}
+                        </strong>
+                        <span style={{ fontSize: "0.68rem", color: "var(--color-text-muted)" }}>
+                          {activePreviewPlatform} • {activeDispatchSlot?.timeStr || "10:30 AM"}
+                        </span>
+                      </div>
                     </div>
-                  ) : (
-                    <div style={{ margin: "10px 0" }}>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "5px", flexShrink: 0 }}>
                       <button
                         type="button"
-                        onClick={() => setShowClipdropModal(true)}
+                        onClick={() => setIsEditingDispatchCopy(!isEditingDispatchCopy)}
                         style={{
-                          background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2))",
-                          border: "1px dashed rgba(168, 85, 247, 0.5)",
-                          color: "var(--accent)",
-                          padding: "10px 14px",
-                          borderRadius: "10px",
-                          fontSize: "0.84rem",
+                          background: isEditingDispatchCopy ? "rgba(99, 102, 241, 0.2)" : "rgba(255, 255, 255, 0.05)",
+                          border: isEditingDispatchCopy ? "1px solid #818cf8" : "1px solid rgba(255, 255, 255, 0.1)",
+                          color: isEditingDispatchCopy ? "#818cf8" : "var(--color-text-muted)",
+                          borderRadius: "5px",
+                          padding: "3px 8px",
+                          fontSize: "0.7rem",
                           fontWeight: 600,
                           cursor: "pointer",
-                          display: "inline-flex",
+                          display: "flex",
                           alignItems: "center",
-                          gap: "8px",
-                          width: "100%",
-                          justifyContent: "center",
+                          gap: "4px",
                         }}
                       >
-                        <Wand2 size={15} /> 🎨 Generate Visual with AI for {activePreviewPlatform}
+                        {isEditingDispatchCopy ? (
+                          <>
+                            <Check size={11} /> Done
+                          </>
+                        ) : (
+                          <>
+                            <Pencil size={11} /> Edit Copy
+                          </>
+                        )}
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const copyData = getPlatformCopyForConcept(activeDispatchConcept, activePreviewPlatform, activeDoc?.original_filename);
+                          const textToCopy = editedDispatchCaptions[activeDispatchConcept.id + '_' + activePreviewPlatform] ?? copyData.caption;
+                          navigator.clipboard?.writeText(textToCopy);
+                          toast.success('Copied ' + activePreviewPlatform + ' caption!');
+                        }}
+                        style={{
+                          background: "rgba(255, 255, 255, 0.05)",
+                          border: "1px solid rgba(255, 255, 255, 0.1)",
+                          color: "var(--color-text-muted)",
+                          borderRadius: "5px",
+                          padding: "3px 8px",
+                          fontSize: "0.7rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        <Copy size={11} /> Copy
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Caption Content (Inline Edit or Preview) */}
+                  {isEditingDispatchCopy ? (
+                    <div>
+                      <textarea
+                        rows={4}
+                        value={
+                          editedDispatchCaptions[activeDispatchConcept.id + '_' + activePreviewPlatform] ??
+                          getPlatformCopyForConcept(activeDispatchConcept, activePreviewPlatform, activeDoc?.original_filename).caption
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditedDispatchCaptions((prev) => ({
+                            ...prev,
+                            [activeDispatchConcept.id + '_' + activePreviewPlatform]: val,
+                          }));
+                        }}
+                        style={{
+                          width: "100%",
+                          padding: "8px 10px",
+                          fontSize: "0.8rem",
+                          lineHeight: 1.4,
+                          borderRadius: "6px",
+                          background: "rgba(2, 6, 23, 0.7)",
+                          border: "1px solid rgba(99, 102, 241, 0.35)",
+                          color: "#f8fafc",
+                          resize: "vertical",
+                        }}
+                        autoFocus
+                      />
+                      <div style={{ textAlign: "right", fontSize: "0.68rem", color: "var(--color-text-muted)", marginTop: "2px" }}>
+                        {(editedDispatchCaptions[activeDispatchConcept.id + '_' + activePreviewPlatform] ??
+                          getPlatformCopyForConcept(activeDispatchConcept, activePreviewPlatform, activeDoc?.original_filename).caption).length} chars
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{
+                      maxHeight: "110px",
+                      overflowY: "auto",
+                      paddingRight: "4px",
+                    }}>
+                      <p style={{
+                        margin: 0,
+                        fontSize: "0.8rem",
+                        color: "#e2e8f0",
+                        lineHeight: 1.45,
+                        whiteSpace: "pre-line",
+                      }}>
+                        {editedDispatchCaptions[activeDispatchConcept.id + '_' + activePreviewPlatform] ??
+                          getPlatformCopyForConcept(activeDispatchConcept, activePreviewPlatform, activeDoc?.original_filename).caption}
+                      </p>
                     </div>
                   )}
 
-                  <div className="social-reactions" style={{ display: "flex", gap: "16px", fontSize: "0.75rem", color: "var(--color-text-muted)", paddingTop: "8px", borderTop: "1px solid var(--border)" }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: "4px" }}><ThumbsUp size={13} /> Like</span>
-                    <span style={{ display: "flex", alignItems: "center", gap: "4px" }}><MessageSquare size={13} /> Comment</span>
-                    <span style={{ display: "flex", alignItems: "center", gap: "4px" }}><Share2 size={13} /> Share</span>
+                  {/* Compact Attached Image */}
+                  {activeDispatchConcept.imageUrl ? (
+                    <div
+                      style={{
+                        position: "relative",
+                        borderRadius: "8px",
+                        overflow: "hidden",
+                        border: "1px solid rgba(255, 255, 255, 0.1)",
+                        background: "#090d16",
+                        cursor: "pointer",
+                        height: "135px",
+                      }}
+                      onClick={() =>
+                        setAttachedVisual({
+                          assetId: activeDispatchConcept.assetId || ('concept-' + activeDispatchConcept.id),
+                          url: activeDispatchConcept.imageUrl,
+                          headline: activeDispatchConcept.conceptTitle,
+                          prompt: activeDispatchConcept.prompt,
+                          engine: "flux",
+                        })
+                      }
+                    >
+                      <img
+                        src={resolveMediaUrl(activeDispatchConcept.imageUrl)}
+                        alt={activeDispatchConcept.conceptTitle}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                          display: "block",
+                        }}
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          bottom: "6px",
+                          right: "6px",
+                          background: "rgba(0, 0, 0, 0.75)",
+                          color: "#fff",
+                          padding: "2px 7px",
+                          borderRadius: "4px",
+                          fontSize: "9px",
+                          fontWeight: 600,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        <Eye size={10} /> Expand
+                      </div>
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "6px",
+                          left: "6px",
+                          background: "rgba(15, 23, 42, 0.8)",
+                          color: "#38bdf8",
+                          border: "1px solid rgba(56, 189, 248, 0.3)",
+                          padding: "2px 6px",
+                          borderRadius: "5px",
+                          fontSize: "9px",
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "3px",
+                        }}
+                      >
+                        <Sparkles size={10} /> AI Concept Visual
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{
+                      padding: "16px",
+                      textAlign: "center",
+                      borderRadius: "6px",
+                      background: "rgba(255, 255, 255, 0.02)",
+                      border: "1px dashed rgba(255, 255, 255, 0.08)",
+                      color: "var(--color-text-muted)",
+                      fontSize: "0.75rem",
+                    }}>
+                      Visual generation completed. Image will attach upon dispatch.
+                    </div>
+                  )}
+
+                  {/* Social Action Footer Bar */}
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    paddingTop: "6px",
+                    borderTop: "1px solid rgba(255, 255, 255, 0.06)",
+                    fontSize: "0.72rem",
+                    color: "var(--color-text-muted)",
+                  }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                      <ThumbsUp size={12} /> Like
+                    </span>
+                    <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                      <MessageSquare size={12} /> Comment
+                    </span>
+                    <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                      <Share2 size={12} /> Share
+                    </span>
                   </div>
                 </div>
 
-                {/* Save & Preview Actions */}
-                <div style={{ marginTop: "auto", paddingTop: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <Button
-                    variant="secondary"
-                    onClick={() => setShowClipdropModal(true)}
-                    style={{
-                      width: "100%",
-                      padding: "10px",
-                      fontSize: "0.9rem",
-                      background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2))",
-                      border: "1px solid rgba(168, 85, 247, 0.4)",
-                      color: "var(--accent)",
+                {/* Collapsible Prompt Accordion */}
+                {activeDispatchConcept.prompt && (
+                  <details style={{
+                    background: "rgba(0, 0, 0, 0.25)",
+                    border: "1px solid rgba(168, 85, 247, 0.2)",
+                    borderRadius: "6px",
+                    padding: "6px 10px",
+                    fontSize: "0.72rem",
+                  }}>
+                    <summary style={{
+                      cursor: "pointer",
+                      color: "#c084fc",
                       fontWeight: 600,
-                    }}
-                  >
-                    <Wand2 size={16} />
-                    🎨 Generate Visual with Clipdrop AI
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => setShowPreviewModal(true)}
-                    disabled={!selectedPlatforms.length || !Object.keys(generatedVariants).length}
-                    style={{ width: "100%", padding: "10px", fontSize: "0.9rem" }}
-                  >
-                    <Layers size={16} />
-                    Review platform variants
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={()=>handleSaveToLibrary()}
-                    disabled={isSaving}
-                    style={{ width: "100%", padding: "10px", fontSize: "0.9rem" }}
-                  >
-                    <Save size={16} />
-                    {isSaving ? "Saving for review..." : savedContentId ? "Update & open in Content Library" : "Save to Needs Review"}
-                  </Button>
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      userSelect: "none",
+                    }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                        <Sparkles size={11} /> FLUX.1 Visual Prompt
+                      </span>
+                      <span style={{ fontSize: "0.68rem", color: "var(--color-text-muted)" }}>View / Copy Prompt ▾</span>
+                    </summary>
+                    <div style={{ marginTop: "6px", paddingTop: "6px", borderTop: "1px dashed rgba(168, 85, 247, 0.2)" }}>
+                      <p style={{ margin: "0 0 6px", color: "#cbd5e1", fontStyle: "italic", lineHeight: 1.4 }}>
+                        &ldquo;{activeDispatchConcept.prompt}&rdquo;
+                      </p>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigator.clipboard?.writeText(activeDispatchConcept.prompt);
+                          toast.success("Prompt copied to clipboard!");
+                        }}
+                        style={{
+                          background: "rgba(168, 85, 247, 0.15)",
+                          border: "1px solid rgba(168, 85, 247, 0.3)",
+                          color: "#d8b4fe",
+                          fontSize: "0.68rem",
+                          borderRadius: "4px",
+                          padding: "3px 8px",
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        <Copy size={10} /> Copy Prompt Text
+                      </button>
+                    </div>
+                  </details>
+                )}
+
+                {/* Post Now Action Button */}
+                <Button
+                  variant="primary"
+                  disabled={isPostingLiveNow}
+                  onClick={handleDispatchActiveConceptNow}
+                  style={{
+                    background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                    fontWeight: 700,
+                    padding: "9px 16px",
+                    fontSize: "0.85rem",
+                    border: "none",
+                    boxShadow: "0 4px 14px rgba(16, 185, 129, 0.25)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "7px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <Send size={14} />
+                  {isPostingLiveNow ? "Dispatching Live..." : "🚀 Post This Concept Now"}
+                </Button>
+              </div>
+            ) : activeTab === "pdf" ? (
+              <div style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                minHeight: "360px",
+                textAlign: "center",
+                padding: "36px 20px",
+                borderRadius: "12px",
+                background: "rgba(15, 23, 42, 0.4)",
+                border: "1px dashed rgba(255, 255, 255, 0.08)",
+                gap: "12px",
+              }}>
+                <div style={{
+                  width: "48px",
+                  height: "48px",
+                  borderRadius: "12px",
+                  background: "rgba(99, 102, 241, 0.1)",
+                  border: "1px solid rgba(99, 102, 241, 0.2)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#818cf8",
+                }}>
+                  <FileText size={22} />
                 </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <h4 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 600, color: "#f8fafc" }}>
+                    No Upcoming Post Scheduled
+                  </h4>
+                  <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)", maxWidth: "260px", lineHeight: 1.5 }}>
+                    {documents.length === 0
+                      ? "Upload a PDF document to automatically generate visual concepts and schedule upcoming posts."
+                      : "Select a concept from your document to preview social copy and scheduled time slots."}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "14px", flex: 1 }}>
+                <div className="preview-heading" style={{ marginBottom: "14px" }}>
+                  <h2 style={{ fontSize: "1.1rem", fontWeight: 600, margin: 0 }}>Generated Post Variants</h2>
+                  <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Preview &amp; refine copy for each platform</span>
+                </div>
+
+                {/* Platform Variant Tabs */}
+                <div className="preview-tabs" style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "16px", paddingBottom: "4px" }}>
+                  {selectedPlatforms.map((p) => {
+                    const isActive = activePreviewPlatform === p;
+                    const hasVariant = !!generatedVariants[p];
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        className={isActive ? "active" : ""}
+                        onClick={() => setActivePreviewPlatform(p)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          padding: "6px 12px",
+                          borderRadius: "6px",
+                          border: "none",
+                          background: isActive ? "#6366f1" : "var(--surface2)",
+                          color: isActive ? "#fff" : "var(--color-text-muted)",
+                          cursor: "pointer",
+                          fontSize: "0.8rem",
+                        }}
+                      >
+                        <PlatformIcon platform={p} />
+                        {p}
+                        {hasVariant && <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981" }} />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {Object.keys(generatedVariants).length === 0 ? (
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px", textAlign: "center", color: "var(--color-text-muted)", border: "1px dashed var(--border)", borderRadius: "10px", gap: "14px" }}>
+                    <Sparkles size={38} style={{ color: "var(--accent)", opacity: 0.8 }} />
+                    <div>
+                      <h3 style={{ margin: "0 0 6px", fontSize: "1.05rem", color: "var(--ink)", fontWeight: 700 }}>Ready for Generation</h3>
+                      <p style={{ margin: 0, fontSize: "0.85rem", maxWidth: "290px", lineHeight: 1.5 }}>
+                        Select extracted claims from your PDF or enter topics to produce channel-specific copy.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
+                    <textarea
+                      rows={8}
+                      value={generatedVariants[activePreviewPlatform] || ""}
+                      onChange={(e) =>
+                        setGeneratedVariants((prev) => ({
+                          ...prev,
+                          [activePreviewPlatform]: e.target.value,
+                        }))
+                      }
+                      style={{ width: "100%", padding: "10px", fontSize: "0.85rem", lineHeight: 1.5 }}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -234,6 +234,64 @@ export class DocumentsController {
   }
 
   @WorkspaceRequired()
+  @Get(":documentId/visual-concepts")
+  async getVisualConcepts(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
+    const { VisualConceptsService } = await import("./visual-concepts.service.js");
+    const service = new VisualConceptsService();
+    return service.getOrGenerateConcepts(documentId, r.workspace.id);
+  }
+
+  @WorkspaceRequired()
+  @Post(":documentId/visual-concepts/regenerate")
+  async regenerateVisualConcepts(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
+    assertPermission(r.workspace.role, "edit");
+    const { VisualConceptsService } = await import("./visual-concepts.service.js");
+    const service = new VisualConceptsService();
+    return service.regenerateConcepts(documentId, r.workspace.id);
+  }
+
+  @WorkspaceRequired()
+  @Post(":documentId/visual-concepts/:conceptId/generate-image")
+  async generateConceptVisual(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+    @Param("conceptId") conceptId: string,
+    @Body() body: { prompt?: string; force?: boolean },
+  ) {
+    assertPermission(r.workspace.role, "edit");
+    const { VisualConceptsService } = await import("./visual-concepts.service.js");
+    const service = new VisualConceptsService();
+    return service.generateConceptVisual({
+      documentId,
+      conceptId,
+      workspaceId: r.workspace.id,
+      userId: r.user.id,
+      customPrompt: body?.prompt,
+      force: body?.force ?? true,
+    });
+  }
+
+  @WorkspaceRequired()
+  @Post(":documentId/visual-concepts/:conceptId/dispatch")
+  async dispatchVisualConcept(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+    @Param("conceptId") conceptId: string,
+    @Body() body: { channels?: string[] },
+  ) {
+    assertPermission(r.workspace.role, "schedule");
+    const { VisualConceptsService } = await import("./visual-concepts.service.js");
+    const service = new VisualConceptsService();
+    return service.dispatchConcept({
+      documentId,
+      conceptId,
+      workspaceId: r.workspace.id,
+      userId: r.user.id,
+      channels: body?.channels,
+    });
+  }
+
+  @WorkspaceRequired()
   @Get(":documentId/pages")
   async getDocumentPages(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
     const w = r.workspace.id;
@@ -567,10 +625,15 @@ export class DocumentsController {
           "DELETE FROM scheduled_posts WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2",
           [allContentIds, w],
         );
-        await db.query(
-          "DELETE FROM published_posts WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2",
-          [allContentIds, w],
-        );
+        try {
+          // published_posts links to scheduled_posts(id), not directly to content_id
+          await db.query(
+            "DELETE FROM published_posts WHERE scheduled_post_id IN (SELECT id FROM scheduled_posts WHERE content_id = ANY($1::uuid[]))",
+            [allContentIds],
+          );
+        } catch (e) {
+          console.warn("[deleteDocument] published_posts delete skipped/failed:", e);
+        }
         await db.query(
           "DELETE FROM video_renders WHERE content_id = ANY($1::uuid[])",
           [allContentIds],
@@ -589,7 +652,12 @@ export class DocumentsController {
         );
       }
 
-      // 5. Delete document-specific artifacts: media, knowledge, chunks, pages, ai_generations
+      // 5. Delete document-specific artifacts: media, knowledge, chunks, pages, ai_generations, visual_concepts
+      try {
+        await db.query("DELETE FROM document_visual_concepts WHERE document_id = $1", [documentId]);
+      } catch (e) {
+        console.warn("[deleteDocument] document_visual_concepts delete skipped/failed:", e);
+      }
       await db.query(
         "DELETE FROM document_source_media WHERE document_id = $1 AND workspace_id = $2",
         [documentId, w],

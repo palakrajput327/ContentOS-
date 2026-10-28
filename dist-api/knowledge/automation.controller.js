@@ -364,6 +364,65 @@ let KnowledgeAutomationController = class KnowledgeAutomationController {
         }
         return { success: true, planId: id, mediaUrl: body.mediaUrl };
     }
+    async getDispatchHistory(r) {
+        const w = r.workspace.id;
+        // 1. Fetch dispatched concepts from document_visual_concepts (last 10 days)
+        const conceptsRes = await pool.query(`SELECT 
+        dvc.id,
+        dvc.document_id,
+        dvc.concept_title as title,
+        dvc.source_excerpt as excerpt,
+        dvc.prompt,
+        dvc.asset_id,
+        dvc.image_url,
+        dvc.status,
+        dvc.target_channels as channels,
+        dvc.dispatched_at,
+        dvc.created_at,
+        d.original_filename as document_name
+       FROM document_visual_concepts dvc
+       LEFT JOIN documents d ON d.id = dvc.document_id
+       WHERE dvc.workspace_id = $1 
+         AND dvc.status = 'DISPATCHED'
+         AND (dvc.dispatched_at >= NOW() - INTERVAL '10 days' OR dvc.dispatched_at IS NULL)
+       ORDER BY dvc.dispatched_at DESC NULLS LAST, dvc.created_at DESC
+       LIMIT 50`, [w]);
+        // 2. Fetch published content from content table (last 10 days)
+        const contentRes = await pool.query(`SELECT 
+        c.id,
+        NULL as document_id,
+        c.title,
+        c.body as excerpt,
+        '' as prompt,
+        NULL as asset_id,
+        (SELECT public_url FROM media_assets ma JOIN content_media cm ON cm.media_asset_id = ma.id WHERE cm.content_id = c.id LIMIT 1) as image_url,
+        'DISPATCHED' as status,
+        c.channels,
+        c.updated_at as dispatched_at,
+        c.created_at,
+        'Content Library Post' as document_name
+       FROM content c
+       WHERE c.workspace_id = $1 
+         AND c.status = 'PUBLISHED'
+         AND c.created_at >= NOW() - INTERVAL '10 days'
+       ORDER BY c.created_at DESC
+       LIMIT 50`, [w]);
+        // Merge and deduplicate
+        const items = [...conceptsRes.rows, ...contentRes.rows]
+            .filter((v, i, a) => a.findIndex(t => t.id === v.id || (t.title && t.title === v.title)) === i)
+            .sort((a, b) => new Date(b.dispatched_at || b.created_at).getTime() - new Date(a.dispatched_at || a.created_at).getTime());
+        return {
+            history: items,
+            count: items.length,
+            retentionDays: 10,
+        };
+    }
+    async clearDispatchHistory(r) {
+        assertPermission(r.workspace.role, "edit");
+        const w = r.workspace.id;
+        await pool.query(`DELETE FROM document_visual_concepts WHERE workspace_id = $1 AND status = 'DISPATCHED'`, [w]);
+        return { success: true, message: "Dispatched publishing history cleared successfully." };
+    }
 };
 __decorate([
     Get(),
@@ -436,6 +495,22 @@ __decorate([
     __metadata("design:paramtypes", [Object, String, Object]),
     __metadata("design:returntype", Promise)
 ], KnowledgeAutomationController.prototype, "updatePlanVisual", null);
+__decorate([
+    WorkspaceRequired(),
+    Get("dispatch-history"),
+    __param(0, Req()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], KnowledgeAutomationController.prototype, "getDispatchHistory", null);
+__decorate([
+    WorkspaceRequired(),
+    Post("clear-history"),
+    __param(0, Req()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], KnowledgeAutomationController.prototype, "clearDispatchHistory", null);
 KnowledgeAutomationController = __decorate([
     WorkspaceRequired(),
     Controller("knowledge-automation")
