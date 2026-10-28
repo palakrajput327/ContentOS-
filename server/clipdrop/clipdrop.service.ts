@@ -7,6 +7,9 @@ import { uploadManagedMedia } from "../storage/managed-media.js";
 import { getStorageProvider } from "../storage/storage.factory.js";
 import { getLLMProvider } from "../ai/llm.service.js";
 import { z } from "zod";
+import { ImagePromptArchitect, StructuredVisualSpecification } from "../ai/prompt-architect.js";
+import { BusinessProfileService } from "../knowledge/business-profile.service.js";
+import type { ImageGenerator, ImageGenerationInput, ImageGenerationOutput } from "../ai/image-generator.interface.js";
 
 export interface GenerateImageOptions {
   workspaceId: string;
@@ -47,59 +50,50 @@ export interface AttachAndSaveOptions {
 }
 
 @Injectable()
-export class ClipdropService {
+export class ClipdropService implements ImageGenerator {
+  readonly providerName = "clipdrop";
+
+  async generate(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
+    const res = await this.generateImage({
+      workspaceId: input.workspaceId,
+      userId: input.userId || "",
+      prompt: input.prompt,
+      headline: input.headline,
+      aspectRatio: (input.aspectRatio as any) || "1:1",
+      platform: input.platform,
+      contentId: input.contentId,
+      enableOverlay: input.brandOverlay,
+    });
+    return {
+      assetUrl: res.url,
+      assetId: res.assetId,
+      provider: res.engine || "clipdrop",
+      providerJobId: (res as any).providerJobId || res.assetId,
+      promptHash: createHash("sha256").update(input.prompt).digest("hex"),
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
   private getApiKey(): string | null {
     const key = process.env.CLIPDROP_API_KEY;
     return key && key.trim() ? key.trim() : null;
   }
 
   /**
-   * Generates a platform-optimized visual prompt using ContentOS LLM (Groq / Gemini / OpenRouter)
+   * Generates a platform-optimized visual prompt using ImagePromptArchitect
    */
-  async suggestPrompt(contentText: string, platform?: string, contextInfo?: string): Promise<{ prompt: string }> {
-    const provider = getLLMProvider();
-    const systemPrompt = `You are an elite creative visual director.
-Analyze the provided content and formulate a vivid, compelling image generation prompt for modern text-to-image AI (FLUX / Clipdrop / Midjourney).
-
-STRICT RULES:
-1. Extract the core concept and determine the best visual style (cinematic photography, high-tech conceptual art, or modern editorial illustration).
-2. Do NOT repeatedly use the word '3D'. Instead describe physical materials, lighting (rim light, volumetric rays, soft studio glow), and camera framing.
-3. Turn abstract concepts into tangible, meaningful visual metaphors.
-4. Do NOT include phrases like "Create an image of", "Illustration of", or quotation marks.
-5. Return 35 to 65 words of rich, descriptive visual keywords.`;
-
-    const userMessage = `Content text:\n"${(contentText || "").slice(0, 1500)}"\n${contextInfo ? `Context: ${contextInfo}` : ""}\nTarget Platform: ${platform || "Social Media"}`;
-
-    try {
-      if (await provider.validateConfiguration()) {
-        const res = await provider.generateStructured({
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userMessage },
-          ],
-          schema: z.object({
-            prompt: z.string(),
-          }),
-          schemaName: "ImagePromptSuggestion",
-        });
-        const promptVal = (res.data as any)?.prompt;
-        if (promptVal && promptVal.trim().length > 15) {
-          return { prompt: promptVal.trim() };
-        }
-      }
-    } catch (err) {
-      console.warn("LLM prompt suggestion fallback:", err);
-    }
-
-    // High quality thematic fallbacks if LLM unavailable
-    const subject = contentText.split(/[.\n]/)[0]?.replace(/[^a-zA-Z0-9 ]/g, " ").trim().slice(0, 80) || "digital innovation";
-    return {
-      prompt: `Cinematic conceptual visual representing ${subject}, dramatic directional lighting, elegant composition, rich textures, high-contrast atmospheric depth, 8k resolution`,
-    };
+  async suggestPrompt(contentText: string, platform?: string, contextInfo?: string): Promise<{ prompt: string; headline?: string; spec?: StructuredVisualSpecification }> {
+    const architect = new ImagePromptArchitect();
+    const spec = await architect.generateSpecification({
+      knowledgeConcept: contentText,
+      platform,
+      documentName: contextInfo,
+    });
+    return { prompt: spec.generationPrompt, headline: spec.headline, spec };
   }
 
   /**
-   * Generates a platform-optimized visual poster prompt directly from PDF knowledge concepts & brand guidelines
+   * Generates a structured, brand-aware visual poster prompt using the 9-part Image Prompt Architect & Business Profile
    */
   async suggestPosterPrompt(opts: {
     knowledgeConcept: string;
@@ -107,6 +101,8 @@ STRICT RULES:
     sourceVisualContext?: string;
     title?: string;
     documentName?: string;
+    documentId?: string;
+    workspaceId?: string;
     brand?: {
       primary_color?: string;
       secondary_color?: string;
@@ -115,91 +111,37 @@ STRICT RULES:
       cta?: string;
     };
     platform?: string;
-  }): Promise<{ prompt: string; headline: string }> {
-    const provider = getLLMProvider();
-
-    const safeConcept = typeof opts.knowledgeConcept === "string" ? opts.knowledgeConcept : (opts.knowledgeConcept ? JSON.stringify(opts.knowledgeConcept) : (opts.title || "Core Business Concept"));
-    const safeExcerpt = typeof opts.excerpt === "string" ? opts.excerpt : (opts.excerpt ? String(opts.excerpt) : "");
-    const safeTitle = typeof opts.title === "string" ? opts.title : (opts.title ? String(opts.title) : "");
-
-    const primaryColor = opts.brand?.primary_color || "refined, high-contrast brand aesthetics with elegant lighting";
-    const systemPrompt = `You are a world-class creative visual director and prompt engineer (ChatGPT DALL-E 3 & Google Gemini Imagen 3 caliber).
-Your objective: Analyze the extracted knowledge concept, facts, entities, and excerpts from the document, and formulate:
-1. A hyper-accurate, high-fidelity text-to-image prompt (for FLUX / Midjourney / Clipdrop) that translates the EXACT subject matter and concrete meaning of the text into stunning visual art.
-2. A punchy, insightful 3 to 6 word visual headline.
-
-CRITICAL ARTISTIC DIRECTIVES:
-1. ACCURATE TO DOCUMENT SUBJECT:
-   - Identify the exact entities, domain, products, mechanisms, or figures in the text (e.g. Gold Bullion & Candlesticks, Multi-Tier Staking, Medical Vaccines, Solar Architecture, Logistics Fleet, Robotic Automation, Corporate Legal).
-   - Render THOSE EXACT subjects with physical authenticity.
-   - Do NOT produce vague, abstract generic art. Ground every element in the concrete meaning of the document.
-2. STRICTLY FORBIDDEN "3D" BUZZWORDS:
-   - NEVER use the words '3D', '3D render', '3D digital render', '3D model', 'octane render', or 'purple SaaS cubes'.
-   - Instead, specify REAL-WORLD materials (brushed titanium, obsidian glass, solid gold, polished marble, carbon fiber, refractive crystal, silk textures), camera optics (85mm f/1.4 lens, macro photography, shallow depth of field, sharp focal plane), and lighting (volumetric god rays, directional rim lighting, golden hour ambient warmth, soft studio diffusion).
-3. DIFFUSION MODEL COMPATIBILITY:
-   - Output must be 40 to 65 words of descriptive visual scene setting following the formula:
-     [Concrete Subject & Action] + [Surrounding Environment] + [Physical Materials & Textures] + [Lighting & Color Harmony] + [Camera Lens, Framing & Photographic Quality].
-   - No conversational filler ("Generate an image of", "A poster showing", quotes).
-4. COLOR HARMONY:
-   - Incorporate: ${primaryColor}.
-
-SCHEMA:
-Return JSON:
-{
-  "prompt": "40-65 words tailored visual prompt",
-  "headline": "3-6 words bold title"
-}`;
-
-    const userMessage = `Document Name: "${opts.documentName || "Document"}"
-Knowledge Concept: "${safeConcept.slice(0, 1000)}"
-${safeExcerpt ? `Source Excerpt: "${safeExcerpt.slice(0, 800)}"` : ""}
-${opts.sourceVisualContext ? `Extracted PDF Visual Context: "${opts.sourceVisualContext}"` : ""}
-${safeTitle ? `Working Title: "${safeTitle}"` : ""}
-Brand Tone: ${opts.brand?.tone || "Professional, Premium, Authoritative"}
-Platform: ${opts.platform || "Instagram"}`;
-
-    try {
-      if (await provider.validateConfiguration()) {
-        const res = await provider.generateStructured({
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userMessage },
-          ],
-          schema: z.object({
-            prompt: z.string(),
-            headline: z.string().optional().default("Key Insight"),
-          }),
-          schemaName: "PosterPromptSuggestion",
-        });
-        const data = res.data as any;
-        if (data?.prompt && data.prompt.trim().length > 15) {
-          return {
-            prompt: data.prompt.trim(),
-            headline: (data.headline || opts.title || "Key Insight").trim().slice(0, 60),
-          };
-        }
+    aspectRatio?: string;
+  }): Promise<{ prompt: string; headline: string; spec?: StructuredVisualSpecification }> {
+    let brandProfile = undefined;
+    if (opts.documentId && opts.workspaceId) {
+      try {
+        const bpService = new BusinessProfileService();
+        brandProfile = await bpService.getOrBuildProfile(opts.documentId, opts.workspaceId);
+      } catch (err: any) {
+        console.warn("[suggestPosterPrompt] Profile loading fallback:", err.message || err);
       }
-    } catch (err) {
-      console.warn("[ClipdropService] suggestPosterPrompt LLM warning:", (err as Error)?.message || err);
     }
 
-    // Dynamic topic-aware fallback if LLM is offline
-    const cleanSubject = (opts.title || opts.knowledgeConcept || "innovation")
-      .replace(/[^a-zA-Z0-9 ]/g, " ")
-      .trim()
-      .slice(0, 60);
-
-    const isFinance = /gold|xau|crypto|trade|trading|invest|market|income|staking|token/i.test(`${safeTitle} ${safeConcept} ${safeExcerpt}`);
-    if (isFinance) {
-      return {
-        prompt: `Macro photograph of gleaming physical gold bullion bars and live market exchange candlestick terminals on dark obsidian slate. Volumetric golden rim lighting, sharp optical reflections, professional executive trading atmosphere, shallow depth of field, 8k resolution`,
-        headline: (opts.title || cleanSubject).slice(0, 40),
-      };
-    }
+    const architect = new ImagePromptArchitect();
+    const spec = await architect.generateSpecification({
+      knowledgeConcept: opts.knowledgeConcept,
+      excerpt: opts.excerpt,
+      title: opts.title,
+      documentName: opts.documentName,
+      platform: opts.platform,
+      aspectRatio: opts.aspectRatio,
+      brandProfile: brandProfile || {
+        companyName: opts.brand?.name || opts.documentName?.replace(/\.[^/.]+$/, ""),
+        brandColors: opts.brand?.primary_color ? [opts.brand.primary_color] : [],
+        visualPersonality: opts.brand?.tone,
+      },
+    });
 
     return {
-      prompt: `Cinematic editorial photograph representing ${cleanSubject}, minimalist composition, soft directional studio lighting, rich textural contrast, sharp optical focus, modern premium aesthetic`,
-      headline: (opts.title || cleanSubject).slice(0, 40),
+      prompt: spec.generationPrompt,
+      headline: spec.headline,
+      spec,
     };
   }
 
@@ -295,6 +237,8 @@ Platform: ${opts.platform || "Instagram"}`;
           status: opts.contentId ? "NEEDS_REVIEW" : asset.status,
           extractedCompany,
           extractedHeadline,
+          promptHash: keyHash,
+          prompt: finalPrompt,
         };
       }
     }
@@ -345,34 +289,23 @@ Platform: ${opts.platform || "Instagram"}`;
       else if (aspectRatio === "9:16") { width = 720; height = 1280; }
       else if (aspectRatio === "4:5") { width = 1024; height = 1280; }
 
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const seed = Math.floor(Math.random() * 1000000);
-        // Attempt 0 tries with FLUX; attempts 1-2 try default engine to prevent 503 limits
-        const modelParam = attempt === 0 ? "&model=flux" : "";
-        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
-          finalPrompt
-        )}?width=${width}&height=${height}&nologo=true&seed=${seed}${modelParam}`;
+      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
+        finalPrompt
+      )}?width=${width}&height=${height}&model=flux&nologo=true`;
 
-        try {
-          const res = await fetch(pollinationsUrl, { signal: AbortSignal.timeout(35000) });
-          if (res.ok) {
-            const arr = await res.arrayBuffer();
-            imageBuffer = Buffer.from(new Uint8Array(arr));
-            mimeType = res.headers.get("content-type") || "image/jpeg";
-            usedEngine = "flux";
-            return true;
-          } else {
-            const errText = await res.text().catch(() => "");
-            console.warn(`FLUX generation attempt ${attempt + 1} status ${res.status}:`, errText.slice(0, 100));
-            if (res.status === 402 || res.status === 503) {
-              const match = errText.match(/Retry after (\d+)s/i);
-              const waitSec = match ? Math.min(parseInt(match[1], 10), 12) : 2;
-              await new Promise((r) => setTimeout(r, waitSec * 1000));
-            }
-          }
-        } catch (err: any) {
-          console.warn(`FLUX image generation error (attempt ${attempt + 1}):`, err?.message || err);
+      try {
+        const res = await fetch(pollinationsUrl, { signal: AbortSignal.timeout(35000) });
+        if (res.ok) {
+          const arr = await res.arrayBuffer();
+          imageBuffer = Buffer.from(new Uint8Array(arr));
+          mimeType = res.headers.get("content-type") || "image/jpeg";
+          usedEngine = "flux";
+          return true;
+        } else {
+          console.warn(`FLUX image generation returned HTTP ${res.status}`);
         }
+      } catch (err: any) {
+        console.warn("FLUX image generation error:", err?.message || err);
       }
       return false;
     };

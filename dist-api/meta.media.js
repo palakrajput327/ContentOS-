@@ -2,8 +2,6 @@ import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { encryptToken, decryptToken } from "./security.js";
 import { getStorageProvider } from "./storage/storage.factory.js";
 import { pool } from "./db.js";
-import { publicMetaUrl } from "./meta.publishing.js";
-import { socialRedirectUri } from "./social.oauth.js";
 const aad = "meta-media-download";
 export function metaMediaTicket(workspaceId, assetId) {
     return Buffer.from(encryptToken(JSON.stringify({ workspaceId, assetId, expires: Date.now() + 3600000 }), aad)).toString("base64url");
@@ -42,14 +40,17 @@ export async function resolveMetaMedia(db, workspaceId, assetId, publicDownload 
     const { provider } = getStorageProvider();
     let url = await provider.getSignedDownloadUrl(asset.bucket, asset.object_key, 3600);
     const convertJpeg = jpeg && asset.mime_type.startsWith('image/') && !['image/jpeg', 'image/jpg'].includes(asset.mime_type);
-    if (publicDownload && (url.startsWith("/") || convertJpeg)) {
-        const base = process.env.META_MEDIA_PUBLIC_BASE_URL ||
-            new URL(socialRedirectUri("facebook")).origin;
+    if (url.startsWith("/") || convertJpeg) {
+        const customBase = process.env.META_MEDIA_PUBLIC_BASE_URL?.trim();
+        const isCustomBaseValid = customBase && !customBase.includes("localhost") && !customBase.includes("hidustansocialnetwork.in");
+        const base = isCustomBaseValid
+            ? customBase
+            : `http://localhost:${process.env.PORT || 3001}`;
         url = new URL("/api/v1/social/meta/media/" + metaMediaTicket(workspaceId, assetId) + (convertJpeg ? '?format=jpeg' : ''), base).toString();
     }
     return {
-        url: publicDownload ? publicMetaUrl(url) : url,
-        mimeType: publicDownload && convertJpeg ? 'image/jpeg' : asset.mime_type,
+        url,
+        mimeType: convertJpeg ? 'image/jpeg' : asset.mime_type,
         type: asset.mime_type.startsWith("video/") ? "video" : "image",
     };
 }

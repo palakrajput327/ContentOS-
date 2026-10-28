@@ -8,6 +8,19 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: 5173,
     strictPort: true,
+    watch: {
+      ignored: [
+        "**/dist-api/**",
+        "**/dist/**",
+        "**/server/**",
+        "**/storage/**",
+        "**/.system_generated/**",
+        "**/.gemini/**",
+        "**/brain/**",
+        "**/scripts/**",
+        "**/*.log",
+      ],
+    },
     // Dev only: proxy /api to local backend
     proxy: { "/api": "http://127.0.0.1:3001" },
   },

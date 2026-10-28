@@ -98,7 +98,8 @@ export default function AIStudio() {
     queryKey: ["studio-autopilot-posts", s.workspace.id],
     queryFn: () => request<{ plans: any[]; settings?: any; workspace?: any }>("/knowledge-automation"),
     enabled: !demo && activeTab === "pdf",
-    refetchInterval: 5000,
+    refetchInterval: 15000,
+    refetchOnWindowFocus: false,
   });
   const setActiveTab = (tab: 'topic' | 'pdf' | 'automation') => setStudioParams({tab});
 
@@ -173,8 +174,9 @@ export default function AIStudio() {
   const [loadingScripts, setLoadingScripts] = useState(false);
   const [copiedScriptId, setCopiedScriptId] = useState<string | null>(null);
   const [refreshingScriptId, setRefreshingScriptId] = useState<string | number | null>(null);
-  const [activeScriptIndex, setActiveScriptIndex] = useState<number | null>(null);
   const [isRegeneratingSinglePrompt, setIsRegeneratingSinglePrompt] = useState(false);
+  const [isGeneratingVisual, setIsGeneratingVisual] = useState(false);
+  const currentVisualJobIdRef = useRef<string | null>(null);
 
   // Platform limits mapping
   const platformLimits: Record<Platform, number> = {
@@ -367,7 +369,11 @@ export default function AIStudio() {
 
         const defaultPlatforms: Platform[] = ["LinkedIn", "Instagram", "Facebook", "Telegram"];
         const newVariants: Partial<Record<Platform, string>> = {};
-        const hashtags = ["#Finance", "#Trading", "#RiskManagement", "#Redhash", "#Innovation"];
+        const safeWords = (title || docName || "Strategy")
+          .split(/[\s-_]+/)
+          .filter(w => w.length > 2 && /^[a-zA-Z0-9]+$/.test(w))
+          .map(w => `#${w[0].toUpperCase()}${w.slice(1)}`);
+        const hashtags = safeWords.length ? safeWords.slice(0, 4) : ["#Business", "#Insights", "#Strategy", "#Growth"];
         for (const p of defaultPlatforms) {
           if (p === "LinkedIn") {
             newVariants[p] = `🚀 ${res.headline || title}\n\n${concept}\n\nKey takeaways from our latest technical breakdown.\n\n${hashtags.join(" ")}`;
@@ -408,6 +414,9 @@ export default function AIStudio() {
 
   const handleRefreshActivePrompt = async () => {
     if (!posterScript?.headline && !generatedTitle) return;
+    const jobId = Math.random().toString(36).substring(2, 9);
+    currentVisualJobIdRef.current = jobId;
+
     try {
       setIsRegeneratingSinglePrompt(true);
       const res = await request<{ prompt: string; headline: string }>(
@@ -419,10 +428,16 @@ export default function AIStudio() {
           title: generatedTitle || posterScript?.headline,
           sourceVisualContext: `Extracted from PDF ${activeDoc?.original_filename || "document"}`,
           platform: activePreviewPlatform,
+          documentId: selectedDocId || undefined,
+          documentName: activeDoc?.original_filename || undefined,
         }
       );
       if (res?.prompt) {
         setPosterScript({ prompt: res.prompt, headline: res.headline || generatedTitle });
+        // Immediately clear previous visual so stale/mismatched image (e.g. Diwali diyas) does NOT display!
+        setAttachedVisual(null);
+        setIsGeneratingVisual(true);
+
         try {
           const imgRes = await clipdropApi.generateImage({
             prompt: res.prompt,
@@ -430,7 +445,8 @@ export default function AIStudio() {
             platform: activePreviewPlatform,
             aspectRatio: "1:1",
           });
-          if (imgRes?.url) {
+          // Ensure this job is still the active one (prevent race conditions)
+          if (currentVisualJobIdRef.current === jobId && imgRes?.url) {
             setAttachedVisual({
               assetId: imgRes.assetId,
               url: imgRes.url,
@@ -441,6 +457,11 @@ export default function AIStudio() {
           }
         } catch (imgErr) {
           console.warn("Could not auto-generate visual in studio preview:", imgErr);
+          toast.error("Visual generation failed. You can retry with Generate Visual.");
+        } finally {
+          if (currentVisualJobIdRef.current === jobId) {
+            setIsGeneratingVisual(false);
+          }
         }
         toast.success("✨ Dynamic visual prompt regenerated!");
       }
@@ -2431,7 +2452,30 @@ export default function AIStudio() {
                     {generatedVariants[activePreviewPlatform] || "No content for this platform variant yet."}
                   </p>
 
-                  {attachedVisual ? (
+                  {isGeneratingVisual ? (
+                    <div style={{
+                      margin: "10px 0",
+                      borderRadius: "10px",
+                      padding: "30px 20px",
+                      background: "linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(168, 85, 247, 0.08))",
+                      border: "1px dashed rgba(168, 85, 247, 0.4)",
+                      textAlign: "center",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: "10px"
+                    }}>
+                      <RotateCw size={24} className="animate-spin" style={{ color: "#c084fc" }} />
+                      <div>
+                        <strong style={{ fontSize: "0.85rem", color: "#e2e8f0", display: "block" }}>
+                          Generating Brand-Aware Visual...
+                        </strong>
+                        <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
+                          Synthesizing physical composition from verified document facts
+                        </span>
+                      </div>
+                    </div>
+                  ) : attachedVisual ? (
                     <div style={{ margin: "10px 0", borderRadius: "10px", overflow: "hidden", position: "relative", border: "1px solid var(--border)" }}>
                       <img
                         src={resolveMediaUrl(attachedVisual.url)}
@@ -2439,6 +2483,24 @@ export default function AIStudio() {
                         crossOrigin="anonymous"
                         style={{ width: "100%", maxHeight: "240px", objectFit: "cover", display: "block" }}
                       />
+                      <div style={{
+                        position: "absolute",
+                        top: "8px",
+                        left: "8px",
+                        background: "rgba(15, 23, 42, 0.75)",
+                        backdropFilter: "blur(4px)",
+                        border: "1px solid rgba(148, 163, 184, 0.2)",
+                        borderRadius: "6px",
+                        padding: "3px 8px",
+                        fontSize: "0.68rem",
+                        color: "#38bdf8",
+                        fontWeight: 600,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px"
+                      }}>
+                        <Sparkles size={11} /> Grounded in Document Concept
+                      </div>
                       <button
                         type="button"
                         onClick={() => setShowClipdropModal(true)}

@@ -568,6 +568,14 @@ export default function KnowledgeAutomation({ embedded = false }: { embedded?: b
               "🚀 Dispatched post live to social channel!"
             );
           }}
+          onRefreshPrompt={async (planId, headline) => {
+            const res = await request<{ posterPrompt: string; headline: string; mediaUrl?: string; assetId?: string }>(
+              `${base}/plans/${planId}/refresh-prompt`,
+              "POST"
+            );
+            await query.invalidateQueries({ queryKey: ["knowledge-automation"] });
+            return res;
+          }}
         />
       )}
 

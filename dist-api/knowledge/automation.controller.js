@@ -273,6 +273,9 @@ let KnowledgeAutomationController = class KnowledgeAutomationController {
             knowledgeConcept: typeof concept === "string" ? concept : JSON.stringify(concept),
             excerpt: typeof excerpt === "string" ? excerpt : "",
             title: typeof title === "string" ? title : "Insight",
+            documentId: plan.document_id || snapshot?.documentId,
+            documentName: snapshot?.documentName,
+            workspaceId: r.workspace.id,
             brand,
         });
         let newMediaUrl = snapshot.mediaUrl || null;

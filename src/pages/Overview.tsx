@@ -65,7 +65,8 @@ export default function Overview() {
   } = useQuery<DashboardSummary>({
     queryKey: ["dashboard-summary", wid],
     queryFn: () => request<DashboardSummary>("/dashboard/summary"),
-    refetchInterval: 5000,
+    refetchInterval: 15000,
+    refetchOnWindowFocus: false,
   });
 
   const count = (st: string) => s.posts.filter((p) => p.status === st).length;

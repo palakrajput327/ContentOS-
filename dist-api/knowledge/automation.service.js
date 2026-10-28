@@ -106,6 +106,7 @@ export class KnowledgeAutomationService {
             sourceVisualContext: context.sourceVisualContext,
             title: context.title,
             documentName: context.documentName,
+            workspaceId: context.workspaceId,
             brand: context.brand,
             platform: "Instagram",
         });

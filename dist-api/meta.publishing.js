@@ -6,6 +6,20 @@ export class MetaPublishError extends Error {
         this.uncertain = uncertain;
     }
 }
+export function isLocalOrPrivateUrl(urlString) {
+    try {
+        const url = new URL(urlString);
+        return (!["http:", "https:"].includes(url.protocol) ||
+            url.username !== "" ||
+            url.password !== "" ||
+            /^(localhost|127\.|0\.|10\.|192\.168\.|\[?::1\]?)/i.test(url.hostname) ||
+            /^172\.(1[6-9]|2\d|3[01])\./.test(url.hostname) ||
+            url.hostname.includes("hidustansocialnetwork.in"));
+    }
+    catch {
+        return true;
+    }
+}
 export function publicMetaUrl(value) {
     let url;
     try {
@@ -14,13 +28,46 @@ export function publicMetaUrl(value) {
     catch {
         throw new MetaPublishError("Meta needs a public image/video URL. Upload media to publicly reachable storage.");
     }
-    if (!["http:", "https:"].includes(url.protocol) ||
-        url.username ||
-        url.password ||
-        /^(localhost|127\.|0\.|10\.|192\.168\.|\[?::1\]?)/i.test(url.hostname) ||
-        /^172\.(1[6-9]|2\d|3[01])\./.test(url.hostname))
+    if (isLocalOrPrivateUrl(value))
         throw new MetaPublishError("Meta cannot download media from localhost/private storage. Use a public HTTPS server or cloud storage.");
     return url.toString();
+}
+export async function uploadBufferToPublicHost(buffer, mimeType, filename = "media.jpg") {
+    const form = new FormData();
+    form.append("reqtype", "fileupload");
+    form.append("fileToUpload", new Blob([new Uint8Array(buffer)], { type: mimeType }), filename);
+    const res = await fetch("https://catbox.moe/user/api.php", {
+        method: "POST",
+        body: form,
+        signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) {
+        throw new Error(`Public media host upload failed (status ${res.status})`);
+    }
+    const text = (await res.text()).trim();
+    if (!text.startsWith("http")) {
+        throw new Error(`Public media host returned invalid URL: ${text}`);
+    }
+    return text;
+}
+export async function ensurePublicMetaUrl(urlOrPath, preferredType = "image") {
+    if (!urlOrPath)
+        return "";
+    if (!isLocalOrPrivateUrl(urlOrPath)) {
+        return urlOrPath;
+    }
+    try {
+        const res = await fetch(urlOrPath, { signal: AbortSignal.timeout(30000) });
+        if (!res.ok)
+            throw new Error(`HTTP ${res.status}`);
+        const arrayBuf = await res.arrayBuffer();
+        const buf = Buffer.from(arrayBuf);
+        const contentType = res.headers.get("content-type") || (preferredType === "video" ? "video/mp4" : "image/jpeg");
+        return await uploadBufferToPublicHost(buf, contentType, preferredType === "video" ? "video.mp4" : "photo.jpg");
+    }
+    catch (err) {
+        throw new MetaPublishError(`Could not prepare media for Meta download: ${err.message}. Ensure media is accessible.`);
+    }
 }
 export async function waitMetaReady(id, token, kind, published = false, attempts = 120, interval = 5000) {
     for (let i = 0; i < attempts; i++) {
@@ -63,13 +110,22 @@ export async function publishMeta(platform, token, post) {
     if (type !== "text" && !post.mediaUrl && !post.mediaUrls?.length)
         throw new MetaPublishError("Attach an image or video before publishing.");
     const rawUrls = post.mediaUrls && post.mediaUrls.length ? post.mediaUrls : (post.mediaUrl ? [post.mediaUrl] : []);
-    const url = post.mediaUrl ? publicMetaUrl(post.mediaUrl) : (rawUrls[0] ? publicMetaUrl(rawUrls[0]) : "");
+    let url = "";
+    if (platform === "facebook" && type === "image") {
+        // For Facebook photos, direct binary FormData upload (source parameter) is supported and preferred.
+        url = post.mediaUrl || (rawUrls[0] || "");
+    }
+    else if (post.mediaUrl || rawUrls[0]) {
+        const targetUrl = post.mediaUrl || rawUrls[0];
+        url = await ensurePublicMetaUrl(targetUrl, type === "video" ? "video" : "image");
+    }
     let submitted = false;
     try {
         if (platform === "instagram" && rawUrls.length > 1) {
             const itemIds = [];
             for (const itemUrl of rawUrls.slice(0, 20)) {
-                const item = await metaRequest(post.destination + "/media", token, { image_url: publicMetaUrl(itemUrl), is_carousel_item: "true" }, "POST");
+                const publicItemUrl = await ensurePublicMetaUrl(itemUrl, "image");
+                const item = await metaRequest(post.destination + "/media", token, { image_url: publicItemUrl, is_carousel_item: "true" }, "POST");
                 if (!item.id)
                     throw new MetaPublishError("Instagram did not return a carousel item ID.");
                 await waitMetaReady(item.id, token, "instagram");
@@ -155,6 +211,9 @@ export async function publishMeta(platform, token, post) {
             }
             catch {
                 // Fall back to url parameter if direct fetch fails
+            }
+            if (!form && isLocalOrPrivateUrl(url)) {
+                url = await ensurePublicMetaUrl(url, "image");
             }
             postParams = form || { url, caption: post.text };
         }
