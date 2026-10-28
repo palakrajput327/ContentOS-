@@ -324,21 +324,33 @@ export class ClipdropService implements ImageGenerator {
       else if (aspectRatio === "9:16") { width = 576; height = 1024; }
       else if (aspectRatio === "4:5") { width = 819; height = 1024; }
 
-      for (let attempt = 0; attempt < 4; attempt++) {
+      const pollinationsKey = process.env.POLLINATIONS_API_KEY?.trim();
+      const headers: Record<string, string> = {};
+      if (pollinationsKey) {
+        headers["Authorization"] = `Bearer ${pollinationsKey}`;
+      }
+
+      for (let attempt = 0; attempt < 3; attempt++) {
         const seed = Math.floor(Math.random() * 999999);
-        const model = attempt === 0 ? "sana" : attempt === 1 ? "flux" : "";
-        const modelParam = model ? `&model=${model}` : "";
-        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
-          finalPrompt
-        )}?width=${width}&height=${height}&seed=${seed}&nologo=true${modelParam}`;
+        // Primary model is official FLUX.1
+        const model = attempt === 0 ? "flux" : attempt === 1 ? "black-forest-labs/flux.1.1-pro" : "flux";
+        const keyParam = pollinationsKey ? `&key=${pollinationsKey}` : "";
+
+        // Try gen.pollinations.ai first when key is available, fallback to image.pollinations.ai
+        const baseUrl = pollinationsKey && attempt === 0
+          ? `https://gen.pollinations.ai/image/${encodeURIComponent(finalPrompt)}?model=${model}&width=${width}&height=${height}&seed=${seed}&nologo=true`
+          : `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=${model}${keyParam}`;
 
         try {
-          const res = await fetch(pollinationsUrl, { signal: AbortSignal.timeout(60000) });
+          const res = await fetch(baseUrl, {
+            headers,
+            signal: AbortSignal.timeout(60000),
+          });
           if (res.ok) {
             const arr = await res.arrayBuffer();
             const rawBuffer = Buffer.from(new Uint8Array(arr));
 
-            // Cleanly crop the bottom 36px to completely eliminate any watermark
+            // Cleanly crop bottom 36px to remove any residual watermark
             try {
               const { createCanvas, loadImage } = await import("@napi-rs/canvas");
               const img = await loadImage(rawBuffer);
@@ -357,16 +369,16 @@ export class ClipdropService implements ImageGenerator {
             return true;
           } else {
             const errText = await res.text().catch(() => "");
-            console.warn(`Diffusion generation attempt ${attempt + 1} status ${res.status}:`, errText.slice(0, 100));
+            console.warn(`FLUX generation attempt ${attempt + 1} status ${res.status}:`, errText.slice(0, 100));
             if (res.status === 402 || res.status === 503) {
               const match = errText.match(/Retry after (\d+)s/i);
-              const waitSec = match ? parseInt(match[1], 10) + 2 : 6;
-              console.warn(`[Pollinations] Waiting ${waitSec}s for cooldown...`);
+              const waitSec = match ? parseInt(match[1], 10) + 2 : 4;
+              console.warn(`[Pollinations FLUX] Waiting ${waitSec}s for cooldown...`);
               await new Promise((r) => setTimeout(r, waitSec * 1000));
             }
           }
         } catch (err: any) {
-          console.warn(`Diffusion generation error (attempt ${attempt + 1}):`, err?.message || err);
+          console.warn(`FLUX generation error (attempt ${attempt + 1}):`, err?.message || err);
         }
       }
       return false;

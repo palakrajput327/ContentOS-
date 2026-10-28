@@ -28,7 +28,7 @@ const promptArchitectOutputSchema = z.object({
   outputSpecs: z.string().optional().default("Social-media ready composition, 1:1 or 4:5 aspect ratio."),
   generationPrompt: z.string().describe("The final synthesized, single-paragraph text-to-image prompt (55-110 words) for the image generator."),
   headline: z.string().optional().default("Key Insight"),
-});
+}).passthrough();
 
 export const IMAGE_PROMPT_ARCHITECT_SYSTEM_PROMPT = `You are the Lead Creative Director and Image Prompt Architect for ContentOS.
 Your purpose is to translate real business knowledge and document facts into grounded, brand-accurate, publication-ready visual prompts for modern AI image generators (FLUX, Clipdrop, Midjourney).
