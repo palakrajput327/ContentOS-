@@ -17,6 +17,26 @@ let ClipdropService = class ClipdropService {
         const key = process.env.CLIPDROP_API_KEY;
         return key && key.trim() ? key.trim() : null;
     }
+    sanitizeColorToName(colorStr) {
+        if (!colorStr)
+            return "warm golden amber, crimson red accents, and crisp clean white";
+        const hex = colorStr.trim();
+        if (hex.startsWith("#")) {
+            const code = hex.slice(1).toUpperCase();
+            if (code.startsWith("E5") || code.startsWith("FF00") || code.startsWith("D") || code.startsWith("C"))
+                return "crimson red accents";
+            if (code.startsWith("FFD") || code.startsWith("E5A") || code.startsWith("F5"))
+                return "warm gold accents";
+            if (code.startsWith("0") || code.startsWith("1"))
+                return "deep navy and obsidian accents";
+            if (code.startsWith("2") || code.startsWith("3"))
+                return "emerald green accents";
+            if (code.startsWith("6") || code.startsWith("7"))
+                return "indigo and royal blue accents";
+            return "refined brand color accents";
+        }
+        return colorStr.replace(/#[0-9a-fA-F]{3,8}/g, "rich color");
+    }
     /**
      * Generates a platform-optimized visual prompt using ContentOS LLM (Groq / Gemini / OpenRouter)
      */
@@ -67,40 +87,46 @@ STRICT RULES:
         const safeConcept = typeof opts.knowledgeConcept === "string" ? opts.knowledgeConcept : (opts.knowledgeConcept ? JSON.stringify(opts.knowledgeConcept) : (opts.title || "Core Business Concept"));
         const safeExcerpt = typeof opts.excerpt === "string" ? opts.excerpt : (opts.excerpt ? String(opts.excerpt) : "");
         const safeTitle = typeof opts.title === "string" ? opts.title : (opts.title ? String(opts.title) : "");
-        const primaryColor = opts.brand?.primary_color || "refined, high-contrast brand aesthetics with elegant lighting";
-        const systemPrompt = `You are a world-class creative visual director and prompt engineer (ChatGPT DALL-E 3 & Google Gemini Imagen 3 caliber).
-Your objective: Analyze the extracted knowledge concept, facts, entities, and excerpts from the document, and formulate:
-1. A hyper-accurate, high-fidelity text-to-image prompt (for FLUX / Midjourney / Clipdrop) that translates the EXACT subject matter and concrete meaning of the text into stunning visual art.
-2. A punchy, insightful 3 to 6 word visual headline.
+        const primaryColor = this.sanitizeColorToName(opts.brand?.primary_color);
+        const systemPrompt = `You are a world-class creative visual director for global brands (like Apple, Stripe, Bloomberg, Forbes, Unsplash).
+Your objective: Formulate an original, highly compelling, photorealistic visual scene prompt based entirely on the specific concept and text extracted from the user's uploaded document.
 
-CRITICAL ARTISTIC DIRECTIVES:
-1. ACCURATE TO DOCUMENT SUBJECT:
-   - Identify the exact entities, domain, products, mechanisms, or figures in the text (e.g. Gold Bullion & Candlesticks, Multi-Tier Staking, Medical Vaccines, Solar Architecture, Logistics Fleet, Robotic Automation, Corporate Legal).
-   - Render THOSE EXACT subjects with physical authenticity.
-   - Do NOT produce vague, abstract generic art. Ground every element in the concrete meaning of the document.
-2. STRICTLY FORBIDDEN "3D" BUZZWORDS:
-   - NEVER use the words '3D', '3D render', '3D digital render', '3D model', 'octane render', or 'purple SaaS cubes'.
-   - Instead, specify REAL-WORLD materials (brushed titanium, obsidian glass, solid gold, polished marble, carbon fiber, refractive crystal, silk textures), camera optics (85mm f/1.4 lens, macro photography, shallow depth of field, sharp focal plane), and lighting (volumetric god rays, directional rim lighting, golden hour ambient warmth, soft studio diffusion).
-3. DIFFUSION MODEL COMPATIBILITY:
-   - Output must be 40 to 65 words of descriptive visual scene setting following the formula:
-     [Concrete Subject & Action] + [Surrounding Environment] + [Physical Materials & Textures] + [Lighting & Color Harmony] + [Camera Lens, Framing & Photographic Quality].
-   - No conversational filler ("Generate an image of", "A poster showing", quotes).
-4. COLOR HARMONY:
-   - Incorporate: ${primaryColor}.
+DYNAMIC VISUAL PRINCIPLES:
+1. PURE CONTENT-DRIVEN CREATIVITY:
+   - Deeply analyze the extracted knowledge concept, title, and PDF source excerpt provided in the user message.
+   - Every single topic MUST get a unique, creative visual metaphor or real-world scene tailored specifically to its actual meaning.
+   - Never repeat the same objects across different topics. Do not default to generic stock items like a blank phone on a desk, an empty table, or a group of people in a meeting room.
+   - Think like a senior art director: What physical scene, tangible metaphor, professional setup, architectural space, or authentic object vividly illustrates this specific idea?
+
+2. VISUAL COMPOSITION & PHOTOGRAPHIC DETAILS:
+   - Describe concrete physical elements, textures, and materials (e.g. brushed metal, polished marble, illuminated glass, fine wood, leather, paper, gold).
+   - Specify dynamic lighting (e.g. golden hour warmth, dramatic directional rim lighting, soft natural window daylight, glowing ambient accents).
+   - Specify camera lens and depth of field (e.g. shot on 50mm or 85mm f/1.4 lens, crisp subject focus, creamy background bokeh, commercial editorial photography).
+
+3. ABSOLUTE CONSTRAINTS:
+   - NO GROUPS OF PEOPLE / NO DISTANT FACES: Small diffusion models distort faces in wide group shots. Focus on crisp objects, setups, architecture, macro details, or hands interacting with tools.
+   - NO LITERAL GEOMETRIC SCULPTURES: Never generate abstract stone pyramids, triangles, or cubes for business concepts.
+   - NO REPETITIVE GADGETS: Do not just place a blank phone or tablet on a table.
+   - NO TEXT OR NUMBERS: Image models cannot render text accurately. Never request written words or numbers in the image.
+   - NO SCI-FI TROPES: Avoid dark dungeons, alien portals, glowing forcefields, or fantasy vaults.
+   - NO HEX CODES: Use color words like 'crimson red', 'golden amber', 'deep navy', 'crisp white'.
+
+4. FORMAT:
+   - 35 to 55 words describing: [Hero Subject / Scene] + [Action / Details directly from the concept] + [Environment & Materials] + [Lighting & Lens Style].
 
 SCHEMA:
 Return JSON:
 {
-  "prompt": "40-65 words tailored visual prompt",
+  "prompt": "35-55 words dynamic commercial visual prompt tailored directly to the extracted content",
   "headline": "3-6 words bold title"
 }`;
-        const userMessage = `Document Name: "${opts.documentName || "Document"}"
+        const userMessage = `Document: "${opts.documentName || "Uploaded Document"}"
+Topic Title: "${safeTitle}"
 Knowledge Concept: "${safeConcept.slice(0, 1000)}"
-${safeExcerpt ? `Source Excerpt: "${safeExcerpt.slice(0, 800)}"` : ""}
-${opts.sourceVisualContext ? `Extracted PDF Visual Context: "${opts.sourceVisualContext}"` : ""}
-${safeTitle ? `Working Title: "${safeTitle}"` : ""}
-Brand Tone: ${opts.brand?.tone || "Professional, Premium, Authoritative"}
-Platform: ${opts.platform || "Instagram"}`;
+${safeExcerpt ? `Extracted PDF Text Excerpt: "${safeExcerpt.slice(0, 800)}"` : ""}
+${opts.sourceVisualContext ? `PDF Visual Context: "${opts.sourceVisualContext}"` : ""}
+Brand Tone: ${opts.brand?.tone || "Professional, Clean, Modern"}
+Platform: ${opts.platform || "LinkedIn"}`;
         try {
             if (await provider.validateConfiguration()) {
                 const res = await provider.generateStructured({
@@ -117,7 +143,7 @@ Platform: ${opts.platform || "Instagram"}`;
                 const data = res.data;
                 if (data?.prompt && data.prompt.trim().length > 15) {
                     return {
-                        prompt: data.prompt.trim(),
+                        prompt: data.prompt.trim().replace(/#[0-9a-fA-F]{3,8}/g, "crimson red"),
                         headline: (data.headline || opts.title || "Key Insight").trim().slice(0, 60),
                     };
                 }
@@ -126,21 +152,18 @@ Platform: ${opts.platform || "Instagram"}`;
         catch (err) {
             console.warn("[ClipdropService] suggestPosterPrompt LLM warning:", err?.message || err);
         }
-        // Dynamic topic-aware fallback if LLM is offline
-        const cleanSubject = (opts.title || opts.knowledgeConcept || "innovation")
-            .replace(/[^a-zA-Z0-9 ]/g, " ")
+        // Dynamic topic-aware fallback synthesized directly from extracted content (no hardcoded domain strings)
+        const cleanTitle = (opts.title || "Core Insight")
+            .replace(/[^\w\s-]/g, " ")
             .trim()
-            .slice(0, 60);
-        const isFinance = /gold|xau|crypto|trade|trading|invest|market|income|staking|token/i.test(`${safeTitle} ${safeConcept} ${safeExcerpt}`);
-        if (isFinance) {
-            return {
-                prompt: `Macro photograph of gleaming physical gold bullion bars and live market exchange candlestick terminals on dark obsidian slate. Volumetric golden rim lighting, sharp optical reflections, professional executive trading atmosphere, shallow depth of field, 8k resolution`,
-                headline: (opts.title || cleanSubject).slice(0, 40),
-            };
-        }
+            .slice(0, 50);
+        const cleanConcept = (opts.knowledgeConcept || cleanTitle)
+            .replace(/[^\w\s-]/g, " ")
+            .trim()
+            .slice(0, 100);
         return {
-            prompt: `Cinematic editorial photograph representing ${cleanSubject}, minimalist composition, soft directional studio lighting, rich textural contrast, sharp optical focus, modern premium aesthetic`,
-            headline: (opts.title || cleanSubject).slice(0, 40),
+            prompt: `An authentic, premium commercial visual representing ${cleanTitle}: ${cleanConcept}, clean modern composition, professional lighting, shallow depth of field, sharp focus, 8k resolution`,
+            headline: cleanTitle.slice(0, 40),
         };
     }
     /**
@@ -149,31 +172,31 @@ Platform: ${opts.platform || "Instagram"}`;
      */
     async generateImage(opts) {
         const aspectRatio = opts.aspectRatio || "1:1";
-        const requestedEngine = opts.engine || "clipdrop";
+        const requestedEngine = opts.engine || "flux";
         // 1. Intelligent Prompt Optimization & Entity Extraction (ChatGPT / Gemini style)
         const { visualPrompt, extractedHeadline, extractedCompany } = this.cleanAndOptimizePrompt(opts.prompt);
         const headline = opts.headline || extractedHeadline;
         const logoText = opts.logoText || extractedCompany;
         const enableOverlay = Boolean(opts.enableOverlay);
-        // Style presets modifier - only enrich if prompt lacks explicit visual styling
+        // Style presets modifier - only apply if user explicitly requested a specific preset (no hardcoded defaults)
         let finalPrompt = visualPrompt;
-        const hasExistingStyle = /cinematic|photography|photo|render|illustration|cyberpunk|macro|lens|lighting|bokeh|aesthetic|high-contrast/i.test(visualPrompt);
-        if (opts.stylePreset && !hasExistingStyle) {
+        if (opts.stylePreset && opts.stylePreset !== "none") {
             switch (opts.stylePreset) {
                 case "3d-render":
-                    finalPrompt += ", 3D digital render, volumetric rim lighting, clean composition";
+                case "3d-glass":
+                    finalPrompt += ", 3D digital render, volumetric rim lighting, sleek glass and polished metallic reflections, clean centered composition, 8k resolution, photorealistic studio quality";
                     break;
                 case "cinematic":
-                    finalPrompt += ", cinematic photography, dramatic rim lighting, depth of field";
+                    finalPrompt += ", cinematic photography, dramatic rim lighting, depth of field, anamorphic lens, 8k resolution";
                     break;
                 case "minimal-saas":
-                    finalPrompt += ", modern minimal vector illustration, sleek pastel gradients";
+                    finalPrompt += ", modern minimal vector illustration, sleek pastel gradients, clean aesthetic, high detail";
                     break;
                 case "cyberpunk":
-                    finalPrompt += ", futuristic cyberpunk aesthetic, neon lights, dark moody lighting";
+                    finalPrompt += ", futuristic cyberpunk aesthetic, neon lights, dark moody lighting, hyper-detailed";
                     break;
                 case "editorial":
-                    finalPrompt += ", high-fashion editorial magazine cover visual, sophisticated art";
+                    finalPrompt += ", high-fashion editorial magazine cover visual, sophisticated art, studio lighting, 8k";
                     break;
             }
         }
@@ -270,43 +293,58 @@ Platform: ${opts.platform || "Instagram"}`;
             let width = 1024;
             let height = 1024;
             if (aspectRatio === "16:9") {
-                width = 1280;
-                height = 720;
+                width = 1024;
+                height = 576;
             }
             else if (aspectRatio === "9:16") {
-                width = 720;
-                height = 1280;
+                width = 576;
+                height = 1024;
             }
             else if (aspectRatio === "4:5") {
-                width = 1024;
-                height = 1280;
+                width = 819;
+                height = 1024;
             }
-            for (let attempt = 0; attempt < 3; attempt++) {
-                const seed = Math.floor(Math.random() * 1000000);
-                // Attempt 0 tries with FLUX; attempts 1-2 try default engine to prevent 503 limits
-                const modelParam = attempt === 0 ? "&model=flux" : "";
-                const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&nologo=true&seed=${seed}${modelParam}`;
+            for (let attempt = 0; attempt < 4; attempt++) {
+                const seed = Math.floor(Math.random() * 999999);
+                const model = attempt === 0 ? "sana" : attempt === 1 ? "flux" : "";
+                const modelParam = model ? `&model=${model}` : "";
+                const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true${modelParam}`;
                 try {
-                    const res = await fetch(pollinationsUrl, { signal: AbortSignal.timeout(35000) });
+                    const res = await fetch(pollinationsUrl, { signal: AbortSignal.timeout(60000) });
                     if (res.ok) {
                         const arr = await res.arrayBuffer();
-                        imageBuffer = Buffer.from(new Uint8Array(arr));
-                        mimeType = res.headers.get("content-type") || "image/jpeg";
+                        const rawBuffer = Buffer.from(new Uint8Array(arr));
+                        // Cleanly crop the bottom 36px to completely eliminate any watermark
+                        try {
+                            const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+                            const img = await loadImage(rawBuffer);
+                            const cropH = Math.max(img.height - 36, 100);
+                            const canvas = createCanvas(img.width, cropH);
+                            const ctx = canvas.getContext("2d");
+                            ctx.drawImage(img, 0, 0);
+                            imageBuffer = canvas.toBuffer("image/jpeg");
+                            mimeType = "image/jpeg";
+                        }
+                        catch {
+                            imageBuffer = rawBuffer;
+                            mimeType = res.headers.get("content-type") || "image/jpeg";
+                        }
                         usedEngine = "flux";
                         return true;
                     }
                     else {
                         const errText = await res.text().catch(() => "");
-                        console.warn(`FLUX generation attempt ${attempt + 1} status ${res.status}:`, errText.slice(0, 100));
+                        console.warn(`Diffusion generation attempt ${attempt + 1} status ${res.status}:`, errText.slice(0, 100));
                         if (res.status === 402 || res.status === 503) {
                             const match = errText.match(/Retry after (\d+)s/i);
-                            const waitSec = match ? Math.min(parseInt(match[1], 10), 12) : 2;
+                            const waitSec = match ? parseInt(match[1], 10) + 2 : 6;
+                            console.warn(`[Pollinations] Waiting ${waitSec}s for cooldown...`);
                             await new Promise((r) => setTimeout(r, waitSec * 1000));
                         }
                     }
                 }
                 catch (err) {
-                    console.warn(`FLUX image generation error (attempt ${attempt + 1}):`, err?.message || err);
+                    console.warn(`Diffusion generation error (attempt ${attempt + 1}):`, err?.message || err);
                 }
             }
             return false;
@@ -314,19 +352,19 @@ Platform: ${opts.platform || "Instagram"}`;
         if (requestedEngine === "clipdrop") {
             const ok = await tryClipdrop();
             if (!ok) {
-                console.warn("Clipdrop failed, falling back to FLUX engine");
+                console.warn("Clipdrop failed, falling back to FLUX/SANA engine");
                 await tryFlux();
             }
         }
         else {
             const ok = await tryFlux();
             if (!ok) {
-                console.warn("FLUX returned error/402, automatically falling back to Clipdrop SDXL");
+                console.warn("Diffusion engine returned error, automatically trying Clipdrop");
                 await tryClipdrop();
             }
         }
         if (!imageBuffer) {
-            throw new ServiceUnavailableException("All visual generation engines are currently busy. Please try again with a different prompt.");
+            throw new ServiceUnavailableException("Visual generation engines are currently busy. Please click 'Refresh Prompt' in a few seconds.");
         }
         const finalBuffer = imageBuffer;
         // 3. Object Storage - Always store native high-res raster buffer (PNG/JPEG)
@@ -550,7 +588,6 @@ Platform: ${opts.platform || "Instagram"}`;
             .replace(/by\s+[a-zA-Z0-9\s&]{2,45}?(?:private\s+limited|pvt\s+ltd|limited|company)/gi, "")
             .replace(/having\s+good\s+greeting\s+for\s+[a-zA-Z0-9\s]+/gi, "")
             .replace(/with\s+good\s+greeting\s+for\s+[a-zA-Z0-9\s]+/gi, "")
-            .replace(/having\s+good\s+greeting/gi, "")
             .replace(/make\s+it\s+real(?:istic)?/gi, "")
             .trim();
         // 4. Only expand short greeting headlines into full visual festival scenes if the prompt is brief (<= 6 words)

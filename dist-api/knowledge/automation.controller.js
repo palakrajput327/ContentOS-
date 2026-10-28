@@ -282,7 +282,8 @@ let KnowledgeAutomationController = class KnowledgeAutomationController {
                 workspaceId: r.workspace.id,
                 userId: r.user.id,
                 prompt: res.prompt,
-                engine: "clipdrop",
+                engine: "flux",
+                enableOverlay: false,
                 headline: res.headline || title,
                 aspectRatio: "1:1",
                 contentId: plan.content_id || undefined,
@@ -327,6 +328,38 @@ let KnowledgeAutomationController = class KnowledgeAutomationController {
             mediaUrl: newMediaUrl,
             assetId: newAssetId,
         };
+    }
+    async updatePlanVisual(r, rawId, body) {
+        assertPermission(r.workspace.role, "edit");
+        const id = z.string().uuid().parse(rawId);
+        const plan = (await pool.query("SELECT * FROM knowledge_content_plans WHERE id = $1 AND workspace_id = $2", [id, r.workspace.id])).rows[0];
+        if (!plan) {
+            throw new NotFoundException("Plan not found in this workspace.");
+        }
+        const snapshot = (typeof plan.source_snapshot === "string" ? JSON.parse(plan.source_snapshot) : plan.source_snapshot) || {};
+        const updatedSnapshot = {
+            ...snapshot,
+            mediaUrl: body.mediaUrl,
+            mediaAssetId: body.mediaAssetId || snapshot.mediaAssetId,
+            ...(body.prompt ? { posterPrompt: body.prompt } : {}),
+        };
+        await pool.query(`UPDATE knowledge_content_plans 
+       SET source_snapshot = $1::jsonb, updated_at = now() 
+       WHERE id = $2 AND workspace_id = $3`, [JSON.stringify(updatedSnapshot), id, r.workspace.id]);
+        if (plan.content_id && body.mediaUrl) {
+            const contentRow = (await pool.query("SELECT variants FROM content WHERE id=$1", [plan.content_id])).rows[0];
+            if (contentRow?.variants) {
+                const variants = typeof contentRow.variants === "string" ? JSON.parse(contentRow.variants) : contentRow.variants;
+                for (const platform of Object.keys(variants)) {
+                    if (variants[platform]) {
+                        variants[platform].mediaUrl = body.mediaUrl;
+                        variants[platform].mediaAssetId = body.mediaAssetId || variants[platform].mediaAssetId;
+                    }
+                }
+                await pool.query("UPDATE content SET variants=$1::jsonb, updated_at=now() WHERE id=$2", [JSON.stringify(variants), plan.content_id]);
+            }
+        }
+        return { success: true, planId: id, mediaUrl: body.mediaUrl };
     }
 };
 __decorate([
@@ -391,6 +424,15 @@ __decorate([
     __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", Promise)
 ], KnowledgeAutomationController.prototype, "refreshPrompt", null);
+__decorate([
+    Post("plans/:id/update-visual"),
+    __param(0, Req()),
+    __param(1, Param("id")),
+    __param(2, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", Promise)
+], KnowledgeAutomationController.prototype, "updatePlanVisual", null);
 KnowledgeAutomationController = __decorate([
     WorkspaceRequired(),
     Controller("knowledge-automation")

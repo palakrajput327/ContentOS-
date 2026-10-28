@@ -144,9 +144,10 @@ export class KnowledgeAutomationService {
         workspaceId: context.workspaceId,
         userId: context.actorId,
         prompt: suggested.prompt,
+        engine: "flux",
         aspectRatio: "1:1",
         headline: suggested.headline || context.title,
-        enableOverlay: true,
+        enableOverlay: false,
         idempotencyKey: `autopilot:${context.workspaceId}:${context.topicHash}:${Date.now()}`,
       });
       return {
@@ -557,8 +558,8 @@ export class KnowledgeAutomationService {
             }
           }
 
-          // 3. If no visual yet and docId is available, verify physical file exists
-          if (!autoVisualAssetId && docId) {
+          // 3. Only use raw PDF slide image if user explicitly requested PDF_SOURCE mode (never in AI_POSTER)
+          if (!autoVisualAssetId && docId && reservation.posterStyle === 'PDF_SOURCE') {
             let imgRow;
             if (pageNum) {
               imgRow = (

@@ -114,7 +114,7 @@ export class DocumentsController {
     });
 
     // Proactively start PDF extraction immediately
-    if (queueBackend()==='bullmq') import("../pdf-processing.js")
+    import("../pdf-processing.js")
       .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
       .catch((err) => console.warn(`[PDF Immediate Trigger] For ${documentId}:`, err?.message || err));
 
@@ -155,7 +155,7 @@ export class DocumentsController {
 
     // If document is QUEUED and not yet picked up by worker after 2s, trigger real processing
     if (doc.status === "QUEUED" && (Date.now() - new Date(doc.created_at).getTime()) > 2000) {
-      if (queueBackend()==='bullmq') import("../pdf-processing.js")
+      import("../pdf-processing.js")
         .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
         .catch((err) => console.warn(`[PDF Direct Trigger] Failed for ${documentId}:`, err?.message || err));
     }
@@ -447,15 +447,18 @@ export class DocumentsController {
       const headline = cleanTitle.length > 45 ? cleanTitle.slice(0, 42) + "..." : cleanTitle;
       const promptSubject = cleanConcept.length > 110 ? cleanConcept.slice(0, 107) + "..." : cleanConcept;
 
-      const dynamicPrompt = `Cinematic conceptual visual artwork representing ${cleanTitle}: ${promptSubject}. Subtle atmospheric rim lighting, deep contrast, refined composition, sharp focus, award-winning editorial aesthetic.`;
-      const cleanCaption = `🚀 ${headline}\n\n${cleanConcept}\n\nKey takeaways from our latest technical breakdown.\n\n#Finance #Trading #Investment #RiskManagement #Innovation`;
+      const dynamicPrompt = `A close-up hero shot representing ${cleanTitle}: ${promptSubject}, centered in a brightly lit modern commercial architectural space, natural daylight, crisp focus, commercial editorial photography, 8k resolution.`;
+      const cleanCaption = `🚀 ${headline}\n\n${cleanConcept}\n\nKey takeaways from our latest technical breakdown.`;
 
       const plan = planMap.get(k.id);
       const visualPrompt = plan?.source_snapshot?.posterPrompt || dynamicPrompt;
       const finalHeadline = plan?.source_snapshot?.headline || headline;
-      const imageUrl = plan?.source_snapshot?.mediaUrl || media?.url || null;
-      const assetId = plan?.source_snapshot?.mediaAssetId || media?.assetId || null;
+      const imageUrl = plan?.source_snapshot?.mediaUrl || null;
+      const assetId = plan?.source_snapshot?.mediaAssetId || null;
       const caption = plan?.variants?.LinkedIn?.caption || plan?.body || cleanCaption;
+
+      const titleTags = cleanTitle.split(/\s+/).filter((w: string) => w.length > 3).slice(0, 4).map((w: string) => `#${w.replace(/[^\w]/g, "")}`);
+      const hashtags = titleTags.length > 0 ? titleTags : ["#Innovation", "#Strategy", "#Business", "#Leadership"];
 
       scripts.push({
         id: k.id,
@@ -468,7 +471,7 @@ export class DocumentsController {
         posterPrompt: visualPrompt,
         headline: finalHeadline,
         caption,
-        hashtags: ["#Finance", "#Trading", "#RiskManagement", "#Redhash", "#Innovation"],
+        hashtags,
       });
     }
 
@@ -491,6 +494,118 @@ export class DocumentsController {
     }
 
     return transaction(async (db) => {
+      // 1. Find all knowledge IDs belonging to this document
+      const kRows = await db.query(
+        "SELECT id FROM document_knowledge WHERE document_id = $1 AND workspace_id = $2",
+        [documentId, w],
+      );
+      const kIds = kRows.rows.map((row) => row.id);
+
+      // 2. Find all autopilot plans linked to this document (by knowledge_id, source_snapshot, or text match)
+      let planRows: { rows: { id: string; content_id: string | null }[] };
+      if (kIds.length > 0) {
+        planRows = await db.query(
+          `SELECT id, content_id FROM knowledge_content_plans 
+           WHERE workspace_id = $1 AND (
+             knowledge_id = ANY($2::uuid[]) OR 
+             source_snapshot->'sources' @> $3::jsonb OR
+             source_snapshot->>'documentId' = $4 OR
+             source_snapshot::text LIKE '%' || $4 || '%'
+           )`,
+          [w, kIds, JSON.stringify([{ documentId }]), documentId],
+        );
+      } else {
+        planRows = await db.query(
+          `SELECT id, content_id FROM knowledge_content_plans 
+           WHERE workspace_id = $1 AND (
+             source_snapshot->'sources' @> $2::jsonb OR
+             source_snapshot->>'documentId' = $3 OR
+             source_snapshot::text LIKE '%' || $3 || '%'
+           )`,
+          [w, JSON.stringify([{ documentId }]), documentId],
+        );
+      }
+
+      const planContentIds = planRows.rows.map((p) => p.content_id).filter(Boolean) as string[];
+      const planIds = planRows.rows.map((p) => p.id);
+
+      // Collect any content IDs linked directly to this document via content_sources
+      const csRows = await db.query(
+        "SELECT content_id FROM content_sources WHERE document_id = $1 AND workspace_id = $2",
+        [documentId, w],
+      );
+      const allContentIds = [
+        ...new Set([...planContentIds, ...csRows.rows.map((r: any) => r.content_id).filter(Boolean)]),
+      ] as string[];
+
+      // 3. Delete knowledge_content_plans FIRST because knowledge_content_plans.content_id has NO ACTION FK on content
+      if (planIds.length > 0) {
+        await db.query(
+          "DELETE FROM knowledge_content_plans WHERE id = ANY($1::uuid[]) AND workspace_id = $2",
+          [planIds, w],
+        );
+      }
+      if (kIds.length > 0) {
+        await db.query(
+          "DELETE FROM knowledge_content_plans WHERE knowledge_id = ANY($1::uuid[]) AND workspace_id = $2",
+          [kIds, w],
+        );
+      }
+
+      // 4. Delete dependent records of content (approvals, scheduled_posts, published_posts, video_renders, content_versions, content_sources) then content
+      if (allContentIds.length > 0) {
+        // Disconnect any remaining plans if any
+        await db.query(
+          "UPDATE knowledge_content_plans SET content_id = NULL WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2",
+          [allContentIds, w],
+        );
+        await db.query(
+          "DELETE FROM approvals WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2",
+          [allContentIds, w],
+        );
+        await db.query(
+          "DELETE FROM scheduled_posts WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2",
+          [allContentIds, w],
+        );
+        await db.query(
+          "DELETE FROM published_posts WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2",
+          [allContentIds, w],
+        );
+        await db.query(
+          "DELETE FROM video_renders WHERE content_id = ANY($1::uuid[])",
+          [allContentIds],
+        );
+        await db.query(
+          "DELETE FROM content_versions WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2",
+          [allContentIds, w],
+        );
+        await db.query(
+          "DELETE FROM content_sources WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2",
+          [allContentIds, w],
+        );
+        await db.query(
+          "DELETE FROM content WHERE id = ANY($1::uuid[]) AND workspace_id = $2",
+          [allContentIds, w],
+        );
+      }
+
+      // 5. Delete document-specific artifacts: media, knowledge, chunks, pages, ai_generations
+      await db.query(
+        "DELETE FROM document_source_media WHERE document_id = $1 AND workspace_id = $2",
+        [documentId, w],
+      );
+      await db.query(
+        "DELETE FROM document_knowledge WHERE document_id = $1 AND workspace_id = $2",
+        [documentId, w],
+      );
+      await db.query("DELETE FROM document_chunks WHERE document_id = $1", [documentId]);
+      await db.query("DELETE FROM document_pages WHERE document_id = $1", [documentId]);
+      await db.query(
+        "DELETE FROM ai_generations WHERE workspace_id = $1 AND (input->>'documentId' = $2 OR input->>'document_id' = $2)",
+        [w, documentId],
+      );
+
+      // 6. Delete the document record itself
       await db.query("DELETE FROM documents WHERE id = $1 AND workspace_id = $2", [
         documentId,
         w,

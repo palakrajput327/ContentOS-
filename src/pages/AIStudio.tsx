@@ -87,6 +87,7 @@ export default function AIStudio() {
   const demo = useSession((x) => x.demo);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showClipdropModal, setShowClipdropModal] = useState(false);
+  const [activePlanForStudio, setActivePlanForStudio] = useState<string | null>(null);
   const [showAutoPilotGuide, setShowAutoPilotGuide] = useState(false);
   const [attachedVisual, setAttachedVisual] = useState<{ assetId: string; url: string; filename: string } | null>(null);
   const [generatedEvidence, setGeneratedEvidence] = useState<any[]>([]);
@@ -1343,8 +1344,9 @@ export default function AIStudio() {
                     autopilotRunning={autopilotRunning}
                     onTriggerAutoPilot={handleTriggerAutoPilot}
                     onSelectPlan={loadPlanIntoStudio}
-                    onOpenVisualStudio={(promptText, headlineText) => {
+                    onOpenVisualStudio={(promptText, headlineText, planId) => {
                       setPosterScript({ prompt: promptText, headline: headlineText });
+                      setActivePlanForStudio(planId || null);
                       setShowClipdropModal(true);
                     }}
                     onPublishNow={async (planId: string) => {
@@ -2552,8 +2554,11 @@ export default function AIStudio() {
         composerMode
         attachmentLabel="Image for generated posts · saved for review"
         isOpen={showClipdropModal}
-        onClose={() => setShowClipdropModal(false)}
-        onAttach={(result) => {
+        onClose={() => {
+          setShowClipdropModal(false);
+          setActivePlanForStudio(null);
+        }}
+        onAttach={async (result) => {
           setAttachedVisual(result);
           if (activeScriptIndex !== null) {
             setPosterScripts((prev) =>
@@ -2563,6 +2568,17 @@ export default function AIStudio() {
                   : s
               )
             );
+          }
+          if (activePlanForStudio) {
+            try {
+              await request(`/knowledge-automation/plans/${activePlanForStudio}/update-visual`, "POST", {
+                mediaUrl: result.url,
+                mediaAssetId: result.assetId,
+              });
+              await storedAutoPosts.refetch();
+            } catch (e) {
+              console.warn("Could not update plan visual:", e);
+            }
           }
           if (savedContentId) void handleSaveToLibrary(undefined,false,result);
           toast.success("Attached visual to this draft post!");

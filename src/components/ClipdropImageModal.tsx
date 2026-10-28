@@ -195,9 +195,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
   initialPrompt,
 }) => {
   // Engine & Prompt
-  const [engine, setEngine] = useState<"clipdrop" | "flux">("clipdrop");
+  const [engine, setEngine] = useState<"clipdrop" | "flux">("flux");
   const [prompt, setPrompt] = useState("");
-  const [stylePreset, setStylePreset] = useState<string>("3d-render");
+  const [stylePreset, setStylePreset] = useState<string>("");
   const [aspectRatio, setAspectRatio] = useState<"1:1" | "4:5" | "9:16" | "16:9">("1:1");
 
   // Dynamic Prompt-Driven Overlay States
@@ -1053,7 +1053,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
                   <button
                     key={s.id}
                     type="button"
-                    onClick={() => setStylePreset(s.id)}
+                    onClick={() => setStylePreset((prev) => (prev === s.id ? "" : s.id))}
                     style={{
                       padding: "8px 4px",
                       borderRadius: "8px",
