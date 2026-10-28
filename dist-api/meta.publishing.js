@@ -198,24 +198,10 @@ export async function publishMeta(platform, token, post) {
             postParams = { file_url: url, description: post.text };
         }
         else if (type === "image") {
-            let form = null;
-            try {
-                const imgRes = await fetch(url, { signal: AbortSignal.timeout(20000) });
-                if (imgRes.ok) {
-                    const blob = await imgRes.blob();
-                    form = new FormData();
-                    form.append("source", blob, "photo.png");
-                    if (post.text)
-                        form.append("caption", post.text);
-                }
-            }
-            catch {
-                // Fall back to url parameter if direct fetch fails
-            }
-            if (!form && isLocalOrPrivateUrl(url)) {
-                url = await ensurePublicMetaUrl(url, "image");
-            }
-            postParams = form || { url, caption: post.text };
+            // Use verified public HTTPS URL for Facebook Page photo publishing.
+            // Meta Graph API fetches this directly and avoids HTTP 500 multipart payload errors.
+            const publicUrl = await ensurePublicMetaUrl(url, "image");
+            postParams = { url: publicUrl, caption: post.text };
         }
         else {
             postParams = { message: post.text };
