@@ -57,13 +57,15 @@ export function LiveAutoPilotPulse({
   }, []);
 
   // Find the next upcoming scheduled plan, or the most recent one
-  const upcomingPlans = plans.filter(
-    (p) => p.publish_state === "ENQUEUED" || p.content_status === "SCHEDULED" || p.state === "ENQUEUED"
-  ).sort((a, b) => {
-    const timeA = new Date(a.execute_at || a.scheduled_at || a.proposed_at || 0).getTime();
-    const timeB = new Date(b.execute_at || b.scheduled_at || b.proposed_at || 0).getTime();
-    return timeA - timeB;
-  });
+  const upcomingPlans = React.useMemo(() => {
+    return plans.filter(
+      (p) => p.publish_state === "ENQUEUED" || p.content_status === "SCHEDULED" || p.state === "ENQUEUED"
+    ).sort((a, b) => {
+      const timeA = new Date(a.execute_at || a.scheduled_at || a.proposed_at || 0).getTime();
+      const timeB = new Date(b.execute_at || b.scheduled_at || b.proposed_at || 0).getTime();
+      return timeA - timeB;
+    });
+  }, [plans]);
 
   const nextPlan = upcomingPlans.find(
     (p) => new Date(p.execute_at || p.scheduled_at || p.proposed_at || 0).getTime() >= now
@@ -161,9 +163,14 @@ export function LiveAutoPilotPulse({
 
   // Extract visual prompt and generated image
   const variants = (currentPlan.variants || {}) as Record<string, any>;
-  const firstVariantKey = Object.keys(variants)[0] || "Instagram";
+  const firstVariantKey = Object.keys(variants).filter((k) => k !== "metadata")[0] || "Instagram";
   const primaryVariant = variants[firstVariantKey] || {};
   const targetPlatform = currentPlan.social_platform || currentPlan.platforms?.[0] || firstVariantKey;
+  const allPlatforms: string[] = (Array.isArray(currentPlan.platforms) && currentPlan.platforms.length > 0)
+    ? currentPlan.platforms
+    : Object.keys(variants).filter((k) => k !== "metadata").length > 0
+    ? Object.keys(variants).filter((k) => k !== "metadata")
+    : [targetPlatform];
 
   const rawMediaUrl =
     localImages[currentPlan.id] ||
@@ -261,18 +268,25 @@ export function LiveAutoPilotPulse({
           <span style={{ fontSize: "0.85rem", fontWeight: 700, letterSpacing: "0.03em", color: "#f8fafc", textTransform: "uppercase" }}>
             Live Real-Time Auto-Post Monitor
           </span>
-          <span
-            style={{
-              fontSize: "0.7rem",
-              padding: "2px 8px",
-              borderRadius: "6px",
-              background: "rgba(99, 102, 241, 0.25)",
-              color: "#a5b4fc",
-              fontWeight: 600,
-            }}
-          >
-            {targetPlatform} Post
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+            {allPlatforms.map((p) => (
+              <span
+                key={p}
+                style={{
+                  fontSize: "0.7rem",
+                  padding: "2px 8px",
+                  borderRadius: "6px",
+                  background: "rgba(99, 102, 241, 0.25)",
+                  color: "#c7d2fe",
+                  fontWeight: 600,
+                  textTransform: "capitalize",
+                }}
+              >
+                {p}
+              </span>
+            ))}
+            <span style={{ fontSize: "0.7rem", color: "#94a3b8" }}>Auto-Scheduled</span>
+          </div>
         </div>
 
         {/* Dynamic Countdown Clock */}
@@ -637,9 +651,27 @@ export function LiveAutoPilotPulse({
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "0.8rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255, 255, 255, 0.06)", paddingBottom: "6px" }}>
-                <span style={{ color: "var(--color-text-muted)" }}>Target Channel:</span>
-                <strong style={{ color: "#f8fafc" }}>{targetPlatform}</strong>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(255, 255, 255, 0.06)", paddingBottom: "6px" }}>
+                <span style={{ color: "var(--color-text-muted)" }}>Target Channels:</span>
+                <div style={{ display: "flex", gap: "5px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {allPlatforms.map((p) => (
+                    <span
+                      key={p}
+                      style={{
+                        fontSize: "0.72rem",
+                        padding: "2px 6px",
+                        borderRadius: "4px",
+                        background: "rgba(99, 102, 241, 0.2)",
+                        border: "1px solid rgba(99, 102, 241, 0.35)",
+                        color: "#e0e7ff",
+                        fontWeight: 600,
+                        textTransform: "capitalize",
+                      }}
+                    >
+                      {p}
+                    </span>
+                  ))}
+                </div>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255, 255, 255, 0.06)", paddingBottom: "6px" }}>
                 <span style={{ color: "var(--color-text-muted)" }}>Scheduled Time:</span>

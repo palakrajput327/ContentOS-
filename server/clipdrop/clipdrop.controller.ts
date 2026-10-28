@@ -22,6 +22,9 @@ const suggestPosterPromptSchema = z.object({
   sourceVisualContext: z.string().max(1000).optional(),
   title: z.string().max(200).optional(),
   platform: z.string().optional(),
+  documentName: z.string().optional(),
+  documentId: z.string().optional(),
+  aspectRatio: z.string().optional(),
 });
 
 const generateImageSchema = z.object({
@@ -89,8 +92,12 @@ export class ClipdropController {
       excerpt: v.excerpt,
       sourceVisualContext: v.sourceVisualContext,
       title: v.title,
+      documentName: v.documentName,
+      documentId: v.documentId,
+      workspaceId: r.workspace.id,
       brand,
       platform: v.platform,
+      aspectRatio: v.aspectRatio,
     });
   }
 

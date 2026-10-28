@@ -7,6 +7,9 @@ import { uploadManagedMedia } from "../storage/managed-media.js";
 import { getStorageProvider } from "../storage/storage.factory.js";
 import { getLLMProvider } from "../ai/llm.service.js";
 import { z } from "zod";
+import { ImagePromptArchitect, StructuredVisualSpecification } from "../ai/prompt-architect.js";
+import { BusinessProfileService } from "../knowledge/business-profile.service.js";
+import type { ImageGenerator, ImageGenerationInput, ImageGenerationOutput } from "../ai/image-generator.interface.js";
 
 export interface GenerateImageOptions {
   workspaceId: string;
@@ -47,7 +50,30 @@ export interface AttachAndSaveOptions {
 }
 
 @Injectable()
-export class ClipdropService {
+export class ClipdropService implements ImageGenerator {
+  readonly providerName = "clipdrop";
+
+  async generate(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
+    const res = await this.generateImage({
+      workspaceId: input.workspaceId,
+      userId: input.userId || "",
+      prompt: input.prompt,
+      headline: input.headline,
+      aspectRatio: (input.aspectRatio as any) || "1:1",
+      platform: input.platform,
+      contentId: input.contentId,
+      enableOverlay: input.brandOverlay,
+    });
+    return {
+      assetUrl: res.url,
+      assetId: res.assetId,
+      provider: res.engine || "clipdrop",
+      providerJobId: (res as any).providerJobId || res.assetId,
+      promptHash: createHash("sha256").update(input.prompt).digest("hex"),
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
   private getApiKey(): string | null {
     const key = process.env.CLIPDROP_API_KEY;
     return key && key.trim() ? key.trim() : null;
@@ -69,52 +95,20 @@ export class ClipdropService {
   }
 
   /**
-   * Generates a platform-optimized visual prompt using ContentOS LLM (Groq / Gemini / OpenRouter)
+   * Generates a platform-optimized visual prompt using ImagePromptArchitect
    */
-  async suggestPrompt(contentText: string, platform?: string, contextInfo?: string): Promise<{ prompt: string }> {
-    const provider = getLLMProvider();
-    const systemPrompt = `You are an elite creative visual director.
-Analyze the provided content and formulate a vivid, compelling image generation prompt for modern text-to-image AI (FLUX / Clipdrop / Midjourney).
-
-STRICT RULES:
-1. Extract the core concept and determine the best visual style (cinematic photography, high-tech conceptual art, or modern editorial illustration).
-2. Do NOT repeatedly use the word '3D'. Instead describe physical materials, lighting (rim light, volumetric rays, soft studio glow), and camera framing.
-3. Turn abstract concepts into tangible, meaningful visual metaphors.
-4. Do NOT include phrases like "Create an image of", "Illustration of", or quotation marks.
-5. Return 35 to 65 words of rich, descriptive visual keywords.`;
-
-    const userMessage = `Content text:\n"${(contentText || "").slice(0, 1500)}"\n${contextInfo ? `Context: ${contextInfo}` : ""}\nTarget Platform: ${platform || "Social Media"}`;
-
-    try {
-      if (await provider.validateConfiguration()) {
-        const res = await provider.generateStructured({
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userMessage },
-          ],
-          schema: z.object({
-            prompt: z.string(),
-          }),
-          schemaName: "ImagePromptSuggestion",
-        });
-        const promptVal = (res.data as any)?.prompt;
-        if (promptVal && promptVal.trim().length > 15) {
-          return { prompt: promptVal.trim() };
-        }
-      }
-    } catch (err) {
-      console.warn("LLM prompt suggestion fallback:", err);
-    }
-
-    // High quality thematic fallbacks if LLM unavailable
-    const subject = contentText.split(/[.\n]/)[0]?.replace(/[^a-zA-Z0-9 ]/g, " ").trim().slice(0, 80) || "digital innovation";
-    return {
-      prompt: `Cinematic conceptual visual representing ${subject}, dramatic directional lighting, elegant composition, rich textures, high-contrast atmospheric depth, 8k resolution`,
-    };
+  async suggestPrompt(contentText: string, platform?: string, contextInfo?: string): Promise<{ prompt: string; headline?: string; spec?: StructuredVisualSpecification }> {
+    const architect = new ImagePromptArchitect();
+    const spec = await architect.generateSpecification({
+      knowledgeConcept: contentText,
+      platform,
+      documentName: contextInfo,
+    });
+    return { prompt: spec.generationPrompt, headline: spec.headline, spec };
   }
 
   /**
-   * Generates a platform-optimized visual poster prompt directly from PDF knowledge concepts & brand guidelines
+   * Generates a structured, brand-aware visual poster prompt using the 9-part Image Prompt Architect & Business Profile
    */
   async suggestPosterPrompt(opts: {
     knowledgeConcept: string;
@@ -122,6 +116,8 @@ STRICT RULES:
     sourceVisualContext?: string;
     title?: string;
     documentName?: string;
+    documentId?: string;
+    workspaceId?: string;
     brand?: {
       primary_color?: string;
       secondary_color?: string;
@@ -130,81 +126,45 @@ STRICT RULES:
       cta?: string;
     };
     platform?: string;
-  }): Promise<{ prompt: string; headline: string }> {
-    const provider = getLLMProvider();
-
-    const safeConcept = typeof opts.knowledgeConcept === "string" ? opts.knowledgeConcept : (opts.knowledgeConcept ? JSON.stringify(opts.knowledgeConcept) : (opts.title || "Core Business Concept"));
-    const safeExcerpt = typeof opts.excerpt === "string" ? opts.excerpt : (opts.excerpt ? String(opts.excerpt) : "");
-    const safeTitle = typeof opts.title === "string" ? opts.title : (opts.title ? String(opts.title) : "");
-
-    const primaryColor = this.sanitizeColorToName(opts.brand?.primary_color);
-    const systemPrompt = `You are a world-class creative visual director for global brands (like Apple, Stripe, Bloomberg, Forbes, Unsplash).
-Your objective: Formulate an original, highly compelling, photorealistic visual scene prompt based entirely on the specific concept and text extracted from the user's uploaded document.
-
-DYNAMIC VISUAL PRINCIPLES:
-1. PURE CONTENT-DRIVEN CREATIVITY:
-   - Deeply analyze the extracted knowledge concept, title, and PDF source excerpt provided in the user message.
-   - Every single topic MUST get a unique, creative visual metaphor or real-world scene tailored specifically to its actual meaning.
-   - Never repeat the same objects across different topics. Do not default to generic stock items like a blank phone on a desk, an empty table, or a group of people in a meeting room.
-   - Think like a senior art director: What physical scene, tangible metaphor, professional setup, architectural space, or authentic object vividly illustrates this specific idea?
-
-2. VISUAL COMPOSITION & PHOTOGRAPHIC DETAILS:
-   - Describe concrete physical elements, textures, and materials (e.g. brushed metal, polished marble, illuminated glass, fine wood, leather, paper, gold).
-   - Specify dynamic lighting (e.g. golden hour warmth, dramatic directional rim lighting, soft natural window daylight, glowing ambient accents).
-   - Specify camera lens and depth of field (e.g. shot on 50mm or 85mm f/1.4 lens, crisp subject focus, creamy background bokeh, commercial editorial photography).
-
-3. ABSOLUTE CONSTRAINTS:
-   - NO GROUPS OF PEOPLE / NO DISTANT FACES: Small diffusion models distort faces in wide group shots. Focus on crisp objects, setups, architecture, macro details, or hands interacting with tools.
-   - NO LITERAL GEOMETRIC SCULPTURES: Never generate abstract stone pyramids, triangles, or cubes for business concepts.
-   - NO REPETITIVE GADGETS: Do not just place a blank phone or tablet on a table.
-   - NO TEXT OR NUMBERS: Image models cannot render text accurately. Never request written words or numbers in the image.
-   - NO SCI-FI TROPES: Avoid dark dungeons, alien portals, glowing forcefields, or fantasy vaults.
-   - NO HEX CODES: Use color words like 'crimson red', 'golden amber', 'deep navy', 'crisp white'.
-
-4. FORMAT:
-   - 35 to 55 words describing: [Hero Subject / Scene] + [Action / Details directly from the concept] + [Environment & Materials] + [Lighting & Lens Style].
-
-SCHEMA:
-Return JSON:
-{
-  "prompt": "35-55 words dynamic commercial visual prompt tailored directly to the extracted content",
-  "headline": "3-6 words bold title"
-}`;
-
-    const userMessage = `Document: "${opts.documentName || "Uploaded Document"}"
-Topic Title: "${safeTitle}"
-Knowledge Concept: "${safeConcept.slice(0, 1000)}"
-${safeExcerpt ? `Extracted PDF Text Excerpt: "${safeExcerpt.slice(0, 800)}"` : ""}
-${opts.sourceVisualContext ? `PDF Visual Context: "${opts.sourceVisualContext}"` : ""}
-Brand Tone: ${opts.brand?.tone || "Professional, Clean, Modern"}
-Platform: ${opts.platform || "LinkedIn"}`;
-
-    try {
-      if (await provider.validateConfiguration()) {
-        const res = await provider.generateStructured({
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userMessage },
-          ],
-          schema: z.object({
-            prompt: z.string(),
-            headline: z.string().optional().default("Key Insight"),
-          }),
-          schemaName: "PosterPromptSuggestion",
-        });
-        const data = res.data as any;
-        if (data?.prompt && data.prompt.trim().length > 15) {
-          return {
-            prompt: data.prompt.trim().replace(/#[0-9a-fA-F]{3,8}/g, "crimson red"),
-            headline: (data.headline || opts.title || "Key Insight").trim().slice(0, 60),
-          };
-        }
+    aspectRatio?: string;
+  }): Promise<{ prompt: string; headline: string; spec?: StructuredVisualSpecification }> {
+    let brandProfile = undefined;
+    if (opts.documentId && opts.workspaceId) {
+      try {
+        const bpService = new BusinessProfileService();
+        brandProfile = await bpService.getOrBuildProfile(opts.documentId, opts.workspaceId);
+      } catch (err: any) {
+        console.warn("[suggestPosterPrompt] Profile loading fallback:", err.message || err);
       }
-    } catch (err) {
-      console.warn("[ClipdropService] suggestPosterPrompt LLM warning:", (err as Error)?.message || err);
     }
 
-    // Dynamic topic-aware fallback synthesized directly from extracted content (no hardcoded domain strings)
+    try {
+      const architect = new ImagePromptArchitect();
+      const spec = await architect.generateSpecification({
+        knowledgeConcept: opts.knowledgeConcept,
+        excerpt: opts.excerpt,
+        title: opts.title,
+        documentName: opts.documentName,
+        platform: opts.platform,
+        aspectRatio: opts.aspectRatio,
+        brandProfile: brandProfile || {
+          companyName: opts.brand?.name || opts.documentName?.replace(/\.[^/.]+$/, ""),
+          brandColors: opts.brand?.primary_color ? [opts.brand.primary_color] : [],
+          visualPersonality: opts.brand?.tone,
+        },
+      });
+
+      if (spec?.generationPrompt && spec.generationPrompt.trim().length > 15) {
+        return {
+          prompt: spec.generationPrompt.trim().replace(/#[0-9a-fA-F]{3,8}/g, "crimson red"),
+          headline: (spec.headline || opts.title || "Key Insight").trim().slice(0, 60),
+          spec,
+        };
+      }
+    } catch (err: any) {
+      console.warn("[ClipdropService] ImagePromptArchitect warning:", err?.message || err);
+    }
+
     const cleanTitle = (opts.title || "Core Insight")
       .replace(/[^\w\s-]/g, " ")
       .trim()
@@ -312,6 +272,8 @@ Platform: ${opts.platform || "LinkedIn"}`;
           status: opts.contentId ? "NEEDS_REVIEW" : asset.status,
           extractedCompany,
           extractedHeadline,
+          promptHash: keyHash,
+          prompt: finalPrompt,
         };
       }
     }

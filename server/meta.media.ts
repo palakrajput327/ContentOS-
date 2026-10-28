@@ -74,18 +74,20 @@ export async function resolveMetaMedia(
     3600,
   );
   const convertJpeg = jpeg && asset.mime_type.startsWith('image/') && !['image/jpeg','image/jpg'].includes(asset.mime_type);
-  if (publicDownload && (url.startsWith("/") || convertJpeg)) {
-    const base =
-      process.env.META_MEDIA_PUBLIC_BASE_URL ||
-      new URL(socialRedirectUri("facebook")).origin;
+  if (url.startsWith("/") || convertJpeg) {
+    const customBase = process.env.META_MEDIA_PUBLIC_BASE_URL?.trim();
+    const isCustomBaseValid = customBase && !customBase.includes("localhost") && !customBase.includes("hidustansocialnetwork.in");
+    const base = isCustomBaseValid
+      ? customBase
+      : `http://localhost:${process.env.PORT || 3001}`;
     url = new URL(
       "/api/v1/social/meta/media/" + metaMediaTicket(workspaceId, assetId) + (convertJpeg ? '?format=jpeg' : ''),
       base,
     ).toString();
   }
   return {
-    url: publicDownload ? publicMetaUrl(url) : url,
-    mimeType: publicDownload && convertJpeg ? 'image/jpeg' : asset.mime_type,
+    url,
+    mimeType: convertJpeg ? 'image/jpeg' : asset.mime_type,
     type: asset.mime_type.startsWith("video/") ? "video" : "image",
   };
 }
