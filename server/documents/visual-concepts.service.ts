@@ -530,7 +530,7 @@ Return JSON with "concepts" array.`;
         row.concept_title,
         caption,
         JSON.stringify(variants),
-        channels,
+        JSON.stringify(channels),
         row.asset_id || null,
       ]
     );
@@ -560,14 +560,14 @@ Return JSON with "concepts" array.`;
         const spId = randomUUID();
         await pool.query(
           `INSERT INTO scheduled_posts (id, workspace_id, content_id, account_id, content_version, execute_at, timezone, state, created_at)
-           VALUES ($1, $2, $3, $4, 1, NOW(), 'UTC', 'ENQUEUED', NOW())`,
+           VALUES ($1, $2, $3, $4, 1, NOW() - INTERVAL '5 seconds', 'UTC', 'ENQUEUED', NOW())`,
           [spId, opts.workspaceId, contentId, matchedAccount.id]
         );
 
         try {
           const { executePublishRecord } = await import("../publishing.js");
           console.log(`[VisualConcepts] Auto-publishing live to ${matchedAccount.platform} (${matchedAccount.name})...`);
-          const res = await executePublishRecord(spId, { attemptsMade: 0, maxAttempts: 3 });
+          const res = await executePublishRecord(spId, { now: new Date(Date.now() + 10000), attemptsMade: 0, maxAttempts: 3 });
           publishResults.push({ platform: matchedAccount.platform, result: res });
           if (res.success) publishedCount++;
         } catch (pubErr: any) {
