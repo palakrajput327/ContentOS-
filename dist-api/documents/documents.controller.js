@@ -209,6 +209,18 @@ let DocumentsController = class DocumentsController {
             channels: body?.channels,
         });
     }
+    async syncVisualSchedule(r, documentId, body) {
+        assertPermission(r.workspace.role, "schedule");
+        const { VisualConceptsService } = await import("./visual-concepts.service.js");
+        const service = new VisualConceptsService();
+        return service.syncSchedule({
+            documentId,
+            workspaceId: r.workspace.id,
+            userId: r.user.id,
+            slots: body.slots || [],
+            channels: body.channels || ["linkedin"],
+        });
+    }
     async getBrandIdentity(r, documentId) {
         const { BrandIdentityService } = await import("./brand-identity.service.js");
         const service = new BrandIdentityService();
@@ -587,6 +599,16 @@ __decorate([
     __metadata("design:paramtypes", [Object, String, String, Object]),
     __metadata("design:returntype", Promise)
 ], DocumentsController.prototype, "dispatchVisualConcept", null);
+__decorate([
+    WorkspaceRequired(),
+    Post(":documentId/visual-concepts/sync-schedule"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __param(2, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "syncVisualSchedule", null);
 __decorate([
     WorkspaceRequired(),
     Get(":documentId/brand-identity"),

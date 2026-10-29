@@ -369,17 +369,21 @@ let KnowledgeAutomationController = class KnowledgeAutomationController {
         // 1. Fetch dispatched concepts from document_visual_concepts (last 10 days)
         const conceptsRes = await pool.query(`SELECT 
         dvc.id,
+        'document' as source,
         dvc.document_id,
+        COALESCE(d.original_filename, 'Business Document') as document_name,
         dvc.concept_title as title,
-        dvc.source_excerpt as excerpt,
-        dvc.prompt,
+        dvc.prompt as concept_prompt,
+        dvc.source_excerpt,
+        dvc.source_page as page_number,
         dvc.asset_id,
         dvc.image_url,
         dvc.status,
-        dvc.target_channels as channels,
+        COALESCE(dvc.target_channels, '["LinkedIn", "Instagram", "Facebook", "Telegram"]'::jsonb) as target_channels,
+        dvc.scheduled_at,
         dvc.dispatched_at,
         dvc.created_at,
-        d.original_filename as document_name
+        dvc.post_result
        FROM document_visual_concepts dvc
        LEFT JOIN documents d ON d.id = dvc.document_id
        WHERE dvc.workspace_id = $1 
@@ -390,26 +394,46 @@ let KnowledgeAutomationController = class KnowledgeAutomationController {
         // 2. Fetch published content from content table (last 10 days)
         const contentRes = await pool.query(`SELECT 
         c.id,
+        'content_library' as source,
         NULL as document_id,
+        'Content Library Post' as document_name,
         c.title,
-        c.body as excerpt,
-        '' as prompt,
-        NULL as asset_id,
-        (SELECT object_key FROM media_assets ma WHERE ma.id = c.image_asset_id LIMIT 1) as image_url,
+        '' as concept_prompt,
+        c.body as source_excerpt,
+        NULL as page_number,
+        c.image_asset_id as asset_id,
+        ma.object_key,
         'DISPATCHED' as status,
-        c.platforms as channels,
+        COALESCE(c.platforms, '["LinkedIn", "Instagram", "Facebook", "Telegram"]'::jsonb) as target_channels,
+        c.updated_at as scheduled_at,
         c.updated_at as dispatched_at,
         c.created_at,
-        'Content Library Post' as document_name
+        NULL as post_result
        FROM content c
+       LEFT JOIN media_assets ma ON ma.id = c.image_asset_id
        WHERE c.workspace_id = $1 
          AND c.status = 'PUBLISHED'
          AND c.created_at >= NOW() - INTERVAL '10 days'
        ORDER BY c.created_at DESC
        LIMIT 50`, [w]);
+        // Resolve media URLs for content rows
+        const { generateStorageSignature } = await import("../storage/signed-url.js");
+        const storageBase = process.env.PUBLIC_STORAGE_URL || "http://localhost:3001/api/v1/storage/local/download";
+        const expires = Date.now() + 1000 * 60 * 60 * 24 * 365;
+        const formattedContent = contentRes.rows.map((row) => {
+            let imageUrl = null;
+            if (row.object_key) {
+                const sig = generateStorageSignature("contentos-media", row.object_key, expires);
+                imageUrl = `${storageBase}?bucket=contentos-media&key=${encodeURIComponent(row.object_key)}&expires=${expires}&sig=${sig}`;
+            }
+            return {
+                ...row,
+                image_url: imageUrl,
+            };
+        });
         // Merge and deduplicate
-        const items = [...conceptsRes.rows, ...contentRes.rows]
-            .filter((v, i, a) => a.findIndex(t => t.id === v.id || (t.title && t.title === v.title)) === i)
+        const items = [...conceptsRes.rows, ...formattedContent]
+            .filter((v, i, a) => a.findIndex((t) => t.id === v.id || (t.title && t.title === v.title)) === i)
             .sort((a, b) => new Date(b.dispatched_at || b.created_at).getTime() - new Date(a.dispatched_at || a.created_at).getTime());
         return {
             history: items,

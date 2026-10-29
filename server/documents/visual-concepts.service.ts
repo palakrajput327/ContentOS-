@@ -465,7 +465,7 @@ Return JSON with "concepts" array.`;
     workspaceId: string;
     userId: string;
     channels?: string[];
-  }): Promise<{ success: boolean; conceptId: string; dispatchedAt: string }> {
+  }): Promise<{ success: boolean; conceptId: string; dispatchedAt: string; publishedCount?: number }> {
     const row = (
       await pool.query(
         `SELECT id, concept_title, prompt, source_excerpt, asset_id, image_url 
@@ -480,7 +480,6 @@ Return JSON with "concepts" array.`;
     }
 
     // Auto-Safety Guarantee: If no visual was generated manually, auto-generate via FLUX before dispatching!
-    // Ensures NO post is ever dispatched blank without an image.
     if (!row.image_url || !row.asset_id) {
       console.log(`[VisualConcepts] Concept ${opts.conceptId} has no visual yet. Auto-synthesizing FLUX visual before dispatch...`);
       try {
@@ -501,46 +500,180 @@ Return JSON with "concepts" array.`;
     const dispatchedAt = new Date().toISOString();
     const channels = opts.channels && opts.channels.length > 0 ? opts.channels : ["linkedin"];
 
-    // 1. Mark as DISPATCHED in database
+    // Fetch connected accounts for this workspace
+    const accountsRes = await pool.query(
+      `SELECT id, platform, name FROM social_accounts WHERE workspace_id = $1 AND state = 'CONNECTED'`,
+      [opts.workspaceId]
+    );
+    const connectedAccounts = accountsRes.rows;
+
+    // Build platform captions
+    const caption = row.source_excerpt || `Strategic Architecture: ${row.concept_title}\n\nIn modern enterprise governance, foundational clarity and rigorous verification drive sustainable advantage.`;
+    const variants: Record<string, any> = {};
+    for (const ch of channels) {
+      variants[ch] = {
+        caption,
+        mediaAssetId: row.asset_id,
+        mediaUrl: row.image_url,
+      };
+    }
+
+    // Create content item with status = 'SCHEDULED' so claim() can claim it
+    const contentId = randomUUID();
     await pool.query(
-      `UPDATE document_visual_concepts
-       SET status = 'DISPATCHED', dispatched_at = NOW(), target_channels = $1
-       WHERE id = $2`,
-      [channels, opts.conceptId]
+      `INSERT INTO content (id, workspace_id, created_by, updated_by, title, body, variants, platforms, status, image_asset_id, created_at, updated_at)
+       VALUES ($1, $2, $3, $3, $4, $5, $6, $7, 'SCHEDULED', $8, NOW(), NOW())`,
+      [
+        contentId,
+        opts.workspaceId,
+        opts.userId,
+        row.concept_title,
+        caption,
+        JSON.stringify(variants),
+        channels,
+        row.asset_id || null,
+      ]
     );
 
-    // 2. Also record in content table for Content Library & Analytics
-    try {
-      const contentId = randomUUID();
-      await pool.query(
-        `INSERT INTO content (id, workspace_id, created_by, title, body, status, platforms, image_asset_id, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, 'PUBLISHED', $6, $7, NOW(), NOW())`,
-        [
-          contentId,
-          opts.workspaceId,
-          opts.userId,
-          row.concept_title,
-          row.source_excerpt || row.concept_title,
-          channels,
-          row.asset_id || null,
-        ]
-      );
+    // Create content_versions record
+    await pool.query(
+      `INSERT INTO content_versions (id, workspace_id, content_id, version, snapshot, created_by, created_at)
+       VALUES ($1, $2, $3, 1, $4, $5, NOW())`,
+      [
+        randomUUID(),
+        opts.workspaceId,
+        contentId,
+        JSON.stringify({ title: row.concept_title, body: caption, variants, platforms: channels }),
+        opts.userId,
+      ]
+    );
 
-      if (row.asset_id) {
+    // Create scheduled_posts for each connected matching account and publish live!
+    const publishResults: any[] = [];
+    let publishedCount = 0;
+
+    for (const ch of channels) {
+      const matchedAccount = connectedAccounts.find(
+        (a: any) => a.platform.toLowerCase() === ch.toLowerCase()
+      );
+      if (matchedAccount) {
+        const spId = randomUUID();
         await pool.query(
-          `INSERT INTO content_media (id, content_id, media_asset_id, position, created_at)
-           VALUES ($1, $2, $3, 0, NOW()) ON CONFLICT DO NOTHING`,
-          [randomUUID(), contentId, row.asset_id]
+          `INSERT INTO scheduled_posts (id, workspace_id, content_id, account_id, content_version, execute_at, timezone, state, created_at)
+           VALUES ($1, $2, $3, $4, 1, NOW(), 'UTC', 'ENQUEUED', NOW())`,
+          [spId, opts.workspaceId, contentId, matchedAccount.id]
         );
+
+        try {
+          const { executePublishRecord } = await import("../publishing.js");
+          console.log(`[VisualConcepts] Auto-publishing live to ${matchedAccount.platform} (${matchedAccount.name})...`);
+          const res = await executePublishRecord(spId, { attemptsMade: 0, maxAttempts: 3 });
+          publishResults.push({ platform: matchedAccount.platform, result: res });
+          if (res.success) publishedCount++;
+        } catch (pubErr: any) {
+          console.warn(`[VisualConcepts] Direct publish error for ${matchedAccount.platform}:`, pubErr?.message || pubErr);
+          publishResults.push({ platform: matchedAccount.platform, error: pubErr?.message || String(pubErr) });
+        }
       }
-    } catch (e) {
-      console.warn("[VisualConcepts] Content log notice:", e);
     }
+
+    // Mark concept as DISPATCHED in database with live publish results
+    await pool.query(
+      `UPDATE document_visual_concepts
+       SET status = 'DISPATCHED', dispatched_at = NOW(), target_channels = $1, post_result = $2
+       WHERE id = $3`,
+      [channels, JSON.stringify(publishResults), opts.conceptId]
+    );
+
+    // Finalize content status
+    await pool.query(
+      `UPDATE content SET status = 'PUBLISHED', updated_at = NOW() WHERE id = $1`,
+      [contentId]
+    );
 
     return {
       success: true,
       conceptId: opts.conceptId,
       dispatchedAt,
+      publishedCount,
+    };
+  }
+
+  /**
+   * Syncs and persists automated dispatch slots to the database
+   */
+  async syncSchedule(opts: {
+    documentId: string;
+    workspaceId: string;
+    userId: string;
+    slots: Array<{ time: string; label: string }>;
+    channels: string[];
+    timezone?: string;
+  }): Promise<{
+    success: boolean;
+    scheduledCount: number;
+    slots: any[];
+  }> {
+    const { documentId, workspaceId, slots, channels } = opts;
+    if (!slots || slots.length === 0) {
+      return { success: false, scheduledCount: 0, slots: [] };
+    }
+
+    const sortedSlots = [...slots].sort((a, b) => a.time.localeCompare(b.time));
+
+    const concepts = (
+      await pool.query(
+        `SELECT id, concept_title, source_page, prompt
+         FROM document_visual_concepts
+         WHERE document_id = $1 AND workspace_id = $2 AND (status IS NULL OR status != 'DISPATCHED')
+         ORDER BY source_page ASC, created_at ASC`,
+        [documentId, workspaceId]
+      )
+    ).rows;
+
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMin = now.getMinutes();
+
+    let dayOffset = 0;
+    let slotIdx = sortedSlots.findIndex((s) => {
+      const [h, m] = s.time.split(":").map(Number);
+      return h > currentHour || (h === currentHour && m > currentMin);
+    });
+
+    if (slotIdx === -1) {
+      dayOffset = 1;
+      slotIdx = 0;
+    }
+
+    let count = 0;
+    for (const c of concepts) {
+      const slot = sortedSlots[slotIdx];
+      const targetDate = new Date(now);
+      targetDate.setDate(targetDate.getDate() + dayOffset);
+      const [sh, sm] = slot.time.split(":").map(Number);
+      targetDate.setHours(sh, sm, 0, 0);
+
+      await pool.query(
+        `UPDATE document_visual_concepts
+         SET scheduled_at = $1, target_channels = $2, status = 'PENDING', updated_at = NOW()
+         WHERE id = $3`,
+        [targetDate.toISOString(), channels, c.id]
+      );
+      count++;
+
+      slotIdx++;
+      if (slotIdx >= sortedSlots.length) {
+        slotIdx = 0;
+        dayOffset++;
+      }
+    }
+
+    console.log(`[VisualConcepts] Successfully synced schedule for ${count} visual concepts on document ${documentId}`);
+    return {
+      success: true,
+      scheduledCount: count,
+      slots: sortedSlots,
     };
   }
 

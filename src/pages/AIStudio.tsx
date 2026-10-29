@@ -150,7 +150,14 @@ export default function AIStudio() {
   const [showClipdropModal, setShowClipdropModal] = useState(false);
   const [activePlanForStudio, setActivePlanForStudio] = useState<string | null>(null);
   const [showAutoPilotGuide, setShowAutoPilotGuide] = useState(false);
-  const [attachedVisual, setAttachedVisual] = useState<{ assetId: string; url: string; filename: string } | null>(null);
+  const [attachedVisual, setAttachedVisual] = useState<{
+    assetId: string;
+    url: string;
+    filename?: string;
+    headline?: string;
+    prompt?: string;
+    engine?: string;
+  } | null>(null);
   const [generatedEvidence, setGeneratedEvidence] = useState<any[]>([]);
 
   // Studio Mode: 'topic' | 'pdf'
@@ -287,6 +294,7 @@ export default function AIStudio() {
     caption: string;
     hashtags: string[];
   }>>([]);
+  const [activeScriptIndex, setActiveScriptIndex] = useState<number | null>(null);
   const [loadingScripts, setLoadingScripts] = useState(false);
   const [copiedScriptId, setCopiedScriptId] = useState<string | null>(null);
   const [refreshingScriptId, setRefreshingScriptId] = useState<string | number | null>(null);

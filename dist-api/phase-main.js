@@ -404,6 +404,37 @@ export async function bootstrap() {
             }
             const { deliverEmails } = await import("./mail.js");
             await deliverEmails({ limit: 10 });
+            // Auto-dispatch due visual concepts from Document Knowledge Base / AI Studio
+            try {
+                const dueConcepts = (await pool.query(`SELECT dvc.id, dvc.document_id, dvc.workspace_id, dvc.target_channels, 
+                  COALESCE(d.created_by, (SELECT id FROM users LIMIT 1)) as user_id
+           FROM document_visual_concepts dvc
+           LEFT JOIN documents d ON d.id = dvc.document_id
+           WHERE dvc.scheduled_at IS NOT NULL 
+             AND dvc.scheduled_at <= NOW()
+             AND (dvc.status IS NULL OR dvc.status = 'PENDING')
+           ORDER BY dvc.scheduled_at ASC LIMIT 5`)).rows;
+                for (const concept of dueConcepts) {
+                    try {
+                        console.log(`[ContentOS] Auto-dispatching due visual concept ${concept.id} (Doc: ${concept.document_id})...`);
+                        const { VisualConceptsService } = await import("./documents/visual-concepts.service.js");
+                        const vcService = new VisualConceptsService();
+                        await vcService.dispatchConcept({
+                            documentId: concept.document_id,
+                            conceptId: concept.id,
+                            workspaceId: concept.workspace_id,
+                            userId: concept.user_id,
+                            channels: concept.target_channels || ["linkedin"],
+                        });
+                    }
+                    catch (conceptErr) {
+                        console.warn(`[ContentOS] Auto-dispatch failed for concept ${concept.id}:`, conceptErr?.message || conceptErr);
+                    }
+                }
+            }
+            catch (vcErr) {
+                console.warn("[ContentOS] Visual concepts check warning:", vcErr?.message || vcErr);
+            }
         }
         catch (loopErr) {
             console.warn("[ContentOS] Auto-scheduler loop error:", loopErr.message);
@@ -424,6 +455,37 @@ export async function bootstrap() {
                 catch (postErr) {
                     console.warn(`[ContentOS] Immediate auto-publish failed for post ${sp.id}:`, postErr.message);
                 }
+            }
+            // Auto-dispatch due visual concepts from Document Knowledge Base / AI Studio
+            try {
+                const dueConcepts = (await pool.query(`SELECT dvc.id, dvc.document_id, dvc.workspace_id, dvc.target_channels, 
+                  COALESCE(d.created_by, (SELECT id FROM users LIMIT 1)) as user_id
+           FROM document_visual_concepts dvc
+           LEFT JOIN documents d ON d.id = dvc.document_id
+           WHERE dvc.scheduled_at IS NOT NULL 
+             AND dvc.scheduled_at <= NOW()
+             AND (dvc.status IS NULL OR dvc.status = 'PENDING')
+           ORDER BY dvc.scheduled_at ASC LIMIT 5`)).rows;
+                for (const concept of dueConcepts) {
+                    try {
+                        console.log(`[ContentOS] Auto-dispatching due visual concept ${concept.id} (Doc: ${concept.document_id})...`);
+                        const { VisualConceptsService } = await import("./documents/visual-concepts.service.js");
+                        const vcService = new VisualConceptsService();
+                        await vcService.dispatchConcept({
+                            documentId: concept.document_id,
+                            conceptId: concept.id,
+                            workspaceId: concept.workspace_id,
+                            userId: concept.user_id,
+                            channels: concept.target_channels || ["linkedin"],
+                        });
+                    }
+                    catch (conceptErr) {
+                        console.warn(`[ContentOS] Auto-dispatch failed for concept ${concept.id}:`, conceptErr?.message || conceptErr);
+                    }
+                }
+            }
+            catch (vcErr) {
+                console.warn("[ContentOS] Visual concepts check warning:", vcErr?.message || vcErr);
             }
         }
         catch (err) {

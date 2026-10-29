@@ -179,9 +179,10 @@ export function DocumentVisualConceptsHub({
   // Automatically enforce that only connected channels can ever be selected
   useEffect(() => {
     if (connectedPlatformIds.size > 0) {
-      setSelectedChannels((prev) => {
+      setSelectedChannels((prev: string[]) => {
         const valid = prev.filter((id) => connectedPlatformIds.has(id.toLowerCase()));
-        return valid.length > 0 ? valid : [Array.from(connectedPlatformIds)[0]];
+        const first = Array.from(connectedPlatformIds)[0] as string | undefined;
+        return valid.length > 0 ? valid : (first ? [first] : ["linkedin"]);
       });
     }
   }, [connectedPlatformIds]);
@@ -231,7 +232,7 @@ export function DocumentVisualConceptsHub({
   };
 
   // Explicit Save & Apply Action
-  const handleSaveAndApplySchedule = () => {
+  const handleSaveAndApplySchedule = async () => {
     try {
       localStorage.setItem("contentos_dispatch_slots", JSON.stringify(slots));
       localStorage.setItem("contentos_dispatch_channels", JSON.stringify(selectedChannels));
@@ -241,6 +242,18 @@ export function DocumentVisualConceptsHub({
       const slotWord = slots.length === 1 ? "1 Post / Day" : `${slots.length} Posts / Day`;
       const channelsList = selectedChannels.map((c) => c.toUpperCase()).join(", ");
       setSavedNotice(`Schedule Saved & Applied! Now dispatching ${slotWord} to [${channelsList}].`);
+
+      if (documentId) {
+        try {
+          await request(`/documents/${documentId}/visual-concepts/sync-schedule`, "POST", {
+            slots,
+            channels: selectedChannels,
+          });
+          await fetchConcepts(true);
+        } catch (syncErr) {
+          console.warn("[VisualConceptsHub] Sync schedule server warning:", syncErr);
+        }
+      }
 
       // Auto-hide the success notice after 4 seconds
       setTimeout(() => {
@@ -266,6 +279,17 @@ export function DocumentVisualConceptsHub({
         setAllDispatched(true);
       } else {
         setAllDispatched(false);
+      }
+
+      // Auto-sync schedule timestamps to DB if unscheduled
+      if (data.concepts && data.concepts.length > 0 && slots.length > 0) {
+        const hasUnscheduled = data.concepts.some((c) => !c.scheduledAt && c.status !== "DISPATCHED");
+        if (hasUnscheduled) {
+          request(`/documents/${documentId}/visual-concepts/sync-schedule`, "POST", {
+            slots,
+            channels: selectedChannels,
+          }).catch(() => {});
+        }
       }
     } catch (err: any) {
       console.error("[VisualConceptsHub] Error loading concepts:", err);
@@ -462,6 +486,16 @@ export function DocumentVisualConceptsHub({
       };
     });
   }, [concepts, slots, currentTime]);
+
+  // Automated Dispatch: Triggers live dispatch when concept's slot time is reached
+  useEffect(() => {
+    if (!scheduledConcepts.length || dispatchingConceptId) return;
+    const dueConcept = scheduledConcepts.find((sc) => sc.isDue && sc.concept.status !== "DISPATCHED");
+    if (dueConcept) {
+      console.log(`[VisualConceptsHub] Slot time reached for ${dueConcept.concept.id}. Triggering auto-dispatch...`);
+      handleDispatchPost(dueConcept.concept.id);
+    }
+  }, [scheduledConcepts, dispatchingConceptId]);
 
   // Auto-sync first active concept with the right preview panel
   useEffect(() => {

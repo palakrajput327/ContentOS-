@@ -293,6 +293,25 @@ export class DocumentsController {
   }
 
   @WorkspaceRequired()
+  @Post(":documentId/visual-concepts/sync-schedule")
+  async syncVisualSchedule(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+    @Body() body: { slots: Array<{ time: string; label: string }>; channels?: string[] },
+  ) {
+    assertPermission(r.workspace.role, "schedule");
+    const { VisualConceptsService } = await import("./visual-concepts.service.js");
+    const service = new VisualConceptsService();
+    return service.syncSchedule({
+      documentId,
+      workspaceId: r.workspace.id,
+      userId: r.user.id,
+      slots: body.slots || [],
+      channels: body.channels || ["linkedin"],
+    });
+  }
+
+  @WorkspaceRequired()
   @Get(":documentId/brand-identity")
   async getBrandIdentity(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
     const { BrandIdentityService } = await import("./brand-identity.service.js");
