@@ -10,8 +10,9 @@ import * as path from "node:path";
 import { pool, transaction, audit } from "../db.js";
 import { uploadManagedMedia } from "../storage/managed-media.js";
 import { getStorageProvider } from "../storage/storage.factory.js";
+import { getLLMProvider } from "../ai/llm.service.js";
+import { z } from "zod";
 import { ImagePromptArchitect } from "../ai/prompt-architect.js";
-import { BusinessProfileService } from "../knowledge/business-profile.service.js";
 let ClipdropService = class ClipdropService {
     providerName = "clipdrop";
     async generate(input) {
@@ -38,6 +39,26 @@ let ClipdropService = class ClipdropService {
         const key = process.env.CLIPDROP_API_KEY;
         return key && key.trim() ? key.trim() : null;
     }
+    sanitizeColorToName(colorStr) {
+        if (!colorStr)
+            return "warm golden amber, crimson red accents, and crisp clean white";
+        const hex = colorStr.trim();
+        if (hex.startsWith("#")) {
+            const code = hex.slice(1).toUpperCase();
+            if (code.startsWith("E5") || code.startsWith("FF00") || code.startsWith("D") || code.startsWith("C"))
+                return "crimson red accents";
+            if (code.startsWith("FFD") || code.startsWith("E5A") || code.startsWith("F5"))
+                return "warm gold accents";
+            if (code.startsWith("0") || code.startsWith("1"))
+                return "deep navy and obsidian accents";
+            if (code.startsWith("2") || code.startsWith("3"))
+                return "emerald green accents";
+            if (code.startsWith("6") || code.startsWith("7"))
+                return "indigo and royal blue accents";
+            return "refined brand color accents";
+        }
+        return colorStr.replace(/#[0-9a-fA-F]{3,8}/g, "rich color");
+    }
     /**
      * Generates a platform-optimized visual prompt using ImagePromptArchitect
      */
@@ -54,34 +75,64 @@ let ClipdropService = class ClipdropService {
      * Generates a structured, brand-aware visual poster prompt using the 9-part Image Prompt Architect & Business Profile
      */
     async suggestPosterPrompt(opts) {
-        let brandProfile = undefined;
-        if (opts.documentId && opts.workspaceId) {
-            try {
-                const bpService = new BusinessProfileService();
-                brandProfile = await bpService.getOrBuildProfile(opts.documentId, opts.workspaceId);
-            }
-            catch (err) {
-                console.warn("[suggestPosterPrompt] Profile loading fallback:", err.message || err);
+        const provider = getLLMProvider();
+        const safeConcept = typeof opts.knowledgeConcept === "string" ? opts.knowledgeConcept : (opts.knowledgeConcept ? JSON.stringify(opts.knowledgeConcept) : (opts.title || "Core Business Concept"));
+        const safeExcerpt = typeof opts.excerpt === "string" ? opts.excerpt : (opts.excerpt ? String(opts.excerpt) : "");
+        const safeTitle = typeof opts.title === "string" ? opts.title : (opts.title ? String(opts.title) : "Key Business Concept");
+        const brandTone = opts.brand?.tone || "Professional, Authoritative, Clean";
+        const brandColors = opts.brand?.primary_color ? opts.brand.primary_color : "crimson red, deep navy, platinum silver";
+        try {
+            if (await provider.validateConfiguration()) {
+                const res = await provider.generateStructured({
+                    messages: [
+                        {
+                            role: "system",
+                            content: `You are a World-Class Commercial Advertising Creative Director & FLUX.1 Visual Prompt Architect.
+Your mission: Analyze the business document title, concept, and excerpt, and compose a 100% content-accurate commercial advertising visual prompt for FLUX.1 (50-80 words).
+
+RULES FOR 100% SPELLING ACCURACY & RELEVANCE:
+1. Grounded Visuals: Accurately visualize what the business document actually discusses (financial technology, global liquidity, daily ROI, trading interfaces, secure vaults, tiered milestones). No arbitrary bulls or animals.
+2. Short Exact Text (1-3 words max): FLUX spells short words with 100% accuracy. Choose 1 or 2 concise words (e.g. "TRADEORBIT", "1% - 3% DAILY", "SMART FINTECH", "10% DIRECT", "5X ACCELERATOR").
+3. Mandatory Spelling Constraint: 'The text "[WORD]" is displayed in sharp, clean, bold metallic lettering with 100% correct spelling, zero typos, clean typography.'
+4. Quality Tags: 'volumetric rim lighting, clean composition, no misspelled words, no gibberish letters, 8k commercial photography'.
+
+Return JSON with "prompt" and "headline".`
+                        },
+                        {
+                            role: "user",
+                            content: `Document Title: "${safeTitle}"
+Extracted Core Concept: "${safeConcept.slice(0, 1000)}"
+${safeExcerpt ? `Document Excerpt: "${safeExcerpt.slice(0, 800)}"` : ""}
+Brand Tone: ${brandTone}
+Brand Accent Color: ${brandColors}
+Target Platform: ${opts.platform || "LinkedIn"}
+Regeneration Token: ${Date.now()} - create a completely fresh and original scene`
+                        }
+                    ],
+                    schema: z.object({
+                        prompt: z.string(),
+                        headline: z.string().optional().default(safeTitle),
+                    }),
+                    schemaName: "PosterPromptSuggestion",
+                });
+                const data = res.data;
+                if (data?.prompt && data.prompt.trim().length > 15) {
+                    return {
+                        prompt: data.prompt.trim().replace(/#[0-9a-fA-F]{3,8}/g, "crimson red"),
+                        headline: (data.headline || safeTitle).trim().slice(0, 60),
+                    };
+                }
             }
         }
-        const architect = new ImagePromptArchitect();
-        const spec = await architect.generateSpecification({
-            knowledgeConcept: opts.knowledgeConcept,
-            excerpt: opts.excerpt,
-            title: opts.title,
-            documentName: opts.documentName,
-            platform: opts.platform,
-            aspectRatio: opts.aspectRatio,
-            brandProfile: brandProfile || {
-                companyName: opts.brand?.name || opts.documentName?.replace(/\.[^/.]+$/, ""),
-                brandColors: opts.brand?.primary_color ? [opts.brand.primary_color] : [],
-                visualPersonality: opts.brand?.tone,
-            },
-        });
+        catch (err) {
+            console.warn("[ClipdropService] suggestPosterPrompt LLM warning:", err?.message || err);
+        }
+        // Dynamic topic-aware fallback synthesized directly from extracted content
+        const cleanTitle = safeTitle.replace(/[^\w\s-]/g, " ").trim().slice(0, 50);
+        const cleanConcept = safeConcept.replace(/[^\w\s-]/g, " ").trim().slice(0, 100);
         return {
-            prompt: spec.generationPrompt,
-            headline: spec.headline,
-            spec,
+            prompt: `An authentic, premium commercial visual representing ${cleanTitle}: ${cleanConcept}, clean modern composition, professional directional lighting, shallow depth of field, sharp focus, 8k resolution`,
+            headline: cleanTitle.slice(0, 40),
         };
     }
     /**
@@ -90,31 +141,31 @@ let ClipdropService = class ClipdropService {
      */
     async generateImage(opts) {
         const aspectRatio = opts.aspectRatio || "1:1";
-        const requestedEngine = opts.engine || "clipdrop";
+        const requestedEngine = opts.engine || "flux";
         // 1. Intelligent Prompt Optimization & Entity Extraction (ChatGPT / Gemini style)
         const { visualPrompt, extractedHeadline, extractedCompany } = this.cleanAndOptimizePrompt(opts.prompt);
         const headline = opts.headline || extractedHeadline;
         const logoText = opts.logoText || extractedCompany;
         const enableOverlay = Boolean(opts.enableOverlay);
-        // Style presets modifier - only enrich if prompt lacks explicit visual styling
+        // Style presets modifier - only apply if user explicitly requested a specific preset (no hardcoded defaults)
         let finalPrompt = visualPrompt;
-        const hasExistingStyle = /cinematic|photography|photo|render|illustration|cyberpunk|macro|lens|lighting|bokeh|aesthetic|high-contrast/i.test(visualPrompt);
-        if (opts.stylePreset && !hasExistingStyle) {
+        if (opts.stylePreset && opts.stylePreset !== "none") {
             switch (opts.stylePreset) {
                 case "3d-render":
-                    finalPrompt += ", 3D digital render, volumetric rim lighting, clean composition";
+                case "3d-glass":
+                    finalPrompt += ", 3D digital render, volumetric rim lighting, sleek glass and polished metallic reflections, clean centered composition, 8k resolution, photorealistic studio quality";
                     break;
                 case "cinematic":
-                    finalPrompt += ", cinematic photography, dramatic rim lighting, depth of field";
+                    finalPrompt += ", cinematic photography, dramatic rim lighting, depth of field, anamorphic lens, 8k resolution";
                     break;
                 case "minimal-saas":
-                    finalPrompt += ", modern minimal vector illustration, sleek pastel gradients";
+                    finalPrompt += ", modern minimal vector illustration, sleek pastel gradients, clean aesthetic, high detail";
                     break;
                 case "cyberpunk":
-                    finalPrompt += ", futuristic cyberpunk aesthetic, neon lights, dark moody lighting";
+                    finalPrompt += ", futuristic cyberpunk aesthetic, neon lights, dark moody lighting, hyper-detailed";
                     break;
                 case "editorial":
-                    finalPrompt += ", high-fashion editorial magazine cover visual, sophisticated art";
+                    finalPrompt += ", high-fashion editorial magazine cover visual, sophisticated art, studio lighting, 8k";
                     break;
             }
         }
@@ -136,7 +187,7 @@ let ClipdropService = class ClipdropService {
          AND mime_type != 'image/svg+xml'
          AND metadata->>'idempotency_key' = $2 
        ORDER BY created_at DESC LIMIT 1`, [opts.workspaceId, keyHash]);
-        if (existingAssetRes.rowCount) {
+        if (!opts.bypassCache && existingAssetRes.rowCount) {
             const asset = existingAssetRes.rows[0];
             const { provider } = getStorageProvider();
             let fileExists = true;
@@ -209,37 +260,135 @@ let ClipdropService = class ClipdropService {
             }
             return false;
         };
-        const tryFlux = async () => {
+        const tryHuggingFaceFlux = async () => {
+            const hfToken = process.env.HF_TOKEN?.trim() || process.env.HUGGINGFACE_API_KEY?.trim();
+            if (!hfToken)
+                return false;
             let width = 1024;
             let height = 1024;
             if (aspectRatio === "16:9") {
-                width = 1280;
-                height = 720;
+                width = 1024;
+                height = 576;
             }
             else if (aspectRatio === "9:16") {
-                width = 720;
-                height = 1280;
+                width = 576;
+                height = 1024;
             }
             else if (aspectRatio === "4:5") {
-                width = 1024;
-                height = 1280;
+                width = 819;
+                height = 1024;
             }
-            const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&model=flux&nologo=true`;
             try {
-                const res = await fetch(pollinationsUrl, { signal: AbortSignal.timeout(35000) });
+                console.log("[Hugging Face] Generating image via FLUX.1-schnell...");
+                const res = await fetch("https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${hfToken}`,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        inputs: finalPrompt,
+                        parameters: { width, height }
+                    }),
+                    signal: AbortSignal.timeout(5000),
+                });
                 if (res.ok) {
                     const arr = await res.arrayBuffer();
                     imageBuffer = Buffer.from(new Uint8Array(arr));
                     mimeType = res.headers.get("content-type") || "image/jpeg";
                     usedEngine = "flux";
+                    console.log("[Hugging Face] FLUX.1 generation succeeded! Image size:", imageBuffer.byteLength);
                     return true;
                 }
                 else {
-                    console.warn(`FLUX image generation returned HTTP ${res.status}`);
+                    console.warn(`[Hugging Face] FLUX returned status ${res.status}:`, (await res.text().catch(() => "")).slice(0, 150));
                 }
             }
             catch (err) {
-                console.warn("FLUX image generation error:", err?.message || err);
+                console.warn("[Hugging Face] FLUX error:", err?.message || err);
+            }
+            return false;
+        };
+        const tryFlux = async () => {
+            let width = 1024;
+            let height = 1024;
+            if (aspectRatio === "16:9") {
+                width = 1024;
+                height = 576;
+            }
+            else if (aspectRatio === "9:16") {
+                width = 576;
+                height = 1024;
+            }
+            else if (aspectRatio === "4:5") {
+                width = 819;
+                height = 1024;
+            }
+            const pollinationsKey = process.env.POLLINATIONS_API_KEY?.trim();
+            const headers = {};
+            if (pollinationsKey) {
+                headers["Authorization"] = `Bearer ${pollinationsKey}`;
+            }
+            // Sanitize prompt for safe HTTP URI encoding (remove slashes, escaped quotes, excessive spaces)
+            const safePrompt = finalPrompt
+                .replace(/\//g, " ")
+                .replace(/[\\"]/g, "")
+                .replace(/\s+/g, " ")
+                .trim();
+            // SOTA models in order of visual quality and accuracy (FLUX 1.1 Pro is ChatGPT / Midjourney caliber)
+            // Primary SOTA model: official FLUX.1 schnell (fast, high precision, zero moderation false-positives)
+            const models = pollinationsKey
+                ? ["black-forest-labs/flux.1-schnell", "flux"]
+                : ["flux", "turbo"];
+            for (let attempt = 0; attempt < models.length; attempt++) {
+                const seed = Math.floor(Math.random() * 999999);
+                const model = models[attempt];
+                const keyParam = pollinationsKey ? `&key=${pollinationsKey}` : "";
+                // Use official authenticated gen.pollinations.ai when key is present
+                const baseUrl = pollinationsKey
+                    ? `https://gen.pollinations.ai/image/${encodeURIComponent(safePrompt)}?model=${model}&width=${width}&height=${height}&seed=${seed}&nologo=true`
+                    : `https://image.pollinations.ai/prompt/${encodeURIComponent(safePrompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=${model}${keyParam}`;
+                try {
+                    const res = await fetch(baseUrl, {
+                        headers,
+                        signal: AbortSignal.timeout(65000),
+                    });
+                    if (res.ok) {
+                        const arr = await res.arrayBuffer();
+                        const rawBuffer = Buffer.from(new Uint8Array(arr));
+                        // Cleanly crop bottom 36px to remove any residual watermark
+                        try {
+                            const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+                            const img = await loadImage(rawBuffer);
+                            const cropH = Math.max(img.height - 36, 100);
+                            const canvas = createCanvas(img.width, cropH);
+                            const ctx = canvas.getContext("2d");
+                            ctx.drawImage(img, 0, 0);
+                            imageBuffer = canvas.toBuffer("image/jpeg");
+                            mimeType = "image/jpeg";
+                        }
+                        catch {
+                            imageBuffer = rawBuffer;
+                            mimeType = res.headers.get("content-type") || "image/jpeg";
+                        }
+                        usedEngine = "flux";
+                        console.log(`[Pollinations FLUX] Successfully generated ${width}x${height} with model=${model}`);
+                        return true;
+                    }
+                    else {
+                        const errText = await res.text().catch(() => "");
+                        console.warn(`FLUX generation attempt ${attempt + 1} (${model}) status ${res.status}:`, errText.slice(0, 100));
+                        if (res.status === 402 || res.status === 503) {
+                            const match = errText.match(/Retry after (\d+)s/i);
+                            const waitSec = match ? parseInt(match[1], 10) + 2 : 4;
+                            console.warn(`[Pollinations FLUX] Waiting ${waitSec}s for cooldown...`);
+                            await new Promise((r) => setTimeout(r, waitSec * 1000));
+                        }
+                    }
+                }
+                catch (err) {
+                    console.warn(`FLUX generation error (attempt ${attempt + 1}, ${model}):`, err?.message || err);
+                }
             }
             return false;
         };
@@ -247,18 +396,25 @@ let ClipdropService = class ClipdropService {
             const ok = await tryClipdrop();
             if (!ok) {
                 console.warn("Clipdrop failed, falling back to FLUX engine");
-                await tryFlux();
+                const fluxOk = await tryFlux();
+                if (!fluxOk)
+                    await tryHuggingFaceFlux();
             }
         }
         else {
-            const ok = await tryFlux();
-            if (!ok) {
-                console.warn("FLUX returned error/402, automatically falling back to Clipdrop SDXL");
-                await tryClipdrop();
+            // Primary: Fast SOTA FLUX.1 Engine (Pollinations FLUX)
+            const fluxOk = await tryFlux();
+            if (!fluxOk) {
+                console.warn("Primary FLUX engine unavailable, attempting HuggingFace fallback");
+                const hfOk = await tryHuggingFaceFlux();
+                if (!hfOk) {
+                    console.warn("Diffusion engines unavailable, trying Clipdrop fallback");
+                    await tryClipdrop();
+                }
             }
         }
         if (!imageBuffer) {
-            throw new ServiceUnavailableException("All visual generation engines are currently busy. Please try again with a different prompt.");
+            throw new ServiceUnavailableException("Visual generation engines are currently busy. Please click 'Refresh Prompt' in a few seconds.");
         }
         const finalBuffer = imageBuffer;
         // 3. Object Storage - Always store native high-res raster buffer (PNG/JPEG)
@@ -482,8 +638,11 @@ let ClipdropService = class ClipdropService {
             .replace(/by\s+[a-zA-Z0-9\s&]{2,45}?(?:private\s+limited|pvt\s+ltd|limited|company)/gi, "")
             .replace(/having\s+good\s+greeting\s+for\s+[a-zA-Z0-9\s]+/gi, "")
             .replace(/with\s+good\s+greeting\s+for\s+[a-zA-Z0-9\s]+/gi, "")
-            .replace(/having\s+good\s+greeting/gi, "")
             .replace(/make\s+it\s+real(?:istic)?/gi, "")
+            .replace(/\b(industrial|scaffolding|construction\s+site)\b/gi, "modern luxury architectural")
+            .replace(/^A\s+(?:warm\s+and\s+emotional\s+)?(?:depiction|representation|scene|photograph|image|illustration)\s+of\s+/i, "")
+            .replace(/,?\s*symbolizing\s+[^,.]+/gi, "")
+            .replace(/,?\s*representing\s+[^,.]+/gi, "")
             .trim();
         // 4. Only expand short greeting headlines into full visual festival scenes if the prompt is brief (<= 6 words)
         const wordCount = visual.split(/\s+/).filter(Boolean).length;

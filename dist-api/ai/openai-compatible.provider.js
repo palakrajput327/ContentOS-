@@ -45,7 +45,7 @@ export class OpenAICompatibleProvider {
                     const isRetryable = (status === 429 && !isQuotaExceeded) || (status >= 500 && status !== 501);
                     // If Gemini model hits 429 quota or 404, automatically try next working Gemini model
                     if (this.providerName === "gemini") {
-                        const geminiModels = [this.model, "gemini-3.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash"].filter((m, i, a) => m && a.indexOf(m) === i);
+                        const geminiModels = [this.model, "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-lite-latest"].filter((m, i, a) => m && a.indexOf(m) === i);
                         const currentIdx = geminiModels.indexOf(payload.model || this.model);
                         if (currentIdx !== -1 && currentIdx < geminiModels.length - 1) {
                             const nextModel = geminiModels[currentIdx + 1];
@@ -146,7 +146,7 @@ export class OpenAICompatibleProvider {
             model: this.model,
             messages: messages.map(m => 'images' in m && m.images?.length ? { role: m.role, content: [{ type: 'text', text: m.content }, ...m.images.map(url => ({ type: 'image_url', image_url: { url } }))] } : { role: m.role, content: m.content }),
             temperature: input.temperature ?? 0.1,
-            max_tokens: this.providerName === "groq" ? Math.min(input.maxTokens ?? 800, 800) : (input.maxTokens ?? 2048),
+            max_tokens: this.providerName === "groq" ? Math.min(input.maxTokens ?? 800, 800) : (input.maxTokens ?? 4096),
             response_format: { type: "json_object" },
         };
         const res = await this.fetchWithRetry(endpoint, payload);

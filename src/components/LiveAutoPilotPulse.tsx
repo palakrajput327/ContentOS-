@@ -27,7 +27,7 @@ export interface LiveAutoPilotPulseProps {
   onTriggerAutoPilot?: () => void;
   autopilotRunning?: boolean;
   onSelectPlan?: (plan: any) => void;
-  onOpenVisualStudio?: (prompt: string, headline: string) => void;
+  onOpenVisualStudio?: (prompt: string, headline: string, planId?: string) => void;
   onRefreshPrompt?: (planId: string, headline: string, prompt: string) => Promise<{ posterPrompt?: string; mediaUrl?: string; assetId?: string } | string | void>;
 }
 
@@ -560,7 +560,7 @@ export function LiveAutoPilotPulse({
               {onOpenVisualStudio && (
                 <button
                   type="button"
-                  onClick={() => onOpenVisualStudio(visualPrompt, headline)}
+                  onClick={() => onOpenVisualStudio(visualPrompt, headline, currentPlan?.id)}
                   style={{
                     background: "rgba(168, 85, 247, 0.2)",
                     border: "1px solid rgba(168, 85, 247, 0.4)",

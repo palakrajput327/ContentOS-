@@ -78,10 +78,9 @@ let DocumentsController = class DocumentsController {
             };
         });
         // Proactively start PDF extraction immediately
-        if (queueBackend() === 'bullmq')
-            import("../pdf-processing.js")
-                .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
-                .catch((err) => console.warn(`[PDF Immediate Trigger] For ${documentId}:`, err?.message || err));
+        import("../pdf-processing.js")
+            .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
+            .catch((err) => console.warn(`[PDF Immediate Trigger] For ${documentId}:`, err?.message || err));
         return result;
     }
     async listDocuments(r) {
@@ -103,10 +102,9 @@ let DocumentsController = class DocumentsController {
         const doc = res.rows[0];
         // If document is QUEUED and not yet picked up by worker after 2s, trigger real processing
         if (doc.status === "QUEUED" && (Date.now() - new Date(doc.created_at).getTime()) > 2000) {
-            if (queueBackend() === 'bullmq')
-                import("../pdf-processing.js")
-                    .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
-                    .catch((err) => console.warn(`[PDF Direct Trigger] Failed for ${documentId}:`, err?.message || err));
+            import("../pdf-processing.js")
+                .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
+                .catch((err) => console.warn(`[PDF Direct Trigger] Failed for ${documentId}:`, err?.message || err));
         }
         return { document: doc };
     }
@@ -174,6 +172,42 @@ let DocumentsController = class DocumentsController {
         }));
         return { visionAvailable: visionConfigured(), status: doc.rows[0].media_extraction_status, message: doc.rows[0].media_extraction_message, summary: doc.rows[0].media_extraction_summary, storage: await storageUsage(pool, w),
             sourceUrl: await provider.getSignedDownloadUrl(doc.rows[0].bucket, doc.rows[0].object_key, 900), assets };
+    }
+    async getVisualConcepts(r, documentId) {
+        const { VisualConceptsService } = await import("./visual-concepts.service.js");
+        const service = new VisualConceptsService();
+        return service.getOrGenerateConcepts(documentId, r.workspace.id);
+    }
+    async regenerateVisualConcepts(r, documentId) {
+        assertPermission(r.workspace.role, "edit");
+        const { VisualConceptsService } = await import("./visual-concepts.service.js");
+        const service = new VisualConceptsService();
+        return service.regenerateConcepts(documentId, r.workspace.id);
+    }
+    async generateConceptVisual(r, documentId, conceptId, body) {
+        assertPermission(r.workspace.role, "edit");
+        const { VisualConceptsService } = await import("./visual-concepts.service.js");
+        const service = new VisualConceptsService();
+        return service.generateConceptVisual({
+            documentId,
+            conceptId,
+            workspaceId: r.workspace.id,
+            userId: r.user.id,
+            customPrompt: body?.prompt,
+            force: body?.force ?? true,
+        });
+    }
+    async dispatchVisualConcept(r, documentId, conceptId, body) {
+        assertPermission(r.workspace.role, "schedule");
+        const { VisualConceptsService } = await import("./visual-concepts.service.js");
+        const service = new VisualConceptsService();
+        return service.dispatchConcept({
+            documentId,
+            conceptId,
+            workspaceId: r.workspace.id,
+            userId: r.user.id,
+            channels: body?.channels,
+        });
     }
     async getDocumentPages(r, documentId) {
         const w = r.workspace.id;
@@ -301,14 +335,16 @@ let DocumentsController = class DocumentsController {
             const cleanTitle = (k.knowledge_key || cleanConcept).replace(/[^\w\s-.,&]/g, "").trim();
             const headline = cleanTitle.length > 45 ? cleanTitle.slice(0, 42) + "..." : cleanTitle;
             const promptSubject = cleanConcept.length > 110 ? cleanConcept.slice(0, 107) + "..." : cleanConcept;
-            const dynamicPrompt = `Cinematic conceptual visual artwork representing ${cleanTitle}: ${promptSubject}. Subtle atmospheric rim lighting, deep contrast, refined composition, sharp focus, award-winning editorial aesthetic.`;
-            const cleanCaption = `🚀 ${headline}\n\n${cleanConcept}\n\nKey takeaways from our latest technical breakdown.\n\n#Finance #Trading #Investment #RiskManagement #Innovation`;
+            const dynamicPrompt = `A close-up hero shot representing ${cleanTitle}: ${promptSubject}, centered in a brightly lit modern commercial architectural space, natural daylight, crisp focus, commercial editorial photography, 8k resolution.`;
+            const cleanCaption = `🚀 ${headline}\n\n${cleanConcept}\n\nKey takeaways from our latest technical breakdown.`;
             const plan = planMap.get(k.id);
             const visualPrompt = plan?.source_snapshot?.posterPrompt || dynamicPrompt;
             const finalHeadline = plan?.source_snapshot?.headline || headline;
-            const imageUrl = plan?.source_snapshot?.mediaUrl || media?.url || null;
-            const assetId = plan?.source_snapshot?.mediaAssetId || media?.assetId || null;
+            const imageUrl = plan?.source_snapshot?.mediaUrl || null;
+            const assetId = plan?.source_snapshot?.mediaAssetId || null;
             const caption = plan?.variants?.LinkedIn?.caption || plan?.body || cleanCaption;
+            const titleTags = cleanTitle.split(/\s+/).filter((w) => w.length > 3).slice(0, 4).map((w) => `#${w.replace(/[^\w]/g, "")}`);
+            const hashtags = titleTags.length > 0 ? titleTags : ["#Innovation", "#Strategy", "#Business", "#Leadership"];
             scripts.push({
                 id: k.id,
                 page: pageNum,
@@ -320,7 +356,7 @@ let DocumentsController = class DocumentsController {
                 posterPrompt: visualPrompt,
                 headline: finalHeadline,
                 caption,
-                hashtags: ["#Finance", "#Trading", "#RiskManagement", "#Redhash", "#Innovation"],
+                hashtags,
             });
         }
         return { scripts };
@@ -333,6 +369,73 @@ let DocumentsController = class DocumentsController {
             throw new NotFoundException("Document not found in this workspace.");
         }
         return transaction(async (db) => {
+            // 1. Find all knowledge IDs belonging to this document
+            const kRows = await db.query("SELECT id FROM document_knowledge WHERE document_id = $1 AND workspace_id = $2", [documentId, w]);
+            const kIds = kRows.rows.map((row) => row.id);
+            // 2. Find all autopilot plans linked to this document (by knowledge_id, source_snapshot, or text match)
+            let planRows;
+            if (kIds.length > 0) {
+                planRows = await db.query(`SELECT id, content_id FROM knowledge_content_plans 
+           WHERE workspace_id = $1 AND (
+             knowledge_id = ANY($2::uuid[]) OR 
+             source_snapshot->'sources' @> $3::jsonb OR
+             source_snapshot->>'documentId' = $4 OR
+             source_snapshot::text LIKE '%' || $4 || '%'
+           )`, [w, kIds, JSON.stringify([{ documentId }]), documentId]);
+            }
+            else {
+                planRows = await db.query(`SELECT id, content_id FROM knowledge_content_plans 
+           WHERE workspace_id = $1 AND (
+             source_snapshot->'sources' @> $2::jsonb OR
+             source_snapshot->>'documentId' = $3 OR
+             source_snapshot::text LIKE '%' || $3 || '%'
+           )`, [w, JSON.stringify([{ documentId }]), documentId]);
+            }
+            const planContentIds = planRows.rows.map((p) => p.content_id).filter(Boolean);
+            const planIds = planRows.rows.map((p) => p.id);
+            // Collect any content IDs linked directly to this document via content_sources
+            const csRows = await db.query("SELECT content_id FROM content_sources WHERE document_id = $1 AND workspace_id = $2", [documentId, w]);
+            const allContentIds = [
+                ...new Set([...planContentIds, ...csRows.rows.map((r) => r.content_id).filter(Boolean)]),
+            ];
+            // 3. Delete knowledge_content_plans FIRST because knowledge_content_plans.content_id has NO ACTION FK on content
+            if (planIds.length > 0) {
+                await db.query("DELETE FROM knowledge_content_plans WHERE id = ANY($1::uuid[]) AND workspace_id = $2", [planIds, w]);
+            }
+            if (kIds.length > 0) {
+                await db.query("DELETE FROM knowledge_content_plans WHERE knowledge_id = ANY($1::uuid[]) AND workspace_id = $2", [kIds, w]);
+            }
+            // 4. Delete dependent records of content (approvals, scheduled_posts, published_posts, video_renders, content_versions, content_sources) then content
+            if (allContentIds.length > 0) {
+                // Disconnect any remaining plans if any
+                await db.query("UPDATE knowledge_content_plans SET content_id = NULL WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2", [allContentIds, w]);
+                await db.query("DELETE FROM approvals WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2", [allContentIds, w]);
+                await db.query("DELETE FROM scheduled_posts WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2", [allContentIds, w]);
+                try {
+                    // published_posts links to scheduled_posts(id), not directly to content_id
+                    await db.query("DELETE FROM published_posts WHERE scheduled_post_id IN (SELECT id FROM scheduled_posts WHERE content_id = ANY($1::uuid[]))", [allContentIds]);
+                }
+                catch (e) {
+                    console.warn("[deleteDocument] published_posts delete skipped/failed:", e);
+                }
+                await db.query("DELETE FROM video_renders WHERE content_id = ANY($1::uuid[])", [allContentIds]);
+                await db.query("DELETE FROM content_versions WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2", [allContentIds, w]);
+                await db.query("DELETE FROM content_sources WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2", [allContentIds, w]);
+                await db.query("DELETE FROM content WHERE id = ANY($1::uuid[]) AND workspace_id = $2", [allContentIds, w]);
+            }
+            // 5. Delete document-specific artifacts: media, knowledge, chunks, pages, ai_generations, visual_concepts
+            try {
+                await db.query("DELETE FROM document_visual_concepts WHERE document_id = $1", [documentId]);
+            }
+            catch (e) {
+                console.warn("[deleteDocument] document_visual_concepts delete skipped/failed:", e);
+            }
+            await db.query("DELETE FROM document_source_media WHERE document_id = $1 AND workspace_id = $2", [documentId, w]);
+            await db.query("DELETE FROM document_knowledge WHERE document_id = $1 AND workspace_id = $2", [documentId, w]);
+            await db.query("DELETE FROM document_chunks WHERE document_id = $1", [documentId]);
+            await db.query("DELETE FROM document_pages WHERE document_id = $1", [documentId]);
+            await db.query("DELETE FROM ai_generations WHERE workspace_id = $1 AND (input->>'documentId' = $2 OR input->>'document_id' = $2)", [w, documentId]);
+            // 6. Delete the document record itself
             await db.query("DELETE FROM documents WHERE id = $1 AND workspace_id = $2", [
                 documentId,
                 w,
@@ -397,6 +500,46 @@ __decorate([
     __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", Promise)
 ], DocumentsController.prototype, "sourceMedia", null);
+__decorate([
+    WorkspaceRequired(),
+    Get(":documentId/visual-concepts"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "getVisualConcepts", null);
+__decorate([
+    WorkspaceRequired(),
+    Post(":documentId/visual-concepts/regenerate"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "regenerateVisualConcepts", null);
+__decorate([
+    WorkspaceRequired(),
+    Post(":documentId/visual-concepts/:conceptId/generate-image"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __param(2, Param("conceptId")),
+    __param(3, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String, Object]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "generateConceptVisual", null);
+__decorate([
+    WorkspaceRequired(),
+    Post(":documentId/visual-concepts/:conceptId/dispatch"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __param(2, Param("conceptId")),
+    __param(3, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String, Object]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "dispatchVisualConcept", null);
 __decorate([
     WorkspaceRequired(),
     Get(":documentId/pages"),

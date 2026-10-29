@@ -443,7 +443,8 @@ export class KnowledgeAutomationController {
         workspaceId: r.workspace.id,
         userId: r.user.id,
         prompt: res.prompt,
-        engine: "clipdrop",
+        engine: "flux",
+        enableOverlay: false,
         headline: res.headline || title,
         aspectRatio: "1:1",
         contentId: plan.content_id || undefined,
@@ -495,6 +496,135 @@ export class KnowledgeAutomationController {
       assetId: newAssetId,
     };
   }
+
+  @Post("plans/:id/update-visual")
+  async updatePlanVisual(
+    @Req() r: AuthedRequest,
+    @Param("id") rawId: string,
+    @Body() body: { mediaUrl: string; mediaAssetId?: string; prompt?: string }
+  ) {
+    assertPermission(r.workspace.role, "edit");
+    const id = z.string().uuid().parse(rawId);
+    const plan = (
+      await pool.query(
+        "SELECT * FROM knowledge_content_plans WHERE id = $1 AND workspace_id = $2",
+        [id, r.workspace.id]
+      )
+    ).rows[0];
+
+    if (!plan) {
+      throw new NotFoundException("Plan not found in this workspace.");
+    }
+
+    const snapshot = (typeof plan.source_snapshot === "string" ? JSON.parse(plan.source_snapshot) : plan.source_snapshot) || {};
+    const updatedSnapshot = {
+      ...snapshot,
+      mediaUrl: body.mediaUrl,
+      mediaAssetId: body.mediaAssetId || snapshot.mediaAssetId,
+      ...(body.prompt ? { posterPrompt: body.prompt } : {}),
+    };
+
+    await pool.query(
+      `UPDATE knowledge_content_plans 
+       SET source_snapshot = $1::jsonb, updated_at = now() 
+       WHERE id = $2 AND workspace_id = $3`,
+      [JSON.stringify(updatedSnapshot), id, r.workspace.id]
+    );
+
+    if (plan.content_id && body.mediaUrl) {
+      const contentRow = (await pool.query("SELECT variants FROM content WHERE id=$1", [plan.content_id])).rows[0];
+      if (contentRow?.variants) {
+        const variants = typeof contentRow.variants === "string" ? JSON.parse(contentRow.variants) : contentRow.variants;
+        for (const platform of Object.keys(variants)) {
+          if (variants[platform]) {
+            variants[platform].mediaUrl = body.mediaUrl;
+            variants[platform].mediaAssetId = body.mediaAssetId || variants[platform].mediaAssetId;
+          }
+        }
+        await pool.query("UPDATE content SET variants=$1::jsonb, updated_at=now() WHERE id=$2", [JSON.stringify(variants), plan.content_id]);
+      }
+    }
+
+    return { success: true, planId: id, mediaUrl: body.mediaUrl };
+  }
+
+  @WorkspaceRequired()
+  @Get("dispatch-history")
+  async getDispatchHistory(@Req() r: AuthedRequest) {
+    const w = r.workspace.id;
+
+    // 1. Fetch dispatched concepts from document_visual_concepts (last 10 days)
+    const conceptsRes = await pool.query(
+      `SELECT 
+        dvc.id,
+        dvc.document_id,
+        dvc.concept_title as title,
+        dvc.source_excerpt as excerpt,
+        dvc.prompt,
+        dvc.asset_id,
+        dvc.image_url,
+        dvc.status,
+        dvc.target_channels as channels,
+        dvc.dispatched_at,
+        dvc.created_at,
+        d.original_filename as document_name
+       FROM document_visual_concepts dvc
+       LEFT JOIN documents d ON d.id = dvc.document_id
+       WHERE dvc.workspace_id = $1 
+         AND dvc.status = 'DISPATCHED'
+         AND (dvc.dispatched_at >= NOW() - INTERVAL '10 days' OR dvc.dispatched_at IS NULL)
+       ORDER BY dvc.dispatched_at DESC NULLS LAST, dvc.created_at DESC
+       LIMIT 50`,
+      [w]
+    );
+
+    // 2. Fetch published content from content table (last 10 days)
+    const contentRes = await pool.query(
+      `SELECT 
+        c.id,
+        NULL as document_id,
+        c.title,
+        c.body as excerpt,
+        '' as prompt,
+        NULL as asset_id,
+        (SELECT public_url FROM media_assets ma JOIN content_media cm ON cm.media_asset_id = ma.id WHERE cm.content_id = c.id LIMIT 1) as image_url,
+        'DISPATCHED' as status,
+        c.channels,
+        c.updated_at as dispatched_at,
+        c.created_at,
+        'Content Library Post' as document_name
+       FROM content c
+       WHERE c.workspace_id = $1 
+         AND c.status = 'PUBLISHED'
+         AND c.created_at >= NOW() - INTERVAL '10 days'
+       ORDER BY c.created_at DESC
+       LIMIT 50`,
+      [w]
+    );
+
+    // Merge and deduplicate
+    const items = [...conceptsRes.rows, ...contentRes.rows]
+      .filter((v, i, a) => a.findIndex(t => t.id === v.id || (t.title && t.title === v.title)) === i)
+      .sort((a, b) => new Date(b.dispatched_at || b.created_at).getTime() - new Date(a.dispatched_at || a.created_at).getTime());
+
+    return {
+      history: items,
+      count: items.length,
+      retentionDays: 10,
+    };
+  }
+
+  @WorkspaceRequired()
+  @Post("clear-history")
+  async clearDispatchHistory(@Req() r: AuthedRequest) {
+    assertPermission(r.workspace.role, "edit");
+    const w = r.workspace.id;
+
+    await pool.query(
+      `DELETE FROM document_visual_concepts WHERE workspace_id = $1 AND status = 'DISPATCHED'`,
+      [w]
+    );
+
+    return { success: true, message: "Dispatched publishing history cleared successfully." };
+  }
 }
-
-
