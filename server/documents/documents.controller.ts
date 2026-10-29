@@ -6,6 +6,7 @@ import {
   Get,
   Param,
   Post,
+  Put,
   Req,
   Res,
   NotFoundException,
@@ -289,6 +290,84 @@ export class DocumentsController {
       userId: r.user.id,
       channels: body?.channels,
     });
+  }
+
+  @WorkspaceRequired()
+  @Get(":documentId/brand-identity")
+  async getBrandIdentity(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
+    const { BrandIdentityService } = await import("./brand-identity.service.js");
+    const service = new BrandIdentityService();
+    return service.getOrCreateBrandIdentity(documentId, r.workspace.id);
+  }
+
+  @WorkspaceRequired()
+  @Put(":documentId/brand-identity")
+  async updateBrandIdentity(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+    @Body() body: any,
+  ) {
+    assertPermission(r.workspace.role, "edit");
+    const { BrandIdentityService } = await import("./brand-identity.service.js");
+    const service = new BrandIdentityService();
+    const updated = await service.updateBrandIdentity(documentId, r.workspace.id, body || {});
+    if (body?.recomposeExisting) {
+      void service.recomposeAllDocumentPosters(documentId, r.workspace.id, r.user.id).catch((err) => {
+        console.warn("[BrandIdentity] Auto-recompose warning:", err);
+      });
+    }
+    return updated;
+  }
+
+  @WorkspaceRequired()
+  @Post(":documentId/brand-identity")
+  async saveBrandIdentityPost(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+    @Body() body: any,
+  ) {
+    return this.updateBrandIdentity(r, documentId, body);
+  }
+
+  @WorkspaceRequired()
+  @Post(":documentId/brand-identity/upload-logo")
+  async uploadBrandLogo(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+    @Body() body: { dataUrl: string; filename?: string },
+  ) {
+    assertPermission(r.workspace.role, "edit");
+    if (!body?.dataUrl || !body.dataUrl.includes(",")) {
+      throw new BadRequestException("Valid base64 dataUrl is required for logo upload.");
+    }
+    const [header, base64Data] = body.dataUrl.split(",");
+    const mimeMatch = header.match(/data:([^;]+);/);
+    const mimeType = mimeMatch ? mimeMatch[1] : "image/png";
+    const buffer = Buffer.from(base64Data, "base64");
+    const filename = body.filename || `logo_${Date.now()}.png`;
+
+    const { BrandIdentityService } = await import("./brand-identity.service.js");
+    const service = new BrandIdentityService();
+    return service.uploadLogo({
+      documentId,
+      workspaceId: r.workspace.id,
+      userId: r.user.id,
+      buffer,
+      mimeType,
+      filename,
+    });
+  }
+
+  @WorkspaceRequired()
+  @Post(":documentId/brand-identity/recompose")
+  async recomposePosters(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+  ) {
+    assertPermission(r.workspace.role, "edit");
+    const { BrandIdentityService } = await import("./brand-identity.service.js");
+    const service = new BrandIdentityService();
+    return service.recomposeAllDocumentPosters(documentId, r.workspace.id, r.user.id);
   }
 
   @WorkspaceRequired()

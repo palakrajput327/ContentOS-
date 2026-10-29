@@ -137,6 +137,24 @@ export interface DocItem {
   processing_completed_at?: string;
 }
 
+export interface DocumentBrandIdentity {
+  documentId: string;
+  workspaceId: string;
+  companyName: string;
+  logoUrl?: string | null;
+  logoAssetId?: string | null;
+  websiteDomain: string;
+  brandColors: string[];
+  applyToAllPosters: boolean;
+  logoPosition: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  domainPosition: "bottom-center" | "bottom-left" | "bottom-right" | "top-center" | "top-right";
+  logoSize: "small" | "medium" | "large";
+  safeMargin: number;
+  status: "DETECTED" | "CONFIRMED" | "MANUAL" | "PENDING_REVIEW";
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface KnowledgeItem {
   id: string;
   generation_id?: string;
@@ -412,6 +430,23 @@ export const documentsApi = {
     if (useSession.getState().demo) return;
     await request(`/documents/${documentId}/knowledge`, "DELETE");
   },
+
+  getBrandIdentity: async (documentId: string): Promise<DocumentBrandIdentity> => {
+    return request(`/documents/${documentId}/brand-identity`);
+  },
+
+  updateBrandIdentity: async (documentId: string, data: Partial<DocumentBrandIdentity> & { recomposeExisting?: boolean }): Promise<DocumentBrandIdentity> => {
+    return request(`/documents/${documentId}/brand-identity`, "PUT", data);
+  },
+
+  uploadBrandLogo: async (documentId: string, dataUrl: string, filename?: string): Promise<{ logoUrl: string; logoAssetId: string }> => {
+    return request(`/documents/${documentId}/brand-identity/upload-logo`, "POST", { dataUrl, filename });
+  },
+
+  recomposePosters: async (documentId: string): Promise<{ updatedCount: number }> => {
+    return request(`/documents/${documentId}/brand-identity/recompose`, "POST");
+  },
+
 };
 
 export const clipdropApi = {

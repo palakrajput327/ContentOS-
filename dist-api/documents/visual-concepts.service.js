@@ -15,7 +15,7 @@ export class VisualConceptsService {
         }
         // 2. Fetch all undispatched concepts across the workspace queue (accumulates across PDF uploads)
         const existing = await pool.query(`SELECT dvc.id, dvc.document_id, dvc.concept_title, dvc.source_page, dvc.source_excerpt, dvc.prompt,
-              dvc.asset_id, dvc.image_url, dvc.status, dvc.scheduled_at, dvc.dispatched_at, dvc.target_channels, dvc.created_at,
+              dvc.asset_id, dvc.image_url, dvc.raw_image_url, dvc.raw_asset_id, dvc.status, dvc.scheduled_at, dvc.dispatched_at, dvc.target_channels, dvc.created_at,
               COALESCE(d.original_filename, 'Document') as document_name
        FROM document_visual_concepts dvc
        LEFT JOIN documents d ON d.id = dvc.document_id
@@ -35,6 +35,8 @@ export class VisualConceptsService {
                 prompt: r.prompt,
                 assetId: r.asset_id,
                 imageUrl: r.image_url,
+                rawImageUrl: r.raw_image_url || r.image_url,
+                rawAssetId: r.raw_asset_id || r.asset_id,
                 status: r.status || "PENDING",
                 scheduledAt: r.scheduled_at ? new Date(r.scheduled_at).toISOString() : null,
                 dispatchedAt: r.dispatched_at ? new Date(r.dispatched_at).toISOString() : null,
@@ -294,14 +296,61 @@ Return JSON with "concepts" array.`;
             bypassCache: isForce,
             idempotencyKey: isForce ? `concept-visual:${opts.conceptId}:${Date.now()}` : undefined,
         });
-        // Save generated asset to concept row
+        // Store raw AI generated artwork separately!
+        let finalAssetId = result.assetId;
+        let finalImageUrl = result.url;
+        const rawAssetId = result.assetId;
+        const rawImageUrl = result.url;
+        // Check if brand identity is configured for this document and applyToAllPosters is enabled
+        try {
+            const { BrandIdentityService } = await import("./brand-identity.service.js");
+            const brandService = new BrandIdentityService();
+            const brand = await brandService.getOrCreateBrandIdentity(opts.documentId, opts.workspaceId);
+            if (brand && brand.applyToAllPosters && (brand.logoUrl || brand.websiteDomain)) {
+                console.log(`[VisualConceptsService] Applying automatic brand identity (${brand.companyName || 'Brand'}, ${brand.websiteDomain}) to concept ${opts.conceptId}...`);
+                const bgBuffer = await brandService.fetchBufferFromUrl(result.url);
+                const brandedBuffer = await brandService.composeBrandOverlay({
+                    backgroundBuffer: bgBuffer,
+                    brand,
+                });
+                const { provider, bucket } = (await import("../storage/storage.factory.js")).getStorageProvider();
+                const { uploadManagedMedia } = await import("../storage/managed-media.js");
+                const brandedAssetId = randomUUID();
+                const objectKey = `workspaces/${opts.workspaceId}/generated_asset/${brandedAssetId}/branded_poster.png`;
+                await uploadManagedMedia({
+                    assetId: brandedAssetId,
+                    workspaceId: opts.workspaceId,
+                    userId: opts.userId,
+                    provider,
+                    bucket,
+                    objectKey,
+                    body: brandedBuffer,
+                    mimeType: "image/png",
+                    filename: `branded_poster_${Date.now()}.png`,
+                    type: "GENERATED_ASSET",
+                    metadata: {
+                        document_id: opts.documentId,
+                        concept_id: opts.conceptId,
+                        branded: true,
+                        raw_asset_id: rawAssetId,
+                    },
+                });
+                finalImageUrl = await provider.getSignedDownloadUrl(bucket, objectKey, 30 * 86400);
+                finalAssetId = brandedAssetId;
+                console.log(`[VisualConceptsService] Brand compositing complete: ${finalImageUrl}`);
+            }
+        }
+        catch (brandErr) {
+            console.warn("[VisualConceptsService] Automatic brand overlay notice:", brandErr);
+        }
+        // Save both final (branded) poster and raw (pure AI artwork) to concept row
         await pool.query(`UPDATE document_visual_concepts
-       SET asset_id = $1, image_url = $2, prompt = $3, updated_at = NOW()
-       WHERE id = $4`, [result.assetId, result.url, promptToUse, opts.conceptId]);
+       SET asset_id = $1, image_url = $2, raw_asset_id = $3, raw_image_url = $4, prompt = $5, updated_at = NOW()
+       WHERE id = $6`, [finalAssetId, finalImageUrl, rawAssetId, rawImageUrl, promptToUse, opts.conceptId]);
         return {
             conceptId: opts.conceptId,
-            assetId: result.assetId,
-            imageUrl: result.url,
+            assetId: finalAssetId,
+            imageUrl: finalImageUrl,
         };
     }
     /**

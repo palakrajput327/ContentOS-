@@ -395,9 +395,9 @@ let KnowledgeAutomationController = class KnowledgeAutomationController {
         c.body as excerpt,
         '' as prompt,
         NULL as asset_id,
-        (SELECT public_url FROM media_assets ma JOIN content_media cm ON cm.media_asset_id = ma.id WHERE cm.content_id = c.id LIMIT 1) as image_url,
+        (SELECT object_key FROM media_assets ma WHERE ma.id = c.image_asset_id LIMIT 1) as image_url,
         'DISPATCHED' as status,
-        c.channels,
+        c.platforms as channels,
         c.updated_at as dispatched_at,
         c.created_at,
         'Content Library Post' as document_name

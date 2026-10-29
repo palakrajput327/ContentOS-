@@ -1449,7 +1449,7 @@ export function DocumentVisualConceptsHub({
                             fontWeight: 600,
                           }}
                         >
-                          Generated via FLUX.1
+                          Generated via FLUX.1 • Branded Poster
                         </div>
                       </div>
                     </div>

@@ -11,7 +11,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
 import { queueBackend } from '../queue-backend.js';
-import { Body, Controller, Delete, Get, Param, Post, Req, Res, NotFoundException, BadRequestException, } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Req, Res, NotFoundException, BadRequestException, } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { audit, pool, transaction } from "../db.js";
@@ -208,6 +208,53 @@ let DocumentsController = class DocumentsController {
             userId: r.user.id,
             channels: body?.channels,
         });
+    }
+    async getBrandIdentity(r, documentId) {
+        const { BrandIdentityService } = await import("./brand-identity.service.js");
+        const service = new BrandIdentityService();
+        return service.getOrCreateBrandIdentity(documentId, r.workspace.id);
+    }
+    async updateBrandIdentity(r, documentId, body) {
+        assertPermission(r.workspace.role, "edit");
+        const { BrandIdentityService } = await import("./brand-identity.service.js");
+        const service = new BrandIdentityService();
+        const updated = await service.updateBrandIdentity(documentId, r.workspace.id, body || {});
+        if (body?.recomposeExisting) {
+            void service.recomposeAllDocumentPosters(documentId, r.workspace.id, r.user.id).catch((err) => {
+                console.warn("[BrandIdentity] Auto-recompose warning:", err);
+            });
+        }
+        return updated;
+    }
+    async saveBrandIdentityPost(r, documentId, body) {
+        return this.updateBrandIdentity(r, documentId, body);
+    }
+    async uploadBrandLogo(r, documentId, body) {
+        assertPermission(r.workspace.role, "edit");
+        if (!body?.dataUrl || !body.dataUrl.includes(",")) {
+            throw new BadRequestException("Valid base64 dataUrl is required for logo upload.");
+        }
+        const [header, base64Data] = body.dataUrl.split(",");
+        const mimeMatch = header.match(/data:([^;]+);/);
+        const mimeType = mimeMatch ? mimeMatch[1] : "image/png";
+        const buffer = Buffer.from(base64Data, "base64");
+        const filename = body.filename || `logo_${Date.now()}.png`;
+        const { BrandIdentityService } = await import("./brand-identity.service.js");
+        const service = new BrandIdentityService();
+        return service.uploadLogo({
+            documentId,
+            workspaceId: r.workspace.id,
+            userId: r.user.id,
+            buffer,
+            mimeType,
+            filename,
+        });
+    }
+    async recomposePosters(r, documentId) {
+        assertPermission(r.workspace.role, "edit");
+        const { BrandIdentityService } = await import("./brand-identity.service.js");
+        const service = new BrandIdentityService();
+        return service.recomposeAllDocumentPosters(documentId, r.workspace.id, r.user.id);
     }
     async getDocumentPages(r, documentId) {
         const w = r.workspace.id;
@@ -540,6 +587,54 @@ __decorate([
     __metadata("design:paramtypes", [Object, String, String, Object]),
     __metadata("design:returntype", Promise)
 ], DocumentsController.prototype, "dispatchVisualConcept", null);
+__decorate([
+    WorkspaceRequired(),
+    Get(":documentId/brand-identity"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "getBrandIdentity", null);
+__decorate([
+    WorkspaceRequired(),
+    Put(":documentId/brand-identity"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __param(2, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "updateBrandIdentity", null);
+__decorate([
+    WorkspaceRequired(),
+    Post(":documentId/brand-identity"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __param(2, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "saveBrandIdentityPost", null);
+__decorate([
+    WorkspaceRequired(),
+    Post(":documentId/brand-identity/upload-logo"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __param(2, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "uploadBrandLogo", null);
+__decorate([
+    WorkspaceRequired(),
+    Post(":documentId/brand-identity/recompose"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "recomposePosters", null);
 __decorate([
     WorkspaceRequired(),
     Get(":documentId/pages"),

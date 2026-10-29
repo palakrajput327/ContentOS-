@@ -33,16 +33,18 @@ import {
   History,
   Eye,
   Pencil,
+  Palette,
 } from "lucide-react";
 import { Button, PlatformIcon, StatusBadge } from "../components/ui";
 import { platforms, type Platform, type Snapshot } from "../lib/model";
-import { data, request, documentsApi, clipdropApi, resolveMediaUrl, type DocItem, type KnowledgeItem } from "../lib/api";
+import { data, request, documentsApi, clipdropApi, resolveMediaUrl, type DocItem, type KnowledgeItem, type DocumentBrandIdentity } from "../lib/api";
 import { useSession } from "../lib/session";
 import { PublishPreviewModal } from "../components/PublishPreviewModal";
 import { ClipdropImageModal } from "../components/ClipdropImageModal";
 import { BatchProgressIndicator } from "../components/BatchProgressIndicator";
 import KnowledgeAutomation from './KnowledgeAutomation';
 import { DocumentVisualConceptsHub } from '../components/DocumentVisualConceptsHub';
+import { BrandIdentityModal } from '../components/BrandIdentityModal';
 import { LiveAutoPilotPulse } from '../components/LiveAutoPilotPulse';
 import './studio-integration.css';
 
@@ -208,6 +210,20 @@ export default function AIStudio() {
     currentName: string;
   } | null>(null);
   const [autopilotRunning, setAutopilotRunning] = useState(false);
+  const [showBrandModal, setShowBrandModal] = useState(false);
+  const [activeBrandIdentity, setActiveBrandIdentity] = useState<DocumentBrandIdentity | null>(null);
+
+  useEffect(() => {
+    if (selectedDocId) {
+      documentsApi
+        .getBrandIdentity(selectedDocId)
+        .then((b) => setActiveBrandIdentity(b))
+        .catch(() => setActiveBrandIdentity(null));
+    } else {
+      setActiveBrandIdentity(null);
+    }
+  }, [selectedDocId]);
+
   const [activeDispatchConcept, setActiveDispatchConcept] = useState<any | null>(null);
   const [activeDispatchSlot, setActiveDispatchSlot] = useState<{ slotNumber: number; slotLabel: string; timeStr: string } | null>(null);
   const [isPostingLiveNow, setIsPostingLiveNow] = useState(false);
@@ -1360,6 +1376,50 @@ export default function AIStudio() {
                       </button>
                     )}
 
+                    
+
+                    {activeDoc && (
+                      <button
+                        type="button"
+                        onClick={() => setShowBrandModal(true)}
+                        title="Configure Per-PDF Brand Identity (Logo, Domain, Colors)"
+                        style={{
+                          height: "30px",
+                          boxSizing: "border-box",
+                          background: activeBrandIdentity?.status === "CONFIRMED"
+                            ? "rgba(16, 185, 129, 0.12)"
+                            : "rgba(99, 102, 241, 0.15)",
+                          border: activeBrandIdentity?.status === "CONFIRMED"
+                            ? "1px solid rgba(16, 185, 129, 0.35)"
+                            : "1px solid rgba(99, 102, 241, 0.35)",
+                          color: activeBrandIdentity?.status === "CONFIRMED" ? "#34d399" : "#c7d2fe",
+                          borderRadius: "6px",
+                          padding: "0 10px",
+                          fontSize: "0.75rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          lineHeight: 1,
+                          margin: 0,
+                          transition: "all 0.15s ease",
+                        }}
+                      >
+                        <Palette size={12} />
+                        Brand Identity
+                        <span
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: activeBrandIdentity?.status === "CONFIRMED" ? "#10b981" : "#f59e0b",
+                            display: "inline-block",
+                          }}
+                        />
+                      </button>
+                    )}
+
                     <label style={{
                       height: "30px",
                       boxSizing: "border-box",
@@ -2424,6 +2484,19 @@ export default function AIStudio() {
         brandWebsite={s?.brand?.website}
         brandCta={s?.brand?.cta}
       />
+      {selectedDocId && (
+        <BrandIdentityModal
+          isOpen={showBrandModal}
+          onClose={() => setShowBrandModal(false)}
+          documentId={selectedDocId}
+          documentName={activeDoc?.original_filename || "Document"}
+          sampleImageUrl={activeDispatchConcept?.imageUrl || null}
+          onBrandUpdated={(brand) => {
+            setActiveBrandIdentity(brand);
+            void query.invalidateQueries({ queryKey: ["document-concepts", selectedDocId] });
+          }}
+        />
+      )}
     </div>
   );
 }
