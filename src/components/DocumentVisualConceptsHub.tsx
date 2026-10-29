@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Button, PlatformIcon } from "./ui";
 import { request, resolveMediaUrl } from "../lib/api";
+import { useWorkspace } from "./Shell";
 
 export interface VisualConceptItem {
   id: string;
@@ -99,6 +100,7 @@ const AVAILABLE_CHANNELS = [
   { id: "facebook", name: "Facebook" },
   { id: "telegram", name: "Telegram" },
   { id: "x", name: "X" },
+  { id: "youtube", name: "YouTube" },
 ];
 
 function formatTime12(time24: string): string {
@@ -162,6 +164,27 @@ export function DocumentVisualConceptsHub({
     } catch {}
     return ["linkedin", "instagram", "facebook"];
   });
+
+  const { data: workspaceData } = useWorkspace();
+
+  const connectedPlatformIds = useMemo(() => {
+    const accounts = (workspaceData as any)?.accounts || [];
+    return new Set(
+      accounts
+        .filter((a: any) => a.state?.toLowerCase() === "connected")
+        .map((a: any) => a.platform?.toLowerCase())
+    );
+  }, [workspaceData]);
+
+  // Automatically enforce that only connected channels can ever be selected
+  useEffect(() => {
+    if (connectedPlatformIds.size > 0) {
+      setSelectedChannels((prev) => {
+        const valid = prev.filter((id) => connectedPlatformIds.has(id.toLowerCase()));
+        return valid.length > 0 ? valid : [Array.from(connectedPlatformIds)[0]];
+      });
+    }
+  }, [connectedPlatformIds]);
 
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
 
@@ -541,41 +564,31 @@ export function DocumentVisualConceptsHub({
         </Button>
       </div>
 
-      {/* Sleek Minimalist Executive Dispatch Schedule Tray */}
+      {/* Ultra-Sleek Minimal Executive Dispatch Schedule Bar */}
       <div
         style={{
-          background: "rgba(255, 255, 255, 0.02)",
-          border: hasUnsavedChanges ? "1px solid rgba(99, 102, 241, 0.4)" : "1px solid rgba(255, 255, 255, 0.08)",
-          borderRadius: "12px",
-          padding: "14px 16px",
+          background: "rgba(15, 23, 42, 0.4)",
+          border: hasUnsavedChanges ? "1px solid rgba(99, 102, 241, 0.35)" : "1px solid rgba(255, 255, 255, 0.06)",
+          borderRadius: "10px",
+          padding: "10px 14px",
           marginBottom: "12px",
-          boxShadow: "none",
         }}
       >
-        {/* Top Row: Title, Presets, Add Slot, Save Button */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", marginBottom: "14px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <div style={{ width: "32px", height: "32px", borderRadius: "8px", background: "rgba(99, 102, 241, 0.15)", border: "1px solid rgba(99, 102, 241, 0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Clock size={16} style={{ color: "#818cf8" }} />
-            </div>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span style={{ fontSize: "0.95rem", fontWeight: 700, color: "#f8fafc" }}>
-                  Daily Dispatch Schedule
-                </span>
-                <span style={{ fontSize: "0.72rem", color: "#818cf8", background: "rgba(99, 102, 241, 0.12)", border: "1px solid rgba(99, 102, 241, 0.25)", padding: "2px 8px", borderRadius: "100px", fontWeight: 700 }}>
-                  {slots.length}/3 Slots Active
-                </span>
-              </div>
-              <span style={{ fontSize: "0.76rem", color: "var(--color-text-muted)" }}>
-                Posts are auto-scheduled sequentially across your daily time slots
-              </span>
-            </div>
+        {/* Top Line: Title + Preset Pills + Add Slot + Save */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Clock size={15} style={{ color: "#818cf8" }} />
+            <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#f8fafc" }}>
+              Daily Dispatch Schedule
+            </span>
+            <span style={{ fontSize: "0.68rem", color: "#818cf8", background: "rgba(99, 102, 241, 0.12)", border: "1px solid rgba(99, 102, 241, 0.2)", padding: "1px 6px", borderRadius: "100px", fontWeight: 700 }}>
+              {slots.length}/3 Slots
+            </span>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-            {/* Minimal Pill Presets */}
-            <div style={{ display: "flex", alignItems: "center", background: "rgba(255, 255, 255, 0.04)", padding: "3px", borderRadius: "20px", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+            {/* Minimal Preset Pills */}
+            <div style={{ display: "flex", alignItems: "center", background: "rgba(255, 255, 255, 0.04)", padding: "2px", borderRadius: "16px", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
               {PRESETS.map((p) => {
                 const isActive = slots.length === p.slots.length;
                 return (
@@ -587,16 +600,16 @@ export function DocumentVisualConceptsHub({
                       background: isActive ? "#4f46e5" : "transparent",
                       color: isActive ? "#ffffff" : "#94a3b8",
                       border: "none",
-                      padding: "4px 12px",
-                      borderRadius: "16px",
-                      fontSize: "0.74rem",
+                      padding: "3px 9px",
+                      borderRadius: "12px",
+                      fontSize: "0.7rem",
                       fontWeight: isActive ? 700 : 500,
                       cursor: "pointer",
                       transition: "all 0.15s ease",
                     }}
                     title={p.desc}
                   >
-                    {p.name}
+                    {p.name.replace(' Posts / Day', '/day').replace(' Post / Day', '/day')}
                   </button>
                 );
               })}
@@ -608,24 +621,24 @@ export function DocumentVisualConceptsHub({
                 type="button"
                 onClick={handleAddCustomSlot}
                 style={{
-                  background: "rgba(255, 255, 255, 0.05)",
-                  border: "1px dashed rgba(255, 255, 255, 0.2)",
-                  color: "#cbd5e1",
-                  padding: "5px 12px",
-                  borderRadius: "20px",
-                  fontSize: "0.74rem",
+                  background: "rgba(255, 255, 255, 0.04)",
+                  border: "1px dashed rgba(255, 255, 255, 0.15)",
+                  color: "#94a3b8",
+                  padding: "3px 9px",
+                  borderRadius: "14px",
+                  fontSize: "0.7rem",
                   fontWeight: 600,
                   cursor: "pointer",
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: "5px",
+                  gap: "4px",
                 }}
               >
-                <Plus size={12} /> Add Slot
+                <Plus size={11} /> Add
               </button>
             )}
 
-            {/* Save Schedule Pill Button */}
+            {/* Save / Applied Indicator Button */}
             <button
               type="button"
               onClick={handleSaveAndApplySchedule}
@@ -634,51 +647,54 @@ export function DocumentVisualConceptsHub({
                   ? "#10b981"
                   : hasUnsavedChanges
                   ? "#4f46e5"
-                  : "rgba(255, 255, 255, 0.08)",
+                  : "rgba(255, 255, 255, 0.06)",
                 border: isSavedSuccessfully
                   ? "1px solid #10b981"
                   : hasUnsavedChanges
-                  ? "none"
-                  : "1px solid rgba(255, 255, 255, 0.15)",
+                  ? "1px solid #6366f1"
+                  : "1px solid rgba(255, 255, 255, 0.08)",
                 color: "#ffffff",
-                padding: "6px 14px",
-                borderRadius: "20px",
-                fontSize: "0.76rem",
-                fontWeight: 700,
+                padding: "3px 10px",
+                borderRadius: "14px",
+                fontSize: "0.7rem",
+                fontWeight: 600,
                 cursor: "pointer",
                 display: "inline-flex",
                 alignItems: "center",
-                gap: "6px",
+                gap: "5px",
                 transition: "all 0.2s ease",
-                boxShadow: "none",
               }}
             >
-              {isSavedSuccessfully ? <Check size={13} /> : <Save size={13} />}
-              <span>{isSavedSuccessfully ? "Schedule Applied!" : hasUnsavedChanges ? `Save Changes (${slots.length} Slots)` : "Schedule Saved"}</span>
+              {isSavedSuccessfully ? <Check size={11} /> : <Save size={11} />}
+              <span>{isSavedSuccessfully ? "Applied" : hasUnsavedChanges ? "Save" : "Saved"}</span>
             </button>
           </div>
         </div>
 
-        {/* Publishing Channels with Official PlatformIcon (NO EMOJIS) */}
+        {/* Dynamic & Minimal Target Channels Row */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "8px",
+            gap: "6px",
             flexWrap: "wrap",
-            paddingBottom: "12px",
-            marginBottom: "12px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.06)",
+            paddingBottom: "8px",
+            marginBottom: "8px",
+            borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
           }}
         >
-          <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", fontWeight: 600 }}>Target Channels:</span>
+          <span style={{ fontSize: "0.7rem", color: "#64748b", fontWeight: 600, marginRight: "2px" }}>Target Channels:</span>
           {AVAILABLE_CHANNELS.map((ch) => {
-            const isSelected = selectedChannels.includes(ch.id);
+            const isConnected = connectedPlatformIds.size === 0 || connectedPlatformIds.has(ch.id.toLowerCase());
+            const isSelected = isConnected && selectedChannels.includes(ch.id);
+
             return (
               <button
                 key={ch.id}
                 type="button"
+                disabled={!isConnected}
                 onClick={() => {
+                  if (!isConnected) return;
                   if (isSelected) {
                     if (selectedChannels.length > 1) {
                       handleUpdateChannels(selectedChannels.filter((c) => c !== ch.id));
@@ -687,64 +703,93 @@ export function DocumentVisualConceptsHub({
                     handleUpdateChannels([...selectedChannels, ch.id]);
                   }
                 }}
+                title={isConnected ? `${ch.name} (Connected)` : `${ch.name} (Not connected in settings)`}
                 style={{
-                  padding: "4px 10px",
-                  borderRadius: "8px",
-                  border: isSelected ? "1px solid #6366f1" : "1px solid rgba(255, 255, 255, 0.08)",
-                  background: isSelected ? "rgba(99, 102, 241, 0.18)" : "rgba(255, 255, 255, 0.03)",
-                  color: isSelected ? "#c7d2fe" : "var(--color-text-muted)",
-                  fontSize: "0.76rem",
-                  fontWeight: 600,
-                  cursor: "pointer",
+                  padding: "3px 8px",
+                  borderRadius: "5px",
+                  border: isSelected
+                    ? "1px solid rgba(99, 102, 241, 0.6)"
+                    : isConnected
+                    ? "1px solid rgba(255, 255, 255, 0.08)"
+                    : "1px dashed rgba(255, 255, 255, 0.05)",
+                  background: isSelected
+                    ? "rgba(99, 102, 241, 0.2)"
+                    : isConnected
+                    ? "rgba(255, 255, 255, 0.02)"
+                    : "rgba(0, 0, 0, 0.15)",
+                  color: isSelected
+                    ? "#ffffff"
+                    : isConnected
+                    ? "#94a3b8"
+                    : "#475569",
+                  fontSize: "0.7rem",
+                  fontWeight: isSelected ? 700 : 500,
+                  cursor: isConnected ? "pointer" : "not-allowed",
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: "6px",
+                  gap: "4px",
+                  opacity: isConnected ? 1 : 0.45,
                   transition: "all 0.15s ease",
                 }}
               >
                 <PlatformIcon platform={ch.id} />
                 <span>{ch.name}</span>
-                {isSelected && <Check size={11} style={{ color: "#818cf8" }} />}
+                {isSelected && <Check size={10} style={{ color: "#818cf8" }} />}
+                {!isConnected && <span style={{ fontSize: "0.6rem", opacity: 0.8 }}>(off)</span>}
               </button>
             );
           })}
         </div>
 
-        {/* Refined Minimalist Time Chips */}
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fit, minmax(220px, 1fr))`, gap: "10px" }}>
+        {/* Sleek Executive Time Slot Cards */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(auto-fit, minmax(180px, 1fr))`,
+            gap: "10px",
+          }}
+        >
           {slots.map((slot, idx) => (
             <div
               key={slot.id}
               style={{
-                background: "rgba(10, 15, 26, 0.6)",
+                background: "rgba(15, 23, 42, 0.65)",
                 border: "1px solid rgba(255, 255, 255, 0.08)",
                 borderRadius: "10px",
-                padding: "10px 14px",
+                padding: "10px 12px",
                 display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "10px",
+                flexDirection: "column",
+                gap: "8px",
+                boxShadow: "0 2px 8px rgba(0, 0, 0, 0.2)",
+                transition: "border-color 0.15s ease, background 0.15s ease",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
-                <span
-                  style={{
-                    width: "20px",
-                    height: "20px",
-                    borderRadius: "50%",
-                    background: "rgba(99, 102, 241, 0.2)",
-                    color: "#818cf8",
-                    fontSize: "0.7rem",
-                    fontWeight: 700,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                  }}
-                >
-                  {idx + 1}
-                </span>
-                <div style={{ minWidth: 0, flex: 1 }}>
+              {/* Top Row: Slot # Badge + Full-width Label + Remove button */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "6px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0, flex: 1 }}>
+                  <span
+                    style={{
+                      fontSize: "0.65rem",
+                      fontWeight: 800,
+                      color: "#818cf8",
+                      background: "rgba(99, 102, 241, 0.15)",
+                      border: "1px solid rgba(99, 102, 241, 0.25)",
+                      padding: "1px 6px",
+                      borderRadius: "4px",
+                      letterSpacing: "0.5px",
+                      textTransform: "uppercase",
+                      flexShrink: 0,
+                    }}
+                  >
+                    #{idx + 1}
+                  </span>
                   <input
                     type="text"
                     value={slot.label}
@@ -755,23 +800,56 @@ export function DocumentVisualConceptsHub({
                     style={{
                       background: "transparent",
                       border: "none",
-                      color: "#94a3b8",
-                      fontSize: "0.72rem",
+                      borderBottom: "1px solid transparent",
+                      color: "#f1f5f9",
+                      fontSize: "0.78rem",
                       fontWeight: 600,
                       outline: "none",
-                      padding: 0,
+                      padding: "2px 4px",
                       margin: 0,
                       width: "100%",
+                      borderRadius: "2px",
+                      transition: "border-color 0.15s ease",
                     }}
-                    placeholder="Slot label"
+                    onFocus={(e) => (e.target.style.borderBottomColor = "#6366f1")}
+                    onBlur={(e) => (e.target.style.borderBottomColor = "transparent")}
+                    placeholder="Slot title..."
                   />
-                  <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "#ffffff", letterSpacing: "0.3px" }}>
-                    {formatTime12(slot.time)}
-                  </div>
                 </div>
+
+                {slots.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveSlot(slot.id)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "#64748b",
+                      cursor: "pointer",
+                      padding: "2px 4px",
+                      borderRadius: "4px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                      transition: "color 0.15s ease",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = "#f43f5e")}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = "#64748b")}
+                    title="Remove slot"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              {/* Bottom Row: Dedicated Sleek Time Input with Instant Native Picker */}
+              <div
+                style={{
+                  position: "relative",
+                  width: "100%",
+                }}
+              >
                 <input
                   type="time"
                   value={slot.time}
@@ -781,40 +859,37 @@ export function DocumentVisualConceptsHub({
                     const updated = slots.map((s) => (s.id === slot.id ? { ...s, time: val } : s));
                     handleUpdateSlots(updated);
                   }}
+                  onClick={(e) => {
+                    try {
+                      e.currentTarget.showPicker();
+                    } catch {}
+                  }}
                   style={{
-                    background: "rgba(255, 255, 255, 0.06)",
-                    border: "1px solid rgba(255, 255, 255, 0.15)",
-                    borderRadius: "6px",
+                    width: "100%",
+                    background: "rgba(255, 255, 255, 0.04)",
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    borderRadius: "7px",
                     color: "#ffffff",
-                    padding: "4px 6px",
-                    fontSize: "0.75rem",
-                    fontWeight: 600,
+                    fontSize: "0.86rem",
+                    fontWeight: 700,
+                    padding: "7px 10px",
                     cursor: "pointer",
                     outline: "none",
+                    colorScheme: "dark",
+                    boxSizing: "border-box",
+                    letterSpacing: "0.4px",
+                    transition: "all 0.15s ease",
                   }}
-                  title="Pick custom time"
+                  onFocus={(e) => {
+                    e.currentTarget.style.borderColor = "rgba(99, 102, 241, 0.6)";
+                    e.currentTarget.style.background = "rgba(99, 102, 241, 0.08)";
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.1)";
+                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.04)";
+                  }}
+                  title="Click to edit time"
                 />
-
-                {slots.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveSlot(slot.id)}
-                    style={{
-                      background: "transparent",
-                      border: "none",
-                      color: "#94a3b8",
-                      cursor: "pointer",
-                      padding: "4px",
-                      borderRadius: "4px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                    title="Remove slot"
-                  >
-                    <X size={13} />
-                  </button>
-                )}
               </div>
             </div>
           ))}

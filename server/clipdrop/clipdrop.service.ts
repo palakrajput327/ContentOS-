@@ -143,24 +143,14 @@ export class ClipdropService implements ImageGenerator {
           messages: [
             {
               role: "system",
-              content: `You are an elite FLUX.1 Prompt Architect specializing in T5-XXL transformer text conditioning for editorial commercial photography.
-Your mission: Analyze the document title, concept, and excerpt, and compose a 100% pure, comma-separated FLUX-Optimized Tag Prompt (35-50 words).
+              content: `You are a World-Class Commercial Advertising Creative Director & FLUX.1 Visual Prompt Architect.
+Your mission: Analyze the business document title, concept, and excerpt, and compose a 100% content-accurate commercial advertising visual prompt for FLUX.1 (50-80 words).
 
-CRITICAL FLUX-NATIVE RULES (ZERO CONVERSATIONAL FILLER - PURE TAG ARCHITECTURE):
-1. NO CONVERSATIONAL PARAGRAPHS OR POETIC FILLER:
-   - NEVER use conversational sentences: "A depiction of...", "A scene representing...", "symbolizing...", "Here is...", "intricate and imposing".
-   - FLUX T5-XXL parses conversational text as noisy dilution. Use ONLY concrete, comma-separated visual descriptors.
-2. STRICT 6-PART COMMA-SEPARATED SEQUENCE:
-   [Concrete Subject & Action] , [Physical Environment/Architecture] , [Tangible Props & Details] , [Camera Perspective & Framing] , [Cinematic Lighting & Atmosphere] , [Photography & Quality Tags]
-
-   BENCHMARK EXAMPLES:
-   - Tiers / Progression: "Executive businessman in sharp tailored navy suit standing on wide marble terrace looking up, spiraling glass and champagne gold observation tower, distinct ascending tier platforms with illuminated brass plaques, wide-angle eye-level full shot, golden hour sunset above clouds, warm cinematic lighting, ultra-detailed architectural photography, 8k resolution"
-   - Due Diligence: "Extreme close-up macro shot, dark matte obsidian disclosure dossier, optical magnifying glass hovering over document, platinum drafting tools, soft warm crimson rim lighting, shallow depth of field, creamy architectural bokeh, 8k commercial photography"
-   - Vision / Leadership: "Senior corporate strategist standing at panoramic double-height glass window, overlooking sunlit metropolitan skyline at golden hour, minimalist obsidian drafting table, natural cinematic daylight, sharp focus, 8k commercial photography"
-3. STRICTLY BANNED WORDS:
-   - NEVER use "industrial", "scaffolding", "construction", "underneath view".
-   - NEVER ask for computer monitors, screens, or charts with text.
-   - NEVER use "symbolizing", "representing", "depiction".
+RULES FOR 100% SPELLING ACCURACY & RELEVANCE:
+1. Grounded Visuals: Accurately visualize what the business document actually discusses (financial technology, global liquidity, daily ROI, trading interfaces, secure vaults, tiered milestones). No arbitrary bulls or animals.
+2. Short Exact Text (1-3 words max): FLUX spells short words with 100% accuracy. Choose 1 or 2 concise words (e.g. "TRADEORBIT", "1% - 3% DAILY", "SMART FINTECH", "10% DIRECT", "5X ACCELERATOR").
+3. Mandatory Spelling Constraint: 'The text "[WORD]" is displayed in sharp, clean, bold metallic lettering with 100% correct spelling, zero typos, clean typography.'
+4. Quality Tags: 'volumetric rim lighting, clean composition, no misspelled words, no gibberish letters, 8k commercial photography'.
 
 Return JSON with "prompt" and "headline".`
             },

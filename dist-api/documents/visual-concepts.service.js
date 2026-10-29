@@ -100,38 +100,26 @@ export class VisualConceptsService {
         const docName = docRes.rows[0]?.original_filename || "Business Document";
         // 3. Ask Gemini to extract genuine visual concepts using FLUX-native Comma-Separated Tag Engine (T5-XXL optimized)
         const provider = getLLMProvider();
-        const systemPrompt = `You are an elite FLUX.1 Prompt Architect specializing in T5-XXL transformer text conditioning.
-Your mission: Analyze the document knowledge and extract only genuine, distinct, non-repetitive core visual concepts.
-For each genuine theme, formulate a 100% pure, comma-separated FLUX-Optimized Tag Prompt (35-50 words).
+        const systemPrompt = `You are an elite Commercial Advertising Creative Director & FLUX.1 Visual Prompt Architect.
+Your mission: Analyze the uploaded business PDF / pitch deck / whitepaper, deeply understand its REAL business model, products, figures, and offerings, and create 100% ACCURATE, highly relevant commercial advertising visuals.
 
-CRITICAL FLUX-NATIVE RULES (ZERO CONVERSATIONAL FILLER - PURE TAG ARCHITECTURE):
-1. NO CONVERSATIONAL PARAGRAPHS OR POETIC FILLER:
-   - NEVER use full sentences or poetic framing like: "A warm and emotional depiction of...", "Here is a scene where...", "A photo symbolizing...", "intricate and imposing", "symbolizing the complex nature".
-   - FLUX T5-XXL parses filler words as noise, causing low accuracy. Use ONLY comma-separated concrete visual keywords and concise phrases.
-2. STRICT 6-PART COMMA-SEPARATED TAG SEQUENCE:
-   [1. Concrete Subject & Pose] , [2. Physical Environment/Architecture] , [3. Tangible Props & Micro-Details] , [4. Camera Perspective & Framing] , [5. Cinematic Lighting & Atmosphere] , [6. Material Textures & Photography Tags]
+STRICT ACCURACY RULES (ZERO HARDCODED ANIMALS OR IRRELEVANT TROPES):
+1. NO RANDOM ANIMALS: Do NOT add bulls, lions, eagles, or animals unless the PDF explicitly features an animal in its brand or text.
+2. 100% CONTENT-ACCURATE VISUALS:
+   - If the page is about Global Infrastructure / Tech: Visualize futuristic global financial network, glowing fiber-optic data streams, clean algorithmic digital systems.
+   - If the page is about Daily ROI / Profit Distribution: Visualize executive trading command desk with clean rising candlestick charts, glowing upward growth vectors, and the exact return figures.
+   - If the page is about Packages / Capital Entry: Visualize sleek digital asset vault, cryptocurrency allocation interface, and BEP-20 verification badges.
+   - If the page is about Referral / Network Income: Visualize interconnected professional leadership network nodes and collaborative digital links.
+   - If the page is about Royalty Club / Leadership Rewards: Visualize prestigious executive achievement awards, golden milestone trophies, and global turnover revenue streams.
+   - If the page is about Security / Compliance: Visualize high-tech cryptographic security shield, verified blockchain ledger blocks, and auditable protocol interfaces.
 
-   PROVEN BENCHMARK EXAMPLES FOR FLUX:
-   - Tiers / Compensation / Career Levels:
-     "Executive businessman in sharp tailored navy suit standing on gleaming black marble terrace looking up, spiraling curved glass and champagne gold architectural observation tower, distinct ascending observation decks with illuminated bronze tier plaques, wide-angle eye-level full shot, dramatic golden hour sunset above sea of clouds, warm cinematic lighting, ultra-detailed architectural photography, 8k resolution"
-   - Due Diligence / Verification / Contracts:
-     "Extreme close-up macro shot, dark matte obsidian disclosure dossier, optical magnifying glass hovering over document, platinum drafting tools, soft warm crimson rim lighting, shallow depth of field, creamy architectural bokeh, award-winning editorial commercial photography"
-   - Vision / Corporate Strategy:
-     "Senior corporate strategist standing at expansive floor-to-ceiling panoramic glass window, overlooking sunlit metropolitan skyline at golden hour, minimalist obsidian drafting table, natural cinematic daylight, sharp focus, 8k commercial photography"
-   - Trading Ecosystem / Technology / Liquidity:
-     "Modern architectural glass atrium, minimalist monolithic marble conference tables, executives in discussion, warm golden ambient sunlight, wide-angle interior architectural photography, clean symmetry, editorial business magazine style"
+CRITICAL TEXT & SPELLING ACCURACY RULES (PREVENTS GIBBERISH & TYPOS):
+- FLUX achieves 100% spelling accuracy ONLY when text is kept to 1 to 3 SHORT words maximum (e.g. "TRADEORBIT", "1% - 3% DAILY", "SMART FINTECH", "10% DIRECT", "5X ACCELERATOR", "ROYALTY CLUB").
+- NEVER prompt long sentences or multi-line paragraphs into the image (this causes garbled typos).
+- Explicitly instruct FLUX: 'The text "[EXACT_SHORT_PHRASE]" is displayed in sharp, clean, bold metallic lettering with 100% correct spelling, zero typos, and clean legible typography.'
+- Explicit negative constraints in every prompt: 'no misspelled words, no gibberish letters, no random floating characters, no duplicate text, clean sharp typography, 8k commercial photography'.
 
-3. STRICTLY BANNED WORDS:
-   - NEVER use "industrial", "scaffolding", "construction", "underneath view" (FLUX renders ugly fire escapes and rusted scaffolding).
-   - NEVER ask for computer monitors, mobile screens, or charts with text (renders garbled hieroglyphics).
-   - NEVER use "symbolizing", "representing", "depiction", "intricate", "imposing".
-
-4. DYNAMIC CONCEPT EXTRACTION (SCALED TO DOCUMENT DEPTH):
-   - Analyze the document thoroughly and extract distinct, non-repetitive visual concepts representing its key sections, models, and milestones.
-   - For shorter docs (1-5 pages): Extract 4 to 6 concepts.
-   - For in-depth business plans, specs, or whitepapers (6-20+ pages): Dynamically extract 7 to 12+ genuine concepts across all chapters/themes.
-   - Never artificially clamp or hardcode to 4 concepts. Scale dynamically with document substance.
-
+Scale dynamically across the document: Extract 6 to 14 distinct concepts covering all key pages and sections.
 Return JSON with "concepts" array.`;
         let rawList = [];
         try {
@@ -142,23 +130,23 @@ Return JSON with "concepts" array.`;
                     title: z.string().optional(),
                     name: z.string().optional(),
                     concept: z.string().optional(),
-                    sourcePage: z.number().optional().default(1),
-                    sourceExcerpt: z.string().optional().default(""),
+                    sourcePage: z.any().optional(),
+                    sourceExcerpt: z.string().optional(),
                     prompt: z.string().optional(),
                     description: z.string().optional(),
-                }),
+                }).passthrough(),
             ]);
             const res = await provider.generateStructured({
                 messages: [
                     { role: "system", content: systemPrompt },
                     {
                         role: "user",
-                        content: `Document: "${docName}"\n\nComprehensive Extracted Content from PDF:\n${contentSummary}\n\nExtract all genuine, distinct core business concepts across this document as pure FLUX tag prompts (scale dynamically from 4 up to 12+ concepts based on depth):\nReturn JSON with "concepts" array.`,
+                        content: `Document: "${docName}"\n\nComprehensive Extracted Content from PDF:\n${contentSummary}\n\nExtract all distinct core business concepts across this document as accurate commercial FLUX prompts:\nReturn JSON with "concepts" array.`,
                     },
                 ],
                 schema: z.object({
                     concepts: z.array(ConceptItemSchema),
-                }),
+                }).passthrough(),
                 schemaName: "DocumentVisualConceptsExtraction",
                 maxTokens: 4096,
             });
@@ -217,20 +205,20 @@ Return JSON with "concepts" array.`;
         if (!rawList || rawList.length === 0) {
             const distinctCategories = [
                 {
-                    key: "Corporate Vision & Architecture",
-                    prompt: "Executive businessman in sharp tailored navy suit standing in double-height minimalist glass atrium, panoramic sunlit skyline view, polished dark obsidian floor, natural morning daylight, eye-level wide shot, 8k commercial editorial photography",
+                    key: "Global Financial Infrastructure & Platform Vision",
+                    prompt: `Commercial financial technology advertising creative for ${docName.replace(/\.pdf$/i, '')}, sharp bold metallic typography "GLOBAL FINTECH" at top with 100% correct spelling, luminous fiber-optic digital world globe with golden and cobalt blue data streams connecting international financial hubs, sleek obsidian marble background, volumetric studio lighting, clean legible typography, no typos, no gibberish, 8k commercial photography`,
                 },
                 {
-                    key: "Multi-Tier Income & Career Progression",
-                    prompt: "Executive in tailored charcoal suit standing on wide marble terrace looking up, spiraling curved glass and champagne gold architectural observation tower, distinct ascending tier platforms with illuminated bronze plaques, wide-angle eye-level full shot, sunset above clouds, warm cinematic lighting, ultra-detailed architectural photography, 8k resolution",
+                    key: "Daily Profit Distribution & Earning Engine",
+                    prompt: `Commercial luxury financial advertising creative for ${docName.replace(/\.pdf$/i, '')}, clear bold 3D golden numbers "1% - 3% DAILY" with exact spelling, executive trading workstation with rising financial candlestick charts under warm amber and deep navy ambient lighting, sleek marble desk, sharp typography, zero typos, no random letters, 8k resolution, cinematic commercial photography`,
                 },
                 {
-                    key: "Precision Diligence & Document Verification",
-                    prompt: "Extreme close-up macro shot, dark matte obsidian disclosure dossier, optical magnifying glass hovering over document, platinum drafting tools, soft warm crimson rim lighting, shallow depth of field, creamy architectural bokeh, award-winning editorial commercial photography",
+                    key: "Smart Execution Engine & Risk Control",
+                    prompt: `High-tech commercial fintech creative for ${docName.replace(/\.pdf$/i, '')}, sharp 3D metallic typography "SMART EXECUTION" with 100% correct spelling, futuristic algorithmic trading node with clean holographic risk management analytics, glowing cyan and gold light circuits, clean sharp focus, no spelling mistakes, 8k resolution`,
                 },
                 {
-                    key: "Global Financial Markets & Liquidity Network",
-                    prompt: "Modern architectural glass trading hall, minimalist monolithic marble counters, senior analysts in conversation, warm golden ambient sunlight through skylights, wide-angle interior architectural photography, clean symmetry, editorial business magazine style",
+                    key: "Multi-Tier Accelerator & Leadership Rewards",
+                    prompt: `Commercial financial rewards creative for ${docName.replace(/\.pdf$/i, '')}, sharp 3D metallic typography "5X ACCELERATOR" with exact spelling, ascending luxury golden achievement tiers with floating metallic black and gold VIP cards, volumetric light beams, luxury dark aesthetic, zero typos, 8k commercial photography`,
                 },
             ];
             if (kRes.rowCount && kRes.rowCount > 0) {
