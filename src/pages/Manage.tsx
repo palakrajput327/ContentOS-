@@ -367,24 +367,44 @@ export function Channels() {
                           Reconnect
                         </button>
                       ) : (
-                        <button
-                          className="text-button"
-                          disabled={busy}
-                          onClick={async () => {
-                            try {
-                              setBusy(true);
-                              await request(`/social/accounts/${a.id}/validate`, "POST");
-                              await query.invalidateQueries({ queryKey: ["workspace"] });
-                              toast.success("Connection re-validated");
-                            } catch (err) {
-                              toast.error((err as Error).message);
-                            } finally {
-                              setBusy(false);
-                            }
-                          }}
-                        >
-                          Validate
-                        </button>
+                        <>
+                          <button
+                            className="text-button"
+                            disabled={busy}
+                            onClick={async () => {
+                              try {
+                                setBusy(true);
+                                await request(`/social/accounts/${a.id}/validate`, "POST");
+                                await query.invalidateQueries({ queryKey: ["workspace"] });
+                                toast.success("Connection re-validated");
+                              } catch (err) {
+                                toast.error((err as Error).message);
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                          >
+                            Validate
+                          </button>
+                          <button
+                            className="text-button"
+                            disabled={busy}
+                            style={{ color: "var(--accent)" }}
+                            onClick={async () => {
+                              try {
+                                setBusy(true);
+                                const res = await request<{ message: string }>(`/social/accounts/${a.id}/test-post`, "POST");
+                                toast.success(res.message || "Test post sent!");
+                              } catch (err) {
+                                toast.error((err as Error).message);
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                          >
+                            Send Test
+                          </button>
+                        </>
                       )}
                       <button
                         className="text-button"
@@ -396,6 +416,7 @@ export function Channels() {
                   )}
                 </div>
               ))}
+
               {canManage && (
                 <>
                 <Button
@@ -429,11 +450,16 @@ export function Channels() {
             setError("");
           }
         }}
-        title="Connect Telegram Channel"
-        description="Enter your channel @username or Chat ID and HTTP API Bot Token."
+        title="Connect Your Telegram Channel"
+        description="You need your own Telegram bot. Each user connects their own unique bot — never share tokens."
       >
-        <div style={{ padding: "10px 12px", background: "rgba(99, 102, 241, 0.1)", borderRadius: "8px", marginBottom: "14px", border: "1px solid rgba(99, 102, 241, 0.2)", fontSize: "0.82rem", color: "var(--accent)" }}>
-          💡 <strong>Setup Step:</strong> Make sure your Telegram bot (from @BotFather) is added as an <strong>Administrator</strong> to your Channel with <em>"Post Messages"</em> permission enabled.
+        <div style={{ padding: "12px 14px", background: "rgba(99, 102, 241, 0.08)", borderRadius: "10px", marginBottom: "16px", border: "1px solid rgba(99, 102, 241, 0.25)", fontSize: "0.82rem", lineHeight: "1.6" }}>
+          <strong style={{ display: "block", marginBottom: "8px", color: "var(--accent)" }}>📋 3 Quick Steps to Connect:</strong>
+          <ol style={{ margin: 0, paddingLeft: "18px" }}>
+            <li style={{ marginBottom: "4px" }}>Open Telegram → search <strong>@BotFather</strong> → send <code style={{ background: "rgba(255,255,255,0.1)", padding: "1px 5px", borderRadius: "4px" }}>/newbot</code> → get your unique <strong>HTTP Bot Token</strong></li>
+            <li style={{ marginBottom: "4px" }}>Add your new bot as <strong>Administrator</strong> to your Channel with <em>"Post Messages"</em> permission</li>
+            <li>Enter your Channel ID and Bot Token below, then click Connect</li>
+          </ol>
         </div>
         <label>
           Channel @username or Chat ID
@@ -445,7 +471,7 @@ export function Channels() {
           />
         </label>
         <label htmlFor="channel-bot-token" style={{ marginTop: "12px" }}>
-          Bot token (from @BotFather)
+          Your Bot Token (from @BotFather — unique to your bot)
         </label>
           <span className="channel-secret-field">
           <input
@@ -454,17 +480,18 @@ export function Channels() {
             value={token}
             onChange={(e) => setToken(e.target.value)}
             autoComplete="off"
-            placeholder="e.g. 8818622380:AAFIE6T9Cns..."
+            placeholder="1234567890:AAHxxxxxxxx..."
           />
           <button type="button" aria-label={showToken ? "Hide bot token" : "Show bot token"} aria-pressed={showToken} onClick={() => setShowToken(value => !value)}>{showToken ? <EyeOff size={17} /> : <Eye size={17} />}</button>
           </span>
-        <p className="form-note"><ShieldCheck size={13} aria-hidden="true" /> Your token stays hidden until you choose to show it.</p>
+        <p className="form-note"><ShieldCheck size={13} aria-hidden="true" /> Your token is encrypted and stored securely in your workspace. Never shared.</p>
 
         {error && (
           <p className="error-box" role="alert" style={{ marginTop: "12px" }}>
             {error}
           </p>
         )}
+
 
         <Button
           onClick={submitTelegram}

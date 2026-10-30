@@ -1076,6 +1076,69 @@ export class SocialController {
   }
 
   @WorkspaceRequired()
+  @Post("social/accounts/:id/test-post")
+  async testPost(@Req() r: AuthedRequest, @Param("id") id: string) {
+    assertPermission(r.workspace.role, "manage");
+    const w = r.workspace.id;
+
+    const accRes = await pool.query(
+      "SELECT a.id, a.platform, a.provider_id, a.name, t.ciphertext FROM social_accounts a JOIN social_account_tokens t ON t.account_id = a.id WHERE a.id = $1 AND a.workspace_id = $2",
+      [id, w],
+    );
+
+    if (!accRes.rowCount) {
+      throw new NotFoundException("Social account not found in this workspace.");
+    }
+
+    const acc = accRes.rows[0];
+    let token: string;
+    try {
+      token = decryptToken(acc.ciphertext, w);
+    } catch {
+      token = decryptToken(acc.ciphertext, `${w}:${acc.id}`);
+    }
+
+    const platform = String(acc.platform).toLowerCase();
+    const provider = SocialProviderRegistry.getProvider(platform as SocialProviderName);
+
+    const testText = `✅ ContentOS Test Post\n\nYour ${acc.name} channel is successfully connected!\n\nTime: ${new Date().toUTCString()}`;
+
+    const config =
+      platform === "telegram"
+        ? { botToken: token, chatId: acc.provider_id }
+        : { token, author: acc.provider_id };
+
+    const result = await provider.publishText(config, {
+      destination: acc.provider_id,
+      text: testText,
+    });
+
+    if (!result.success) {
+      throw new BadRequestException(
+        result.error || "Test post failed. Check your bot token and channel permissions.",
+      );
+    }
+
+    await audit(
+      pool,
+      w,
+      r.user.id,
+      "test_post_sent",
+      "social_account",
+      id,
+      acc.name,
+      null,
+      { platform, providerPostId: result.providerPostId },
+    );
+
+    return {
+      success: true,
+      providerPostId: result.providerPostId,
+      message: `Test message sent successfully to ${acc.name}!`,
+    };
+  }
+
+  @WorkspaceRequired()
   @Delete("social/accounts/:id")
   async disconnectAccount(@Req() r: AuthedRequest, @Param("id") id: string) {
     assertPermission(r.workspace.role, "manage");
