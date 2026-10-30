@@ -4,10 +4,19 @@ import fs from 'node:fs';
 
 const cwd = fileURLToPath(new URL('../', import.meta.url));
 
-// 1. If precompiled backend exists and we are in cloud (Render) or skipping build, succeed immediately
-if (fs.existsSync('dist-api/phase-main.js') && (process.env.RENDER || process.env.NODE_ENV === 'production' || process.env.SKIP_BUILD === '1')) {
-  console.log('[ContentOS] Precompiled dist-api is ready for deployment.');
-  process.exit(0);
+// 1. If precompiled backend exists and we are in production, cPanel, or missing devDependencies, succeed cleanly
+if (fs.existsSync('dist-api/phase-main.js')) {
+  if (
+    process.env.RENDER ||
+    process.env.NODE_ENV === 'production' ||
+    process.env.APP_ENV === 'production' ||
+    process.env.SKIP_BUILD === '1' ||
+    !fs.existsSync('node_modules/typescript') ||
+    !fs.existsSync('node_modules/vite')
+  ) {
+    console.log('[ContentOS] Precompiled dist-api is ready for deployment. Build step completed.');
+    process.exit(0);
+  }
 }
 
 // 2. Otherwise compile Backend API
