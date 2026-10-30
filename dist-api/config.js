@@ -20,7 +20,16 @@ export function loadConfig() {
         QUEUE_BACKEND: z.enum(['bullmq', 'postgres']).default('postgres'),
         REDIS_URL: z.string().url().optional(),
         ENCRYPTION_KEY: z.string().transform((s) => s.trim()).pipe(z.string().regex(/^[0-9a-f]{64}$/i)),
-        PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+        PORT: z.preprocess((val) => {
+            if (typeof val === "string") {
+                const num = Number(val);
+                if (!isNaN(num) && Number.isInteger(num) && num > 0 && num <= 65535) {
+                    return num;
+                }
+                return val;
+            }
+            return val;
+        }, z.union([z.number().int().min(1).max(65535), z.string()]).default(3001)),
         MAIL_HOST: z.string().min(1),
         MAIL_PORT: z.coerce.number().int().positive(),
         MAIL_FROM_ADDRESS: z.string().email(),

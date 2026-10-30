@@ -1,0 +1,86 @@
+CONTENTOS CPANEL DEPLOYMENT — CURRENT WORKSPACE BUILD
+
+Domains used by this build:
+  Frontend https://hidustansocialnetwork.in
+  Backend  https://api.hidustansocialnetwork.in
+If these differ, rebuild the frontend with the correct VITE_API_BASE before upload.
+
+1. FRONTEND
+Extract frontend-deploy.zip directly into the frontend domain document root,
+usually /home/CPANEL_USER/public_html. index.html, assets/ and .htaccess must
+be at that root, not inside a nested frontend or dist folder.
+Back up existing files first. Preserve unrelated domains and custom .htaccess rules.
+
+2. BACKEND
+In cPanel Setup Node.js App create a Production app using Node.js 22.
+Application URL: api.hidustansocialnetwork.in
+Application root: api.hidustansocialnetwork.in (a separate folder from public_html).
+Startup file: app.cjs (CommonJS wrapper for Passenger, loads app.mjs).
+Extract backend-deploy.zip directly into that application root.
+Precompiled dist-api is included; no TypeScript build is needed on cPanel.
+Do not upload Windows node_modules. Dependencies must install on Linux.
+
+Use the activation command displayed by cPanel, then run in the application root:
+  npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+  npm rebuild ffmpeg-static --ignore-scripts=false
+  node scripts/verify-ffmpeg.mjs
+The native canvas package must match Linux; do not copy a Windows installation.
+Some hosting providers restrict executable downloads/native libraries; ask them
+for ffmpeg/native canvas support if installation or startup fails.
+
+3. PRODUCTION ENVIRONMENT
+Copy .env.production.example to .env in the backend root only.
+Keep an existing production .env instead of overwriting it.
+No real keys, database passwords or local .env were included in these ZIPs.
+Fill DATABASE_URL with the PostgreSQL Wizard's FULL prefixed database/user names,
+password and host. Grant that user privileges on that database in cPanel.
+For a database on the same server use 127.0.0.1:5432 unless your host gives another address.
+URL-encode password characters such as @, #, /, %, : and ? in DATABASE_URL.
+Set actual SMTP details (needed for verification/login emails), AI and social keys.
+For a NEW installation, generate each secret with:
+  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+ENCRYPTION_KEY must be 64 hexadecimal characters.
+Preserve the previous encryption/signing keys when keeping/importing existing data;
+otherwise saved social tokens and encrypted records cannot be decrypted.
+Use HTTPS on both domains. Keep OAuth callback URLs aligned with the API domain.
+The supplied OpenAI key previously returned invalid_api_key during testing;
+put a working key in the server .env to enable new image generation.
+
+4. DATABASE
+Back up an existing database first. For a new empty cPanel database run:
+  node --env-file=.env dist-api/migrate.js
+All schema migrations, including per-PDF branding, are included in server/migrations.
+This package does not copy/import the local or cloud database. Existing users,
+PDF records, schedules and social connections need a separate data migration if wanted.
+Do not blindly run initial CREATE TABLE migrations against an existing schema whose
+schema_migrations history was not migrated. Back up and reconcile history first.
+If moving existing data, migrate its stored media as well; uploads/ is not included.
+
+5. STORAGE AND RESTART
+The template uses local storage at backend-root/uploads. Keep that directory
+writable and preserve it across deployments. Do not place .env in frontend files.
+Restart the Node app from cPanel.
+  https://api.hidustansocialnetwork.in/api/v1/health/ready
+must return HTTP 200 with postgres=ok before testing login.
+
+6. AUTOMATION / CPANEL CRON
+The API has a 30-second visual-concept dispatch loop. Passenger must remain active
+for that loop to run. An idle/stopped application cannot dispatch on time.
+Add cPanel Cron Jobs every minute using YOUR actual cPanel Node environment path:
+  cd /home/CPANEL_USER/api.hidustansocialnetwork.in && /home/CPANEL_USER/nodevenv/api.hidustansocialnetwork.in/22/bin/node --env-file=.env dist-api/cron-worker.js --lane=priority --budget-seconds=45 >> cron-priority.log 2>&1
+  cd /home/CPANEL_USER/api.hidustansocialnetwork.in && /home/CPANEL_USER/nodevenv/api.hidustansocialnetwork.in/22/bin/node --env-file=.env dist-api/cron-worker.js --lane=background --budget-seconds=45 >> cron-background.log 2>&1
+For the built-in visual dispatch loop, also keep the app active using hosting-supported
+always-on settings; a once-per-minute health request can wake Passenger:
+  /usr/bin/curl --fail --silent --max-time 20 https://api.hidustansocialnetwork.in/api/v1/health/ready > /dev/null
+Confirm your host supports long-running Node apps and one-minute cron intervals.
+Cron workers process PDF extraction, mail, Auto-Pilot generation and queued publishing.
+No cron jobs or live deployments were activated while preparing these archives.
+
+7. ACCEPTANCE CHECK
+Open frontend; verify login, PDF upload, Brand Identity logo upload, image generation.
+Save a near-future slot on a test channel; verify actual publication and history.
+Brand Identity is optional; missing/unconfirmed identity produces a warning and
+scheduled posting proceeds with available artwork. A valid image provider is still
+required when the selected post has no generated image.
+
+Included build: current brand branch workspace, including uncommitted fixes.

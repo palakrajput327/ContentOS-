@@ -135,6 +135,10 @@ if (!process.env.QUEUE_BACKEND) process.env.QUEUE_BACKEND = "postgres";
 const { bootstrap } = await import("./dist-api/phase-main.js");
 
 bootstrap().catch((error) => {
-  console.error("ContentOS startup failed:", error?.stack || error);
+  const errMsg = `[${new Date().toISOString()}] ContentOS startup failed:\n${error?.stack || error}\n`;
+  console.error(errMsg);
+  try {
+    fs.appendFileSync(path.join(__dirname, "cpanel-startup-error.log"), errMsg);
+  } catch {}
   process.exit(1);
 });
