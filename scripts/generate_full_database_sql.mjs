@@ -236,13 +236,29 @@ INSERT INTO social_account_tokens (account_id, ciphertext, expires_at, refresh_c
 VALUES ('f166c4df-4f10-498b-915a-d5aae6b6e880', 'G2DB63jV+8trJiT4.7ZoPLcnWMmT9SoIhXjYMuw==.iOh2xIdcgHNUpDD2oV0S18pyTx4qFGYmZcSTMX9pql3sjfbRlLL6W+B2xXUoIAClYcdaVKriky679sa4SViMj2MeFkaIE3sT9MFeXkEc05c7tpQ5PRK+9Eimc52Ly+WPeT6YWtIAiGbEoIXN6v+gIM1S9N50sTHXmsA71u5fq/SfzQGE8HDO8gfn9oUKB824y2Daf4ypN8GUOvw26ArlZJRSkJanpCgnxow/MQLIRT97/GH/6XzwQZJVj03qD7LBg9eKXCC3WfsvcVhvIq5TC/QtVeXTagoXlxhx6mubSMJa3Wp4D+evIKaI4NfqIzKzsuHbNsPPDM5ajdRVk=', '2026-10-16T09:05:24.193Z', 'rZ71T7+3PMCgkDsQ.kpAJxWwWGQdZcaknjnDg1A==.M/RvZTrYAu+Gi82yRcYxFis3JriId7+K+yb59S8gHnA4i97/Ug/6mgSojKYCohijVxbys4TTtK2oy1+SJrQhZpncxLDqRiiNH8AVDwmghlF3a9P0E8WfFsczT5BNKr8qf5aVyI10Rw==')
 ON CONFLICT (account_id) DO UPDATE SET ciphertext = EXCLUDED.ciphertext;
 
--- Permissions for cPanel database user hindust1_OneSocial
-GRANT ALL ON SCHEMA public TO "hindust1_OneSocial";
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "hindust1_OneSocial";
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "hindust1_OneSocial";
-GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO "hindust1_OneSocial";
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "hindust1_OneSocial";
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "hindust1_OneSocial";
+-- Permissions for cPanel database user hindust1_OneSocial / hindust1
+DO $$
+BEGIN
+  BEGIN
+    GRANT ALL ON SCHEMA public TO "hindust1_OneSocial";
+    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "hindust1_OneSocial";
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "hindust1_OneSocial";
+    GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO "hindust1_OneSocial";
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "hindust1_OneSocial";
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "hindust1_OneSocial";
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+
+  BEGIN
+    GRANT ALL ON SCHEMA public TO "hindust1";
+    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "hindust1";
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "hindust1";
+    GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO "hindust1";
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "hindust1";
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "hindust1";
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+END $$;
 
 -- ====================================================================
 -- Setup Complete!

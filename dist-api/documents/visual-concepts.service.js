@@ -367,7 +367,7 @@ Return JSON with "concepts" array.`;
             await brandService.warnOptionalBrand(opts.documentId, opts.workspaceId);
         }
         const dispatchedAt = new Date().toISOString();
-        const channels = opts.channels && opts.channels.length > 0 ? opts.channels : ["linkedin"];
+        const channels = Array.isArray(opts.channels) && opts.channels.length > 0 ? opts.channels : ["linkedin"];
         // Fetch connected accounts for this workspace
         const accountsRes = await pool.query(`SELECT id, platform, name FROM social_accounts WHERE workspace_id = $1 AND state = 'CONNECTED'`, [opts.workspaceId]);
         const connectedAccounts = accountsRes.rows;
@@ -443,7 +443,8 @@ Return JSON with "concepts" array.`;
      * Syncs and persists automated dispatch slots to the database
      */
     async syncSchedule(opts) {
-        const { documentId, workspaceId, slots, channels } = opts;
+        const { documentId, workspaceId, slots } = opts;
+        const safeChannels = Array.isArray(opts.channels) && opts.channels.length > 0 ? opts.channels : ["linkedin"];
         if (!slots || slots.length === 0) {
             return { success: false, scheduledCount: 0, slots: [] };
         }
@@ -512,7 +513,7 @@ Return JSON with "concepts" array.`;
             const targetUtcDate = parseDateInTz(y, mo, da, sh, sm, timezone || 'Asia/Kolkata');
             await pool.query(`UPDATE document_visual_concepts
          SET scheduled_at = $1, target_channels = $2::jsonb, status = 'PENDING', updated_at = NOW()
-         WHERE id = $3`, [targetUtcDate.toISOString(), JSON.stringify(channels), c.id]);
+         WHERE id = $3`, [targetUtcDate.toISOString(), JSON.stringify(safeChannels), c.id]);
             count++;
             slotIdx++;
             if (slotIdx >= sortedSlots.length) {

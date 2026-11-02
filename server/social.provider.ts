@@ -141,7 +141,11 @@ export class TelegramProvider implements SocialProvider {
       throw new BadRequestException("Invalid Telegram configuration payload.");
     }
     const { botToken, chatId } = config as Record<string, any>;
-    if (!botToken || typeof botToken !== "string" || !botToken.trim()) {
+    const effectiveToken =
+      botToken && typeof botToken === "string" && botToken.trim() && botToken !== "undefined"
+        ? botToken.trim()
+        : (process.env.TELEGRAM_BOT_TOKEN || "").trim();
+    if (!effectiveToken) {
       throw new BadRequestException("Telegram bot token is required.");
     }
     if (!chatId || typeof chatId !== "string" || !chatId.trim()) {
@@ -149,7 +153,7 @@ export class TelegramProvider implements SocialProvider {
         "Telegram target chat/channel ID is required.",
       );
     }
-    return { botToken: botToken.trim(), chatId: chatId.trim() };
+    return { botToken: effectiveToken, chatId: chatId.trim() };
   }
 
   async validateConnection(
@@ -345,6 +349,34 @@ export class TelegramProvider implements SocialProvider {
           }
         }
 
+        // Fast Path: If mediaUrl is a public HTTP/HTTPS URL, pass URL directly to Telegram
+        if (!isVideo && request.mediaUrl && request.mediaUrl.startsWith("http") && !request.mediaUrl.includes("localhost") && !request.mediaUrl.includes("127.0.0.1")) {
+          try {
+            const fastRes = await fetch(
+              `https://api.telegram.org/bot${botToken}/sendPhoto`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: chatId,
+                  photo: request.mediaUrl,
+                  caption: request.text.slice(0, 1024),
+                }),
+              },
+            );
+            const fastData = await fastRes.json();
+            if (fastRes.ok && fastData.ok && fastData.result?.message_id) {
+              return {
+                success: true,
+                providerPostId: String(fastData.result.message_id),
+                publishedAt: new Date(fastData.result.date * 1000),
+              };
+            }
+          } catch (fastErr) {
+            console.warn("[Telegram Provider] Direct URL sendPhoto attempt skipped:", fastErr);
+          }
+        }
+
         const endpoint = isVideo ? 'sendVideo' : 'sendPhoto';
         const paramName = isVideo ? 'video' : 'photo';
         const filename = isVideo ? 'video.mp4' : 'photo.jpg';
@@ -442,7 +474,7 @@ export class TelegramProvider implements SocialProvider {
         };
       }
 
-      const res = await fetch(
+      let res = await fetch(
         `https://api.telegram.org/bot${botToken}/sendMessage`,
         {
           method: "POST",
@@ -450,7 +482,6 @@ export class TelegramProvider implements SocialProvider {
           body: JSON.stringify({
             chat_id: chatId,
             text: request.text,
-            parse_mode: "HTML",
           }),
         },
       );

@@ -475,7 +475,7 @@ Return JSON with "concepts" array.`;
     }
     } catch { await brandService.warnOptionalBrand(opts.documentId, opts.workspaceId); }
     const dispatchedAt = new Date().toISOString();
-    const channels = opts.channels && opts.channels.length > 0 ? opts.channels : ["linkedin"];
+    const channels = Array.isArray(opts.channels) && opts.channels.length > 0 ? opts.channels : ["linkedin"];
 
     // Fetch connected accounts for this workspace
     const accountsRes = await pool.query(
@@ -591,7 +591,8 @@ Return JSON with "concepts" array.`;
     scheduledCount: number;
     slots: any[];
   }> {
-    const { documentId, workspaceId, slots, channels } = opts;
+    const { documentId, workspaceId, slots } = opts;
+    const safeChannels = Array.isArray(opts.channels) && opts.channels.length > 0 ? opts.channels : ["linkedin"];
     if (!slots || slots.length === 0) {
       return { success: false, scheduledCount: 0, slots: [] };
     }
@@ -678,7 +679,7 @@ Return JSON with "concepts" array.`;
         `UPDATE document_visual_concepts
          SET scheduled_at = $1, target_channels = $2::jsonb, status = 'PENDING', updated_at = NOW()
          WHERE id = $3`,
-        [targetUtcDate.toISOString(), JSON.stringify(channels), c.id]
+        [targetUtcDate.toISOString(), JSON.stringify(safeChannels), c.id]
       );
       count++;
 

@@ -61,7 +61,8 @@ export async function claim(id, now = new Date()) {
         if (new Date(job.execute_at).getTime() > now.getTime())
             throw new Error("Job arrived before execution time");
         const account = (await db.query("SELECT a.*,t.ciphertext,t.expires_at FROM social_accounts a LEFT JOIN social_account_tokens t ON t.account_id=a.id WHERE a.id=$1 AND a.workspace_id=$2 FOR SHARE OF a", [job.account_id, job.workspace_id])).rows[0];
-        if (!account?.ciphertext ||
+        const isTelegramWithEnv = String(account?.platform).toLowerCase() === "telegram" && Boolean(process.env.TELEGRAM_BOT_TOKEN);
+        if ((!account?.ciphertext && !isTelegramWithEnv) ||
             String(account.state).toLowerCase() !== "connected" ||
             (String(account.platform).toLowerCase() !== "youtube" &&
                 account.expires_at &&
@@ -100,7 +101,17 @@ export async function executePublishRecord(id, options) {
                 token = decryptToken(account.ciphertext, record.workspace_id);
             }
             catch {
-                token = decryptToken(account.ciphertext, `${record.workspace_id}:${account.id}`);
+                try {
+                    token = decryptToken(account.ciphertext, `${record.workspace_id}:${account.id}`);
+                }
+                catch (decryptErr) {
+                    if (metaPlatform === "telegram" && process.env.TELEGRAM_BOT_TOKEN) {
+                        token = process.env.TELEGRAM_BOT_TOKEN.trim();
+                    }
+                    else {
+                        throw decryptErr;
+                    }
+                }
             }
             dispatchStarted = true;
             const result = await SocialProviderRegistry.getProvider(metaPlatform).publishText(metaPlatform === "telegram" ? { botToken: token, chatId: account.provider_id } : { token, author: account.provider_id }, { destination: account.provider_id, text: plan.caption, mediaUrl: plan.mediaUrl, mediaType: plan.mediaType, metadata: plan.metadata });

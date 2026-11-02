@@ -119,8 +119,9 @@ export async function claim(id: string, now: Date = new Date()) {
         [job.account_id, job.workspace_id],
       )
     ).rows[0];
+    const isTelegramWithEnv = String(account?.platform).toLowerCase() === "telegram" && Boolean(process.env.TELEGRAM_BOT_TOKEN);
     if (
-      !account?.ciphertext ||
+      (!account?.ciphertext && !isTelegramWithEnv) ||
       String(account.state).toLowerCase() !== "connected" ||
       (String(account.platform).toLowerCase() !== "youtube" &&
         account.expires_at &&
@@ -187,7 +188,15 @@ export async function executePublishRecord(
       try {
         token = decryptToken(account.ciphertext, record.workspace_id);
       } catch {
-        token = decryptToken(account.ciphertext, `${record.workspace_id}:${account.id}`);
+        try {
+          token = decryptToken(account.ciphertext, `${record.workspace_id}:${account.id}`);
+        } catch (decryptErr) {
+          if (metaPlatform === "telegram" && process.env.TELEGRAM_BOT_TOKEN) {
+            token = process.env.TELEGRAM_BOT_TOKEN.trim();
+          } else {
+            throw decryptErr;
+          }
+        }
       }
       dispatchStarted = true;
       const result = await SocialProviderRegistry.getProvider(metaPlatform as any).publishText(

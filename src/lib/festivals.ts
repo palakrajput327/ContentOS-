@@ -1215,3 +1215,4 @@ export function getFestivalsForMonth(year: number, monthIndex: number): Calendar
     return d && d.startsWith(prefix);
   }).sort((a, b) => a.dates[year].localeCompare(b.dates[year]));
 }
+
