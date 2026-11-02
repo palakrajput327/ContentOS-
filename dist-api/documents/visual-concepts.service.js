@@ -428,8 +428,8 @@ Return JSON with "concepts" array.`;
         }
         // Mark concept as DISPATCHED in database with live publish results
         await pool.query(`UPDATE document_visual_concepts
-       SET status = 'DISPATCHED', dispatched_at = NOW(), target_channels = $1, post_result = $2
-       WHERE id = $3`, [channels, JSON.stringify(publishResults), opts.conceptId]);
+       SET status = 'DISPATCHED', dispatched_at = NOW(), target_channels = $1::jsonb, post_result = $2::jsonb
+       WHERE id = $3`, [JSON.stringify(channels), JSON.stringify(publishResults), opts.conceptId]);
         // Finalize content status
         await pool.query(`UPDATE content SET status = 'PUBLISHED', updated_at = NOW() WHERE id = $1`, [contentId]);
         return {
@@ -472,8 +472,8 @@ Return JSON with "concepts" array.`;
             const [sh, sm] = slot.time.split(":").map(Number);
             targetDate.setHours(sh, sm, 0, 0);
             await pool.query(`UPDATE document_visual_concepts
-         SET scheduled_at = $1, target_channels = $2, status = 'PENDING', updated_at = NOW()
-         WHERE id = $3`, [targetDate.toISOString(), channels, c.id]);
+         SET scheduled_at = $1, target_channels = $2::jsonb, status = 'PENDING', updated_at = NOW()
+         WHERE id = $3`, [targetDate.toISOString(), JSON.stringify(channels), c.id]);
             count++;
             slotIdx++;
             if (slotIdx >= sortedSlots.length) {

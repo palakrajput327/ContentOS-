@@ -557,9 +557,9 @@ Return JSON with "concepts" array.`;
     // Mark concept as DISPATCHED in database with live publish results
     await pool.query(
       `UPDATE document_visual_concepts
-       SET status = 'DISPATCHED', dispatched_at = NOW(), target_channels = $1, post_result = $2
+       SET status = 'DISPATCHED', dispatched_at = NOW(), target_channels = $1::jsonb, post_result = $2::jsonb
        WHERE id = $3`,
-      [channels, JSON.stringify(publishResults), opts.conceptId]
+      [JSON.stringify(channels), JSON.stringify(publishResults), opts.conceptId]
     );
 
     // Finalize content status
@@ -633,9 +633,9 @@ Return JSON with "concepts" array.`;
 
       await pool.query(
         `UPDATE document_visual_concepts
-         SET scheduled_at = $1, target_channels = $2, status = 'PENDING', updated_at = NOW()
+         SET scheduled_at = $1, target_channels = $2::jsonb, status = 'PENDING', updated_at = NOW()
          WHERE id = $3`,
-        [targetDate.toISOString(), channels, c.id]
+        [targetDate.toISOString(), JSON.stringify(channels), c.id]
       );
       count++;
 
