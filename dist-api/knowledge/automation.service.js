@@ -25,7 +25,7 @@ export function topicHash(item) {
 export function groupKnowledge(rows) {
     const groups = new Map();
     for (const row of rows) {
-        const hash = topicHash(row);
+        const hash = createHash("sha256").update(`${row.document_id}:${topicHash(row)}`).digest("hex");
         const source = {
             knowledgeId: row.id,
             documentId: row.document_id,
@@ -110,10 +110,14 @@ export class KnowledgeAutomationService {
             brand: context.brand,
             platform: "Instagram",
         });
+        const { BrandIdentityService } = await import("../documents/brand-identity.service.js");
+        const brandService = new BrandIdentityService();
+        if (!context.documentId)
+            throw new Error("A source PDF is required for branding.");
         const genResult = await service.generateImage({
             workspaceId: context.workspaceId,
             userId: context.actorId,
-            prompt: suggested.prompt,
+            prompt: suggested.prompt + "\nDo not draw logos, domains or URLs. Approved branding is added afterward.",
             engine: "flux",
             aspectRatio: "1:1",
             headline: suggested.headline || context.title,
@@ -345,7 +349,8 @@ export class KnowledgeAutomationService {
                             knowledgeValue: reservation.topic.value,
                             excerpt: evidence[0]?.excerpt || reservation.topic.sources[0]?.excerpt,
                             sourceVisualContext,
-                            documentName: reservation.topic.sources?.[0]?.documentName || "Redhash.pdf",
+                            documentId: docId,
+                            documentName: reservation.topic.sources?.find((s) => s.documentId === docId)?.documentName,
                             brand: reservation.brand,
                         });
                         if (gen) {
@@ -356,7 +361,7 @@ export class KnowledgeAutomationService {
                         }
                     }
                     catch (genErr) {
-                        console.warn("[ContentOS] AI Visual generation failed, will try source asset fallback:", genErr?.message || genErr);
+                        throw genErr;
                     }
                 }
                 await inTransaction(this.database, async (db) => {
@@ -428,7 +433,8 @@ export class KnowledgeAutomationService {
                                 knowledgeValue: reservation.topic.value,
                                 excerpt: evidence[0]?.excerpt || reservation.topic.sources[0]?.excerpt,
                                 sourceVisualContext,
-                                documentName: reservation.topic.sources?.[0]?.documentName || "Redhash.pdf",
+                                documentId: docId,
+                                documentName: reservation.topic.sources?.find((s) => s.documentId === docId)?.documentName,
                                 brand: reservation.brand,
                             });
                             if (gen) {
@@ -439,7 +445,7 @@ export class KnowledgeAutomationService {
                             }
                         }
                         catch (fallbackErr) {
-                            console.warn("[ContentOS] Fallback AI visual generation error:", fallbackErr?.message || fallbackErr);
+                            throw fallbackErr;
                         }
                     }
                     // Composite poster creation: when user chooses BRANDED_CANVAS mode
@@ -483,6 +489,12 @@ export class KnowledgeAutomationService {
                         catch (canvasErr) {
                             console.warn("[ContentOS] Composite poster generation failed, using direct PDF visual:", canvasErr.message);
                         }
+                    }
+                    if (docId && autoVisualAssetId && autoVisualUrl) {
+                        const { BrandIdentityService } = await import("../documents/brand-identity.service.js");
+                        const branded = await new BrandIdentityService().brandGeneratedImage({ documentId: docId, workspaceId, userId: reservation.actorId, assetId: autoVisualAssetId, url: autoVisualUrl });
+                        autoVisualAssetId = branded.assetId;
+                        autoVisualUrl = branded.url;
                     }
                     const variants = {};
                     for (const p of reservation.platforms) {

@@ -561,7 +561,7 @@ export function DocumentVisualConceptsHub({
           style={{
             fontSize: "1.05rem",
             fontWeight: 700,
-            color: "#f8fafc",
+            color: "var(--ink)",
             margin: 0,
             letterSpacing: "-0.01em",
           }}
@@ -579,8 +579,8 @@ export function DocumentVisualConceptsHub({
             display: "flex",
             alignItems: "center",
             gap: "5px",
-            background: "rgba(255, 255, 255, 0.04)",
-            border: "1px solid rgba(255, 255, 255, 0.1)",
+            background: "var(--studio-neutral-soft)",
+            border: "1px solid var(--studio-neutral-border)",
             color: "var(--color-text-muted)",
           }}
         >
@@ -601,8 +601,8 @@ export function DocumentVisualConceptsHub({
       {/* Ultra-Sleek Minimal Executive Dispatch Schedule Bar */}
       <div
         style={{
-          background: "rgba(15, 23, 42, 0.4)",
-          border: hasUnsavedChanges ? "1px solid rgba(99, 102, 241, 0.35)" : "1px solid rgba(255, 255, 255, 0.06)",
+          background: "var(--surface2)",
+          border: hasUnsavedChanges ? "1px solid rgba(99, 102, 241, 0.35)" : "1px solid var(--studio-neutral-soft)",
           borderRadius: "10px",
           padding: "10px 14px",
           marginBottom: "12px",
@@ -611,18 +611,18 @@ export function DocumentVisualConceptsHub({
         {/* Top Line: Title + Preset Pills + Add Slot + Save */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "10px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <Clock size={15} style={{ color: "#818cf8" }} />
-            <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#f8fafc" }}>
+            <Clock size={15} style={{ color: "var(--accent)" }} />
+            <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--ink)" }}>
               Daily Dispatch Schedule
             </span>
-            <span style={{ fontSize: "0.68rem", color: "#818cf8", background: "rgba(99, 102, 241, 0.12)", border: "1px solid rgba(99, 102, 241, 0.2)", padding: "1px 6px", borderRadius: "100px", fontWeight: 700 }}>
+            <span style={{ fontSize: "0.68rem", color: "var(--accent)", background: "rgba(99, 102, 241, 0.12)", border: "1px solid rgba(99, 102, 241, 0.2)", padding: "1px 6px", borderRadius: "100px", fontWeight: 700 }}>
               {slots.length}/3 Slots
             </span>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
             {/* Minimal Preset Pills */}
-            <div style={{ display: "flex", alignItems: "center", background: "rgba(255, 255, 255, 0.04)", padding: "2px", borderRadius: "16px", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
+            <div style={{ display: "flex", alignItems: "center", background: "var(--studio-neutral-soft)", padding: "2px", borderRadius: "16px", border: "1px solid var(--studio-neutral-soft)" }}>
               {PRESETS.map((p) => {
                 const isActive = slots.length === p.slots.length;
                 return (
@@ -632,7 +632,7 @@ export function DocumentVisualConceptsHub({
                     onClick={() => handleApplyPreset(p.slots)}
                     style={{
                       background: isActive ? "#4f46e5" : "transparent",
-                      color: isActive ? "#ffffff" : "#94a3b8",
+                      color: isActive ? "var(--on-accent)" : "var(--muted)",
                       border: "none",
                       padding: "3px 9px",
                       borderRadius: "12px",
@@ -655,9 +655,9 @@ export function DocumentVisualConceptsHub({
                 type="button"
                 onClick={handleAddCustomSlot}
                 style={{
-                  background: "rgba(255, 255, 255, 0.04)",
-                  border: "1px dashed rgba(255, 255, 255, 0.15)",
-                  color: "#94a3b8",
+                  background: "var(--studio-neutral-soft)",
+                  border: "1px dashed var(--studio-neutral-border)",
+                  color: "var(--muted)",
                   padding: "3px 9px",
                   borderRadius: "14px",
                   fontSize: "0.7rem",
@@ -681,13 +681,13 @@ export function DocumentVisualConceptsHub({
                   ? "#10b981"
                   : hasUnsavedChanges
                   ? "#4f46e5"
-                  : "rgba(255, 255, 255, 0.06)",
+                  : "var(--studio-neutral-soft)",
                 border: isSavedSuccessfully
                   ? "1px solid #10b981"
                   : hasUnsavedChanges
                   ? "1px solid #6366f1"
-                  : "1px solid rgba(255, 255, 255, 0.08)",
-                color: "#ffffff",
+                  : "1px solid var(--studio-neutral-soft)",
+                color: "var(--ink)",
                 padding: "3px 10px",
                 borderRadius: "14px",
                 fontSize: "0.7rem",
@@ -714,10 +714,10 @@ export function DocumentVisualConceptsHub({
             flexWrap: "wrap",
             paddingBottom: "8px",
             marginBottom: "8px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
+            borderBottom: "1px solid var(--studio-neutral-soft)",
           }}
         >
-          <span style={{ fontSize: "0.7rem", color: "#64748b", fontWeight: 600, marginRight: "2px" }}>Target Channels:</span>
+          <span style={{ fontSize: "0.7rem", color: "var(--muted)", fontWeight: 600, marginRight: "2px" }}>Target Channels:</span>
           {AVAILABLE_CHANNELS.map((ch) => {
             const isConnected = connectedPlatformIds.size === 0 || connectedPlatformIds.has(ch.id.toLowerCase());
             const isSelected = isConnected && selectedChannels.includes(ch.id);
@@ -744,18 +744,18 @@ export function DocumentVisualConceptsHub({
                   border: isSelected
                     ? "1px solid rgba(99, 102, 241, 0.6)"
                     : isConnected
-                    ? "1px solid rgba(255, 255, 255, 0.08)"
-                    : "1px dashed rgba(255, 255, 255, 0.05)",
+                    ? "1px solid var(--studio-neutral-soft)"
+                    : "1px dashed var(--studio-neutral-soft)",
                   background: isSelected
                     ? "rgba(99, 102, 241, 0.2)"
                     : isConnected
-                    ? "rgba(255, 255, 255, 0.02)"
-                    : "rgba(0, 0, 0, 0.15)",
+                    ? "var(--studio-neutral-soft)"
+                    : "var(--surface2)",
                   color: isSelected
-                    ? "#ffffff"
+                    ? "var(--ink)"
                     : isConnected
-                    ? "#94a3b8"
-                    : "#475569",
+                    ? "var(--muted)"
+                    : "var(--muted)",
                   fontSize: "0.7rem",
                   fontWeight: isSelected ? 700 : 500,
                   cursor: isConnected ? "pointer" : "not-allowed",
@@ -768,7 +768,7 @@ export function DocumentVisualConceptsHub({
               >
                 <PlatformIcon platform={ch.id} />
                 <span>{ch.name}</span>
-                {isSelected && <Check size={10} style={{ color: "#818cf8" }} />}
+                {isSelected && <Check size={10} style={{ color: "var(--accent)" }} />}
                 {!isConnected && <span style={{ fontSize: "0.6rem", opacity: 0.8 }}>(off)</span>}
               </button>
             );
@@ -787,8 +787,8 @@ export function DocumentVisualConceptsHub({
             <div
               key={slot.id}
               style={{
-                background: "rgba(15, 23, 42, 0.65)",
-                border: "1px solid rgba(255, 255, 255, 0.08)",
+                background: "var(--surface2)",
+                border: "1px solid var(--studio-neutral-soft)",
                 borderRadius: "10px",
                 padding: "10px 12px",
                 display: "flex",
@@ -812,7 +812,7 @@ export function DocumentVisualConceptsHub({
                     style={{
                       fontSize: "0.65rem",
                       fontWeight: 800,
-                      color: "#818cf8",
+                      color: "var(--accent)",
                       background: "rgba(99, 102, 241, 0.15)",
                       border: "1px solid rgba(99, 102, 241, 0.25)",
                       padding: "1px 6px",
@@ -835,7 +835,7 @@ export function DocumentVisualConceptsHub({
                       background: "transparent",
                       border: "none",
                       borderBottom: "1px solid transparent",
-                      color: "#f1f5f9",
+                      color: "var(--ink)",
                       fontSize: "0.78rem",
                       fontWeight: 600,
                       outline: "none",
@@ -858,7 +858,7 @@ export function DocumentVisualConceptsHub({
                     style={{
                       background: "transparent",
                       border: "none",
-                      color: "#64748b",
+                      color: "var(--muted)",
                       cursor: "pointer",
                       padding: "2px 4px",
                       borderRadius: "4px",
@@ -869,7 +869,7 @@ export function DocumentVisualConceptsHub({
                       transition: "color 0.15s ease",
                     }}
                     onMouseEnter={(e) => (e.currentTarget.style.color = "#f43f5e")}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = "#64748b")}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = "var(--muted)")}
                     title="Remove slot"
                   >
                     <X size={12} />
@@ -900,10 +900,10 @@ export function DocumentVisualConceptsHub({
                   }}
                   style={{
                     width: "100%",
-                    background: "rgba(255, 255, 255, 0.04)",
-                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    background: "var(--studio-neutral-soft)",
+                    border: "1px solid var(--studio-neutral-border)",
                     borderRadius: "7px",
-                    color: "#ffffff",
+                    color: "var(--ink)",
                     fontSize: "0.86rem",
                     fontWeight: 700,
                     padding: "7px 10px",
@@ -919,8 +919,8 @@ export function DocumentVisualConceptsHub({
                     e.currentTarget.style.background = "rgba(99, 102, 241, 0.08)";
                   }}
                   onBlur={(e) => {
-                    e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.1)";
-                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.04)";
+                    e.currentTarget.style.borderColor = "var(--studio-neutral-border)";
+                    e.currentTarget.style.background = "var(--studio-neutral-soft)";
                   }}
                   title="Click to edit time"
                 />
@@ -944,12 +944,12 @@ export function DocumentVisualConceptsHub({
             gap: "8px",
           }}
         >
-          <Sparkles size={14} color="#818cf8" style={{ flexShrink: 0 }} />
+          <Sparkles size={14} color="var(--accent)" style={{ flexShrink: 0 }} />
           <p
             style={{
               margin: 0,
               fontSize: "0.78rem",
-              color: "#c7d2fe",
+              color: "var(--accent)",
               lineHeight: 1.4,
               fontWeight: 500,
             }}
@@ -967,7 +967,7 @@ export function DocumentVisualConceptsHub({
             borderRadius: "8px",
             background: "rgba(239, 68, 68, 0.15)",
             border: "1px solid rgba(239, 68, 68, 0.3)",
-            color: "#fca5a5",
+            color: "var(--danger)",
             fontSize: "0.82rem",
             marginBottom: "16px",
             display: "flex",
@@ -988,13 +988,13 @@ export function DocumentVisualConceptsHub({
               width: "36px",
               height: "36px",
               border: "3px solid rgba(99, 102, 241, 0.2)",
-              borderTopColor: "#818cf8",
+              borderTopColor: "var(--accent)",
               borderRadius: "50%",
               animation: "spin 1s linear infinite",
               margin: "0 auto 14px auto",
             }}
           />
-          <p style={{ margin: 0, fontSize: "0.85rem", color: "#c7d2fe" }}>
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--accent)" }}>
             Connecting to AI Analysis Engine...
           </p>
         </div>
@@ -1006,10 +1006,10 @@ export function DocumentVisualConceptsHub({
           style={{
             padding: "44px 24px",
             textAlign: "center",
-            background: "linear-gradient(180deg, rgba(30, 41, 59, 0.35) 0%, rgba(15, 23, 42, 0.6) 100%)",
+            background: "linear-gradient(180deg, var(--surface2) 0%, var(--surface2) 100%)",
             border: "1px solid rgba(99, 102, 241, 0.25)",
             borderRadius: "14px",
-            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.25)",
+            boxShadow: "0 8px 32px var(--surface2)",
             position: "relative",
             overflow: "hidden",
             display: "flex",
@@ -1062,7 +1062,7 @@ export function DocumentVisualConceptsHub({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                color: "#c7d2fe",
+                color: "var(--accent)",
               }}
             >
               <Cpu size={20} className="animate-pulse" />
@@ -1073,11 +1073,11 @@ export function DocumentVisualConceptsHub({
           <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxWidth: "520px" }}>
             <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", justifyContent: "center", alignSelf: "center", padding: "2px 10px", borderRadius: "100px", background: "rgba(99, 102, 241, 0.12)", border: "1px solid rgba(99, 102, 241, 0.25)" }}>
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#6366f1", display: "inline-block" }} />
-              <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "#a5b4fc", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                 AI Analysis In Progress
               </span>
             </div>
-            <h4 style={{ fontSize: "1.15rem", fontWeight: 700, color: "#f8fafc", margin: "4px 0 0 0" }}>
+            <h4 style={{ fontSize: "1.15rem", fontWeight: 700, color: "var(--ink)", margin: "4px 0 0 0" }}>
               Analyzing Document &amp; Formulating Visual Concepts
             </h4>
             <p style={{ fontSize: "0.8rem", color: "var(--color-text-muted)", margin: 0, lineHeight: 1.5 }}>
@@ -1109,13 +1109,13 @@ export function DocumentVisualConceptsHub({
                   gap: "6px",
                   padding: "5px 12px",
                   borderRadius: "6px",
-                  background: "rgba(255, 255, 255, 0.03)",
-                  border: "1px solid rgba(255, 255, 255, 0.07)",
+                  background: "var(--studio-neutral-soft)",
+                  border: "1px solid var(--studio-neutral-soft)",
                   fontSize: "0.72rem",
-                  color: "#cbd5e1",
+                  color: "var(--studio-secondary)",
                 }}
               >
-                <RotateCw size={11} className="animate-spin" style={{ color: "#818cf8" }} />
+                <RotateCw size={11} className="animate-spin" style={{ color: "var(--accent)" }} />
                 <span>{step.label}</span>
               </div>
             ))}
@@ -1128,7 +1128,7 @@ export function DocumentVisualConceptsHub({
               maxWidth: "380px",
               height: "4px",
               borderRadius: "2px",
-              background: "rgba(255, 255, 255, 0.06)",
+              background: "var(--studio-neutral-soft)",
               overflow: "hidden",
               position: "relative",
             }}
@@ -1154,8 +1154,8 @@ export function DocumentVisualConceptsHub({
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              background: "rgba(255, 255, 255, 0.04)",
-              border: "1px solid rgba(255, 255, 255, 0.1)",
+              background: "var(--studio-neutral-soft)",
+              border: "1px solid var(--studio-neutral-border)",
               borderRadius: "6px",
               padding: "6px 14px",
               color: "var(--color-text-muted)",
@@ -1186,8 +1186,8 @@ export function DocumentVisualConceptsHub({
             gap: "12px",
           }}
         >
-          <CheckCircle2 size={38} color="#34d399" />
-          <h4 style={{ fontSize: "1.2rem", color: "#34d399", fontWeight: 700, margin: 0 }}>
+          <CheckCircle2 size={38} color="var(--success)" />
+          <h4 style={{ fontSize: "1.2rem", color: "var(--success)", fontWeight: 700, margin: 0 }}>
             All Visual Posts from this PDF Have Been Dispatched!
           </h4>
           <p style={{ fontSize: "0.85rem", color: "#a7f3d0", maxWidth: "540px", margin: 0, lineHeight: 1.5 }}>
@@ -1228,10 +1228,10 @@ export function DocumentVisualConceptsHub({
                   borderRadius: "14px",
                   background: isAttached
                     ? "rgba(99, 102, 241, 0.04)"
-                    : "rgba(255, 255, 255, 0.02)",
+                    : "var(--studio-neutral-soft)",
                   border: isAttached
                     ? "1px solid #6366f1"
-                    : "1px solid rgba(255, 255, 255, 0.08)",
+                    : "1px solid var(--studio-neutral-soft)",
                   boxShadow: "none",
                   padding: "14px",
                   display: "flex",
@@ -1258,10 +1258,10 @@ export function DocumentVisualConceptsHub({
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <span style={{ fontSize: "0.95rem" }}>⏳</span>
                     <div>
-                      <span style={{ fontSize: "0.72rem", color: "#93c5fd", fontWeight: 700, textTransform: "uppercase" }}>
+                      <span style={{ fontSize: "0.72rem", color: "var(--studio-info)", fontWeight: 700, textTransform: "uppercase" }}>
                         Slot #{slotNumber} ({slotLabel}) • {dayLabel} at {formattedTime}
                       </span>
-                      <div style={{ fontSize: "0.82rem", fontWeight: 800, color: "#60a5fa", letterSpacing: "0.5px" }}>
+                      <div style={{ fontSize: "0.82rem", fontWeight: 800, color: "var(--studio-info)", letterSpacing: "0.5px" }}>
                         Live in {countdownStr}
                       </div>
                     </div>
@@ -1273,8 +1273,8 @@ export function DocumentVisualConceptsHub({
                         key={ch}
                         style={{
                           fontSize: "0.68rem",
-                          background: "rgba(255, 255, 255, 0.08)",
-                          color: "#e2e8f0",
+                          background: "var(--studio-neutral-soft)",
+                          color: "var(--ink)",
                           padding: "2px 6px",
                           borderRadius: "4px",
                           fontWeight: 600,
@@ -1308,7 +1308,7 @@ export function DocumentVisualConceptsHub({
                           height: "24px",
                           borderRadius: "50%",
                           background: "#3b82f6",
-                          color: "#ffffff",
+                          color: "var(--ink)",
                           fontSize: "0.75rem",
                           fontWeight: 700,
                           display: "flex",
@@ -1322,7 +1322,7 @@ export function DocumentVisualConceptsHub({
                         style={{
                           fontSize: "1rem",
                           fontWeight: 700,
-                          color: "#ffffff",
+                          color: "var(--ink)",
                           margin: 0,
                         }}
                       >
@@ -1333,8 +1333,8 @@ export function DocumentVisualConceptsHub({
                     <span
                       style={{
                         fontSize: "0.72rem",
-                        color: "#94a3b8",
-                        background: "rgba(255, 255, 255, 0.05)",
+                        color: "var(--muted)",
+                        background: "var(--studio-neutral-soft)",
                         padding: "2px 8px",
                         borderRadius: "5px",
                         fontWeight: 600,
@@ -1345,7 +1345,7 @@ export function DocumentVisualConceptsHub({
                       }}
                     >
                       {concept.documentName && (
-                        <span style={{ color: "#a5b4fc", maxWidth: "130px", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <span style={{ color: "var(--accent)", maxWidth: "130px", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {concept.documentName} •
                         </span>
                       )}
@@ -1359,11 +1359,11 @@ export function DocumentVisualConceptsHub({
                       style={{
                         padding: "8px 12px",
                         borderRadius: "6px",
-                        background: "rgba(0, 0, 0, 0.25)",
+                        background: "var(--surface2)",
                         borderLeft: "3px solid rgba(96, 165, 250, 0.6)",
                         marginBottom: "12px",
                         fontSize: "0.78rem",
-                        color: "#94a3b8",
+                        color: "var(--muted)",
                         fontStyle: "italic",
                         lineHeight: 1.4,
                       }}
@@ -1388,7 +1388,7 @@ export function DocumentVisualConceptsHub({
                           fontWeight: 700,
                           letterSpacing: "0.8px",
                           textTransform: "uppercase",
-                          color: "#93c5fd",
+                          color: "var(--studio-info)",
                         }}
                       >
                         FLUX.1 Dynamic Prompt:
@@ -1398,7 +1398,7 @@ export function DocumentVisualConceptsHub({
                         style={{
                           background: "none",
                           border: "none",
-                          color: copiedId === concept.id ? "#34d399" : "#94a3b8",
+                          color: copiedId === concept.id ? "var(--success)" : "var(--muted)",
                           fontSize: "0.75rem",
                           cursor: "pointer",
                           padding: 0,
@@ -1409,7 +1409,7 @@ export function DocumentVisualConceptsHub({
                       >
                         {copiedId === concept.id ? (
                           <>
-                            <Check size={11} color="#34d399" />
+                            <Check size={11} color="var(--success)" />
                             <span>Copied</span>
                           </>
                         ) : (
@@ -1424,12 +1424,12 @@ export function DocumentVisualConceptsHub({
                     <div
                       style={{
                         fontSize: "0.82rem",
-                        color: "#e2e8f0",
+                        color: "var(--ink)",
                         lineHeight: 1.5,
                         background: "rgba(0, 0, 0, 0.35)",
                         padding: "10px 14px",
                         borderRadius: "8px",
-                        border: "1px solid rgba(255, 255, 255, 0.05)",
+                        border: "1px solid var(--studio-neutral-soft)",
                       }}
                     >
                       "{concept.prompt}"
@@ -1448,7 +1448,7 @@ export function DocumentVisualConceptsHub({
                           height: "220px",
                           borderRadius: "10px",
                           overflow: "hidden",
-                          border: "1px solid rgba(255, 255, 255, 0.12)",
+                          border: "1px solid var(--studio-neutral-border)",
                           background: "#0a0c14",
                           cursor: "pointer",
                         }}
@@ -1479,7 +1479,7 @@ export function DocumentVisualConceptsHub({
                             padding: "3px 8px",
                             borderRadius: "6px",
                             fontSize: "0.7rem",
-                            color: "#ffffff",
+                            color: "var(--ink)",
                             fontWeight: 600,
                           }}
                         >
@@ -1495,13 +1495,13 @@ export function DocumentVisualConceptsHub({
                         textAlign: "center",
                         borderRadius: "10px",
                         background: "rgba(0, 0, 0, 0.2)",
-                        border: "1px dashed rgba(255, 255, 255, 0.1)",
+                        border: "1px dashed var(--studio-neutral-border)",
                       }}
                     >
                       <div style={{ display: "flex", justifyContent: "center", marginBottom: "8px" }}>
-                        <Wand2 size={24} color="#818cf8" style={{ opacity: 0.8 }} />
+                        <Wand2 size={24} color="var(--accent)" style={{ opacity: 0.8 }} />
                       </div>
-                      <p style={{ margin: 0, fontSize: "0.8rem", color: "#94a3b8" }}>
+                      <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--muted)" }}>
                         Image not yet generated for this concept.
                       </p>
                     </div>
@@ -1550,7 +1550,7 @@ export function DocumentVisualConceptsHub({
                         gap: "6px",
                         background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
                         borderColor: "#059669",
-                        color: "#ffffff",
+                        color: "var(--ink)",
                         fontWeight: 700,
                       }}
                     >
@@ -1603,7 +1603,7 @@ export function DocumentVisualConceptsHub({
                 maxHeight: "92vh",
                 borderRadius: "16px",
                 overflow: "hidden",
-                boxShadow: "0 25px 60px -15px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.1)",
+                boxShadow: "0 25px 60px -15px rgba(0, 0, 0, 0.9), 0 0 0 1px var(--studio-neutral-border)",
                 background: "#090d16",
                 display: "flex",
                 flexDirection: "column",
@@ -1616,13 +1616,13 @@ export function DocumentVisualConceptsHub({
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
-                  background: "rgba(15, 23, 42, 0.95)",
-                  borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
+                  background: "var(--surface2)",
+                  borderBottom: "1px solid var(--studio-neutral-border)",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <Sparkles size={16} style={{ color: "#818cf8" }} />
-                  <h5 style={{ margin: 0, color: "#ffffff", fontSize: "0.95rem", fontWeight: 700 }}>
+                  <Sparkles size={16} style={{ color: "var(--accent)" }} />
+                  <h5 style={{ margin: 0, color: "var(--ink)", fontSize: "0.95rem", fontWeight: 700 }}>
                     {previewImage.title}
                   </h5>
                 </div>
@@ -1630,9 +1630,9 @@ export function DocumentVisualConceptsHub({
                   type="button"
                   onClick={() => setPreviewImage(null)}
                   style={{
-                    background: "rgba(255, 255, 255, 0.08)",
-                    border: "1px solid rgba(255, 255, 255, 0.15)",
-                    color: "#ffffff",
+                    background: "var(--studio-neutral-soft)",
+                    border: "1px solid var(--studio-neutral-border)",
+                    color: "var(--ink)",
                     borderRadius: "8px",
                     width: "32px",
                     height: "32px",

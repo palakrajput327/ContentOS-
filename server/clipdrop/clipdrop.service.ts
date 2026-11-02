@@ -7,6 +7,7 @@ import { uploadManagedMedia } from "../storage/managed-media.js";
 import { getStorageProvider } from "../storage/storage.factory.js";
 import { getLLMProvider } from "../ai/llm.service.js";
 import { z } from "zod";
+import { generateOpenAIImage } from "../ai/openai-image.js";
 import { ImagePromptArchitect, StructuredVisualSpecification } from "../ai/prompt-architect.js";
 import { BusinessProfileService } from "../knowledge/business-profile.service.js";
 import type { ImageGenerator, ImageGenerationInput, ImageGenerationOutput } from "../ai/image-generator.interface.js";
@@ -200,7 +201,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
    */
   async generateImage(opts: GenerateImageOptions) {
     const aspectRatio = opts.aspectRatio || "1:1";
-    const requestedEngine = opts.engine || "flux";
+    const requestedEngine = process.env.IMAGE_PROVIDER === "openai" ? "openai" : opts.engine || "flux";
     // 1. Intelligent Prompt Optimization & Entity Extraction (ChatGPT / Gemini style)
     const { visualPrompt, extractedHeadline, extractedCompany } = this.cleanAndOptimizePrompt(opts.prompt);
 
@@ -238,7 +239,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
     else finalPrompt += ", 1:1 square centered composition";
 
     // 2. Idempotency Check
-    const rawKey = opts.idempotencyKey || `${opts.workspaceId}:${finalPrompt}:${aspectRatio}:${enableOverlay ? headline || "" : "raw"}:${opts.contentId || ""}`;
+    const rawKey = `${requestedEngine}:${process.env.OPENAI_IMAGE_MODEL || ""}:${opts.idempotencyKey || `${opts.workspaceId}:${finalPrompt}:${aspectRatio}:${enableOverlay ? headline || "" : "raw"}:${opts.contentId || ""}`}`;
     const keyHash = createHash("sha256").update(rawKey).digest("hex");
 
     const existingAssetRes = await pool.query(
@@ -295,7 +296,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
     // 2. Execute Image Generation with Bidirectional Fallback
     let imageBuffer: Buffer | null = null;
     let mimeType = "image/png";
-    let usedEngine: "clipdrop" | "flux" | "canvas-card" = requestedEngine;
+    let usedEngine: "openai" | "clipdrop" | "flux" | "canvas-card" = requestedEngine;
     let remainingCredits: number | null = null;
 
     const clipdropKey = this.getApiKey();
@@ -452,7 +453,11 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
       return false;
     };
 
-    if (requestedEngine === "clipdrop") {
+    if (requestedEngine === "openai") {
+      imageBuffer = await generateOpenAIImage(finalPrompt, aspectRatio);
+      mimeType = "image/png";
+      usedEngine = "openai";
+    } else if (requestedEngine === "clipdrop") {
       const ok = await tryClipdrop();
       if (!ok) {
         console.warn("Clipdrop failed, falling back to FLUX engine");

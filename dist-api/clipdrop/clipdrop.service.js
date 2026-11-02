@@ -12,6 +12,7 @@ import { uploadManagedMedia } from "../storage/managed-media.js";
 import { getStorageProvider } from "../storage/storage.factory.js";
 import { getLLMProvider } from "../ai/llm.service.js";
 import { z } from "zod";
+import { generateOpenAIImage } from "../ai/openai-image.js";
 import { ImagePromptArchitect } from "../ai/prompt-architect.js";
 let ClipdropService = class ClipdropService {
     providerName = "clipdrop";
@@ -141,7 +142,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
      */
     async generateImage(opts) {
         const aspectRatio = opts.aspectRatio || "1:1";
-        const requestedEngine = opts.engine || "flux";
+        const requestedEngine = process.env.IMAGE_PROVIDER === "openai" ? "openai" : opts.engine || "flux";
         // 1. Intelligent Prompt Optimization & Entity Extraction (ChatGPT / Gemini style)
         const { visualPrompt, extractedHeadline, extractedCompany } = this.cleanAndOptimizePrompt(opts.prompt);
         const headline = opts.headline || extractedHeadline;
@@ -179,7 +180,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
         else
             finalPrompt += ", 1:1 square centered composition";
         // 2. Idempotency Check
-        const rawKey = opts.idempotencyKey || `${opts.workspaceId}:${finalPrompt}:${aspectRatio}:${enableOverlay ? headline || "" : "raw"}:${opts.contentId || ""}`;
+        const rawKey = `${requestedEngine}:${process.env.OPENAI_IMAGE_MODEL || ""}:${opts.idempotencyKey || `${opts.workspaceId}:${finalPrompt}:${aspectRatio}:${enableOverlay ? headline || "" : "raw"}:${opts.contentId || ""}`}`;
         const keyHash = createHash("sha256").update(rawKey).digest("hex");
         const existingAssetRes = await pool.query(`SELECT * FROM media_assets 
        WHERE workspace_id = $1 
@@ -392,7 +393,12 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
             }
             return false;
         };
-        if (requestedEngine === "clipdrop") {
+        if (requestedEngine === "openai") {
+            imageBuffer = await generateOpenAIImage(finalPrompt, aspectRatio);
+            mimeType = "image/png";
+            usedEngine = "openai";
+        }
+        else if (requestedEngine === "clipdrop") {
             const ok = await tryClipdrop();
             if (!ok) {
                 console.warn("Clipdrop failed, falling back to FLUX engine");

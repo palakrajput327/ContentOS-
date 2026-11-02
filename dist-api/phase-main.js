@@ -15,6 +15,7 @@ catch {
     // cPanel may also provide environment variables directly.
 }
 import "reflect-metadata";
+import { jsonBodyParsers } from "./http-body.js";
 import { Module, Catch, HttpException, Injectable, UnauthorizedException, ForbiddenException, BadRequestException, Controller, Get, ServiceUnavailableException, } from "@nestjs/common";
 import { NestFactory, APP_GUARD, Reflector } from "@nestjs/core";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
@@ -317,7 +318,7 @@ export async function bootstrap() {
             });
         next();
     });
-    app.use(express.json({ limit: "16kb" }));
+    app.use(jsonBodyParsers());
     app.use(cookieParser());
     app.use(async (req, res, next) => {
         if (!req.path.startsWith("/api/v1/auth/"))

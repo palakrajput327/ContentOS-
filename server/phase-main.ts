@@ -7,6 +7,7 @@ try {
 }
 
 import "reflect-metadata";
+import { jsonBodyParsers } from "./http-body.js";
 import {
   Module,
   Catch,
@@ -312,7 +313,7 @@ export async function bootstrap() {
       next();
     },
   );
-  app.use(express.json({ limit: "16kb" }));
+  app.use(jsonBodyParsers());
   app.use(cookieParser());
   app.use(
     async (

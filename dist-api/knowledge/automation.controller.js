@@ -278,13 +278,18 @@ let KnowledgeAutomationController = class KnowledgeAutomationController {
             workspaceId: r.workspace.id,
             brand,
         });
+        const sourceDocumentId = plan.document_id || snapshot.documentId || snapshot.sources?.[0]?.documentId || (plan.knowledge_id ? (await pool.query("SELECT document_id FROM document_knowledge WHERE id=$1 AND workspace_id=$2", [plan.knowledge_id, r.workspace.id])).rows[0]?.document_id : null);
+        if (!sourceDocumentId)
+            throw new BadRequestException("A source PDF is required for branding.");
+        const { BrandIdentityService } = await import("../documents/brand-identity.service.js");
+        const brandService = new BrandIdentityService();
         let newMediaUrl = snapshot.mediaUrl || null;
         let newAssetId = snapshot.mediaAssetId || null;
         try {
             const imgRes = await clipdropService.generateImage({
                 workspaceId: r.workspace.id,
                 userId: r.user.id,
-                prompt: res.prompt,
+                prompt: res.prompt + "\nDo not draw logos, domains or URLs. Approved branding is added afterward.",
                 engine: "flux",
                 enableOverlay: false,
                 headline: res.headline || title,
@@ -293,12 +298,13 @@ let KnowledgeAutomationController = class KnowledgeAutomationController {
                 idempotencyKey: `refresh:${id}:${Date.now()}`,
             });
             if (imgRes?.url) {
-                newMediaUrl = imgRes.url;
-                newAssetId = imgRes.assetId;
+                const branded = await brandService.brandGeneratedImage({ documentId: sourceDocumentId, workspaceId: r.workspace.id, userId: r.user.id, assetId: imgRes.assetId, url: imgRes.url });
+                newMediaUrl = branded.url;
+                newAssetId = branded.assetId;
             }
         }
         catch (imgErr) {
-            console.warn("Could not auto-generate refreshed visual image:", imgErr);
+            throw imgErr;
         }
         const updatedSnapshot = {
             ...snapshot,

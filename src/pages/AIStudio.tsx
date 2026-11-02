@@ -47,6 +47,7 @@ import { DocumentVisualConceptsHub } from '../components/DocumentVisualConceptsH
 import { BrandIdentityModal } from '../components/BrandIdentityModal';
 import { LiveAutoPilotPulse } from '../components/LiveAutoPilotPulse';
 import './studio-integration.css';
+import './studio-theme.css';
 
 function formatExcerpt(text: string | null | undefined): string {
   if (!text) return "";
@@ -1099,8 +1100,8 @@ export default function AIStudio() {
           gap: "4px",
           padding: "4px",
           borderRadius: "10px",
-          background: "rgba(255, 255, 255, 0.03)",
-          border: "1px solid rgba(255, 255, 255, 0.08)",
+          background: "var(--studio-neutral-soft)",
+          border: "1px solid var(--studio-neutral-soft)",
           marginBottom: "14px",
           flexWrap: "wrap",
         }}
@@ -1116,9 +1117,9 @@ export default function AIStudio() {
             gap: "7px",
             padding: "7px 15px",
             borderRadius: "7px",
-            border: activeTab === "topic" ? "1px solid rgba(255, 255, 255, 0.12)" : "1px solid transparent",
-            background: activeTab === "topic" ? "rgba(255, 255, 255, 0.08)" : "transparent",
-            color: activeTab === "topic" ? "#ffffff" : "var(--color-text-muted, #94a3b8)",
+            border: activeTab === "topic" ? "1px solid var(--studio-neutral-border)" : "1px solid transparent",
+            background: activeTab === "topic" ? "var(--studio-neutral-soft)" : "transparent",
+            color: activeTab === "topic" ? "var(--ink)" : "var(--color-text-muted, var(--muted))",
             fontWeight: activeTab === "topic" ? 600 : 500,
             fontSize: "0.82rem",
             cursor: "pointer",
@@ -1142,9 +1143,9 @@ export default function AIStudio() {
             gap: "7px",
             padding: "7px 15px",
             borderRadius: "7px",
-            border: activeTab === "pdf" ? "1px solid rgba(255, 255, 255, 0.12)" : "1px solid transparent",
-            background: activeTab === "pdf" ? "rgba(255, 255, 255, 0.08)" : "transparent",
-            color: activeTab === "pdf" ? "#ffffff" : "var(--color-text-muted, #94a3b8)",
+            border: activeTab === "pdf" ? "1px solid var(--studio-neutral-border)" : "1px solid transparent",
+            background: activeTab === "pdf" ? "var(--studio-neutral-soft)" : "transparent",
+            color: activeTab === "pdf" ? "var(--ink)" : "var(--color-text-muted, var(--muted))",
             fontWeight: activeTab === "pdf" ? 600 : 500,
             fontSize: "0.82rem",
             cursor: "pointer",
@@ -1157,9 +1158,9 @@ export default function AIStudio() {
           Business knowledge
           <span
             style={{
-              background: activeTab === "pdf" ? "rgba(99, 102, 241, 0.25)" : "rgba(255, 255, 255, 0.06)",
-              color: activeTab === "pdf" ? "#c7d2fe" : "var(--color-text-muted, #94a3b8)",
-              border: activeTab === "pdf" ? "1px solid rgba(129, 140, 248, 0.35)" : "1px solid rgba(255, 255, 255, 0.08)",
+              background: activeTab === "pdf" ? "rgba(99, 102, 241, 0.25)" : "var(--studio-neutral-soft)",
+              color: activeTab === "pdf" ? "var(--accent)" : "var(--color-text-muted, var(--muted))",
+              border: activeTab === "pdf" ? "1px solid rgba(129, 140, 248, 0.35)" : "1px solid var(--studio-neutral-soft)",
               fontSize: "0.65rem",
               padding: "1px 6px",
               borderRadius: "4px",
@@ -1183,9 +1184,9 @@ export default function AIStudio() {
             gap: "7px",
             padding: "7px 15px",
             borderRadius: "7px",
-            border: activeTab === "automation" ? "1px solid rgba(255, 255, 255, 0.12)" : "1px solid transparent",
-            background: activeTab === "automation" ? "rgba(255, 255, 255, 0.08)" : "transparent",
-            color: activeTab === "automation" ? "#ffffff" : "var(--color-text-muted, #94a3b8)",
+            border: activeTab === "automation" ? "1px solid var(--studio-neutral-border)" : "1px solid transparent",
+            background: activeTab === "automation" ? "var(--studio-neutral-soft)" : "transparent",
+            color: activeTab === "automation" ? "var(--ink)" : "var(--color-text-muted, var(--muted))",
             fontWeight: activeTab === "automation" ? 600 : 500,
             fontSize: "0.82rem",
             cursor: "pointer",
@@ -1198,9 +1199,9 @@ export default function AIStudio() {
           Autopilot History
           <span
             style={{
-              background: activeTab === "automation" ? "rgba(16, 185, 129, 0.2)" : "rgba(255, 255, 255, 0.06)",
-              color: activeTab === "automation" ? "#34d399" : "var(--color-text-muted, #94a3b8)",
-              border: activeTab === "automation" ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid rgba(255, 255, 255, 0.08)",
+              background: activeTab === "automation" ? "rgba(16, 185, 129, 0.2)" : "var(--studio-neutral-soft)",
+              color: activeTab === "automation" ? "var(--success)" : "var(--color-text-muted, var(--muted))",
+              border: activeTab === "automation" ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid var(--studio-neutral-soft)",
               fontSize: "0.65rem",
               padding: "1px 6px",
               borderRadius: "4px",
@@ -1279,8 +1280,8 @@ export default function AIStudio() {
                   gap: "12px",
                   padding: "10px 14px",
                   borderRadius: "10px",
-                  background: "rgba(255, 255, 255, 0.025)",
-                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  background: "var(--studio-neutral-soft)",
+                  border: "1px solid var(--studio-neutral-soft)",
                 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
                     <div style={{
@@ -1294,11 +1295,11 @@ export default function AIStudio() {
                       justifyContent: "center",
                       flexShrink: 0,
                     }}>
-                      <FileText size={15} color="#818cf8" />
+                      <FileText size={15} color="var(--accent)" />
                     </div>
 
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flexWrap: "wrap" }}>
-                      <strong style={{ fontSize: "0.88rem", color: "#f8fafc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <strong style={{ fontSize: "0.88rem", color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {activeDoc.original_filename}
                       </strong>
                       <span style={{
@@ -1307,7 +1308,7 @@ export default function AIStudio() {
                         padding: "1px 7px",
                         borderRadius: "4px",
                         background: activeDoc.status === "READY" ? "rgba(16, 185, 129, 0.12)" : "rgba(245, 158, 11, 0.12)",
-                        color: activeDoc.status === "READY" ? "#34d399" : "#fbbf24",
+                        color: activeDoc.status === "READY" ? "var(--success)" : "#fbbf24",
                         border: `1px solid ${activeDoc.status === "READY" ? "rgba(16, 185, 129, 0.25)" : "rgba(245, 158, 11, 0.25)"}`,
                       }}>
                         {activeDoc.status}
@@ -1338,9 +1339,9 @@ export default function AIStudio() {
                         style={{
                           height: "30px",
                           boxSizing: "border-box",
-                          background: "rgba(255, 255, 255, 0.04)",
-                          border: "1px solid rgba(255, 255, 255, 0.1)",
-                          color: "#f8fafc",
+                          background: "var(--studio-neutral-soft)",
+                          border: "1px solid var(--studio-neutral-border)",
+                          color: "var(--ink)",
                           borderRadius: "6px",
                           padding: "0 8px",
                           fontSize: "0.75rem",
@@ -1364,8 +1365,8 @@ export default function AIStudio() {
                         style={{
                           height: "30px",
                           boxSizing: "border-box",
-                          background: "rgba(255, 255, 255, 0.04)",
-                          border: "1px solid rgba(255, 255, 255, 0.1)",
+                          background: "var(--studio-neutral-soft)",
+                          border: "1px solid var(--studio-neutral-border)",
                           color: "var(--color-text-muted)",
                           borderRadius: "6px",
                           padding: "0 10px",
@@ -1400,7 +1401,7 @@ export default function AIStudio() {
                           border: activeBrandIdentity?.status === "CONFIRMED"
                             ? "1px solid rgba(16, 185, 129, 0.35)"
                             : "1px solid rgba(99, 102, 241, 0.35)",
-                          color: activeBrandIdentity?.status === "CONFIRMED" ? "#34d399" : "#c7d2fe",
+                          color: activeBrandIdentity?.status === "CONFIRMED" ? "var(--success)" : "var(--accent)",
                           borderRadius: "6px",
                           padding: "0 10px",
                           fontSize: "0.75rem",
@@ -1439,7 +1440,7 @@ export default function AIStudio() {
                       borderRadius: "6px",
                       background: "rgba(99, 102, 241, 0.15)",
                       border: "1px solid rgba(99, 102, 241, 0.3)",
-                      color: "#c7d2fe",
+                      color: "var(--accent)",
                       fontSize: "0.75rem",
                       fontWeight: 600,
                       cursor: uploadingPdf ? "wait" : "pointer",
@@ -1470,7 +1471,7 @@ export default function AIStudio() {
                         boxSizing: "border-box",
                         background: "rgba(239, 68, 68, 0.08)",
                         border: "1px solid rgba(239, 68, 68, 0.2)",
-                        color: "#f87171",
+                        color: "var(--danger)",
                         borderRadius: "6px",
                         padding: 0,
                         cursor: "pointer",
@@ -1489,12 +1490,12 @@ export default function AIStudio() {
 
               {/* Batch upload progress indicator if active */}
               {batchProgress && (
-                <div style={{ background: "rgba(255, 255, 255, 0.03)", borderRadius: "6px", padding: "8px 12px", border: "1px solid rgba(255, 255, 255, 0.08)" }}>
+                <div style={{ background: "var(--studio-neutral-soft)", borderRadius: "6px", padding: "8px 12px", border: "1px solid var(--studio-neutral-soft)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", marginBottom: "4px" }}>
                     <span style={{ color: "var(--accent)", fontWeight: 600 }}>Processing: {batchProgress.completed}/{batchProgress.total}</span>
                     <span style={{ color: "var(--color-text-muted)" }}>{batchProgress.currentName}</span>
                   </div>
-                  <div style={{ height: "3px", background: "rgba(255, 255, 255, 0.08)", borderRadius: "2px", overflow: "hidden" }}>
+                  <div style={{ height: "3px", background: "var(--studio-neutral-soft)", borderRadius: "2px", overflow: "hidden" }}>
                     <div
                       style={{
                         height: "100%",
@@ -1511,15 +1512,15 @@ export default function AIStudio() {
               {!activeDoc && (
                 <div
                   style={{
-                    border: "1px dashed rgba(255, 255, 255, 0.15)",
+                    border: "1px dashed var(--studio-neutral-border)",
                     borderRadius: "10px",
                     padding: "24px 16px",
                     textAlign: "center",
-                    background: "rgba(255, 255, 255, 0.015)",
+                    background: "var(--studio-neutral-soft)",
                   }}
                 >
-                  <Upload size={24} style={{ color: "#818cf8", marginBottom: "8px" }} />
-                  <h4 style={{ margin: "0 0 4px", fontSize: "0.9rem", color: "#f8fafc" }}>Upload PDF Document(s)</h4>
+                  <Upload size={24} style={{ color: "var(--accent)", marginBottom: "8px" }} />
+                  <h4 style={{ margin: "0 0 4px", fontSize: "0.9rem", color: "var(--ink)" }}>Upload PDF Document(s)</h4>
                   <p style={{ margin: "0 0 12px", fontSize: "0.76rem", color: "var(--color-text-muted)" }}>
                     Supports batch PDF upload up to 50MB. AI extracts verifiable concepts & generates daily visual schedule.
                   </p>
@@ -1544,8 +1545,8 @@ export default function AIStudio() {
                   style={{
                     padding: "8px 14px",
                     borderRadius: "10px",
-                    background: "rgba(255, 255, 255, 0.02)",
-                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    background: "var(--studio-neutral-soft)",
+                    border: "1px solid var(--studio-neutral-soft)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
@@ -1562,18 +1563,18 @@ export default function AIStudio() {
                         fontSize: "0.72rem",
                         padding: "2px 8px",
                         borderRadius: "100px",
-                        background: isAutoPilotActive ? "rgba(16, 185, 129, 0.12)" : "rgba(255, 255, 255, 0.05)",
-                        color: isAutoPilotActive ? "#34d399" : "var(--color-text-muted)",
-                        border: `1px solid ${isAutoPilotActive ? "rgba(16, 185, 129, 0.25)" : "rgba(255, 255, 255, 0.1)"}`,
+                        background: isAutoPilotActive ? "rgba(16, 185, 129, 0.12)" : "var(--studio-neutral-soft)",
+                        color: isAutoPilotActive ? "var(--success)" : "var(--color-text-muted)",
+                        border: `1px solid ${isAutoPilotActive ? "rgba(16, 185, 129, 0.25)" : "var(--studio-neutral-border)"}`,
                         fontWeight: 600,
                       }}
                     >
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: isAutoPilotActive ? "#10b981" : "#64748b", display: "inline-block" }} />
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: isAutoPilotActive ? "#10b981" : "var(--muted)", display: "inline-block" }} />
                       {isAutoPilotActive ? "Auto-Pilot Active" : "Auto-Pilot Paused"}
                     </span>
 
                     <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-                      Slots ({dynamicScheduleInfo.activeSlotsCount}/day): <strong style={{ color: "#38bdf8" }}>{dynamicScheduleInfo.slotsText}</strong>
+                      Slots ({dynamicScheduleInfo.activeSlotsCount}/day): <strong style={{ color: "var(--studio-info)" }}>{dynamicScheduleInfo.slotsText}</strong>
                       {isAutoPilotActive ? ` • Next: ${dynamicScheduleInfo.nextPostText}` : ""}
                     </span>
                   </div>
@@ -1587,8 +1588,8 @@ export default function AIStudio() {
                         display: "inline-flex",
                         alignItems: "center",
                         gap: "4px",
-                        background: "rgba(255, 255, 255, 0.04)",
-                        border: "1px solid rgba(255, 255, 255, 0.08)",
+                        background: "var(--studio-neutral-soft)",
+                        border: "1px solid var(--studio-neutral-soft)",
                         color: "var(--color-text-muted)",
                         padding: "5px 10px",
                         borderRadius: "6px",
@@ -1606,8 +1607,8 @@ export default function AIStudio() {
                         display: "inline-flex",
                         alignItems: "center",
                         gap: "4px",
-                        background: "rgba(255, 255, 255, 0.04)",
-                        border: "1px solid rgba(255, 255, 255, 0.08)",
+                        background: "var(--studio-neutral-soft)",
+                        border: "1px solid var(--studio-neutral-soft)",
                         color: "var(--color-text-muted)",
                         padding: "5px 10px",
                         borderRadius: "6px",
@@ -1624,7 +1625,7 @@ export default function AIStudio() {
                       onClick={handleToggleAutoPilot}
                       style={{
                         background: isAutoPilotActive ? "rgba(239, 68, 68, 0.12)" : "#4f46e5",
-                        color: isAutoPilotActive ? "#f87171" : "#ffffff",
+                        color: isAutoPilotActive ? "var(--danger)" : "var(--ink)",
                         border: isAutoPilotActive ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid #6366f1",
                         fontWeight: 600,
                         padding: "5px 12px",
@@ -1664,55 +1665,55 @@ export default function AIStudio() {
                   <div
                     style={{
                       background: "#0f172a",
-                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      border: "1px solid var(--studio-neutral-border)",
                       borderRadius: "14px",
                       maxWidth: "560px",
                       width: "100%",
                       padding: "22px",
-                      color: "#f8fafc",
+                      color: "var(--ink)",
                     }}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <Sparkles size={18} color="#818cf8" />
+                        <Sparkles size={18} color="var(--accent)" />
                         <h2 style={{ fontSize: "1.05rem", margin: 0, fontWeight: 700 }}>How PDF Auto-Pilot Works</h2>
                       </div>
                       <button
                         type="button"
                         onClick={() => setShowAutoPilotGuide(false)}
-                        style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "1.4rem", cursor: "pointer", lineHeight: 1 }}
+                        style={{ background: "transparent", border: "none", color: "var(--muted)", fontSize: "1.4rem", cursor: "pointer", lineHeight: 1 }}
                       >
                         ×
                       </button>
                     </div>
 
                     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                      <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", background: "var(--studio-neutral-soft)", padding: "12px", borderRadius: "8px", border: "1px solid var(--studio-neutral-soft)" }}>
                         <div style={{ width: "22px", height: "22px", borderRadius: "50%", background: "#4f46e5", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.75rem", flexShrink: 0 }}>1</div>
                         <div>
-                          <strong style={{ display: "block", fontSize: "0.85rem", color: "#fff" }}>Upload Your Business Document</strong>
-                          <p style={{ margin: "2px 0 0", fontSize: "0.76rem", color: "#94a3b8", lineHeight: 1.4 }}>
+                          <strong style={{ display: "block", fontSize: "0.85rem", color: "var(--ink)" }}>Upload Your Business Document</strong>
+                          <p style={{ margin: "2px 0 0", fontSize: "0.76rem", color: "var(--muted)", lineHeight: 1.4 }}>
                             Upload PDF reports or decks. Core storytelling concepts and images are extracted automatically.
                           </p>
                         </div>
                       </div>
 
-                      <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", background: "var(--studio-neutral-soft)", padding: "12px", borderRadius: "8px", border: "1px solid var(--studio-neutral-soft)" }}>
                         <div style={{ width: "22px", height: "22px", borderRadius: "50%", background: "#7c3aed", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.75rem", flexShrink: 0 }}>2</div>
                         <div>
-                          <strong style={{ display: "block", fontSize: "0.85rem", color: "#fff" }}>Set Daily Dispatch Schedule</strong>
-                          <p style={{ margin: "2px 0 0", fontSize: "0.76rem", color: "#94a3b8", lineHeight: 1.4 }}>
+                          <strong style={{ display: "block", fontSize: "0.85rem", color: "var(--ink)" }}>Set Daily Dispatch Schedule</strong>
+                          <p style={{ margin: "2px 0 0", fontSize: "0.76rem", color: "var(--muted)", lineHeight: 1.4 }}>
                             Choose 1, 2, or 3 slots/day. Posts are assigned sequentially and dynamically scheduled.
                           </p>
                         </div>
                       </div>
 
-                      <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      <div style={{ display: "flex", gap: "12px", alignItems: "flex-start", background: "var(--studio-neutral-soft)", padding: "12px", borderRadius: "8px", border: "1px solid var(--studio-neutral-soft)" }}>
                         <div style={{ width: "22px", height: "22px", borderRadius: "50%", background: "#059669", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.75rem", flexShrink: 0 }}>3</div>
                         <div>
-                          <strong style={{ display: "block", fontSize: "0.85rem", color: "#fff" }}>Autonomous Publishing & Updates</strong>
-                          <p style={{ margin: "2px 0 0", fontSize: "0.76rem", color: "#94a3b8", lineHeight: 1.4 }}>
+                          <strong style={{ display: "block", fontSize: "0.85rem", color: "var(--ink)" }}>Autonomous Publishing & Updates</strong>
+                          <p style={{ margin: "2px 0 0", fontSize: "0.76rem", color: "var(--muted)", lineHeight: 1.4 }}>
                             At designated slot times, posts are dispatched to selected channels and archived in History.
                           </p>
                         </div>
@@ -1730,6 +1731,14 @@ export default function AIStudio() {
 
               {/* 3. Primary Workspace: Document Visual Storytelling Hub */}
               {selectedDocId && activeDoc && (
+                <>
+                {activeBrandIdentity?.applyToAllPosters && activeBrandIdentity.status !== "CONFIRMED" && (
+                  <div role="status" style={{ marginBottom: "16px", padding: "14px 16px", borderRadius: "10px", border: "1px solid var(--warning)", background: "var(--surface)", color: "var(--ink)" }}>
+                    <strong>Brand Identity is optional — scheduled posting continues.</strong>
+                    <p style={{ margin: "6px 0 10px", color: "var(--muted)" }}>Your posts will publish at the saved times. Add and confirm this PDF’s logo and website if you want automatic branding.</p>
+                    <button type="button" className="btn btn-secondary" onClick={() => setShowBrandModal(true)}>Review Brand Identity</button>
+                  </div>
+                )}
                 <DocumentVisualConceptsHub
                   key={selectedDocId}
                   documentId={selectedDocId}
@@ -1766,14 +1775,15 @@ export default function AIStudio() {
                     });
                   }}
                 />
+                </>
               )}
 
               {/* 4. Collapsible Document Citations & Claims */}
               {knowledgeItems.length > 0 && (
                 <details style={{
                   borderRadius: "10px",
-                  background: "rgba(255, 255, 255, 0.02)",
-                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  background: "var(--studio-neutral-soft)",
+                  border: "1px solid var(--studio-neutral-soft)",
                   padding: "10px 14px",
                 }}>
                   <summary style={{
@@ -1790,7 +1800,7 @@ export default function AIStudio() {
                       <Quote size={14} style={{ color: "var(--success)" }} />
                       Extracted Document Citations & Claims ({knowledgeItems.length})
                     </span>
-                    <span style={{ fontSize: "0.72rem", color: "#818cf8" }}>View Citations ▾</span>
+                    <span style={{ fontSize: "0.72rem", color: "var(--accent)" }}>View Citations ▾</span>
                   </summary>
 
                   <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "8px", maxHeight: "280px", overflowY: "auto" }}>
@@ -1803,19 +1813,19 @@ export default function AIStudio() {
                           style={{
                             padding: "10px 12px",
                             borderRadius: "8px",
-                            background: isSelected ? "rgba(99, 102, 241, 0.08)" : "rgba(255, 255, 255, 0.02)",
-                            border: isSelected ? "1px solid rgba(99, 102, 241, 0.3)" : "1px solid rgba(255, 255, 255, 0.05)",
+                            background: isSelected ? "rgba(99, 102, 241, 0.08)" : "var(--studio-neutral-soft)",
+                            border: isSelected ? "1px solid rgba(99, 102, 241, 0.3)" : "1px solid var(--studio-neutral-soft)",
                             cursor: "pointer",
                             fontSize: "0.78rem",
                           }}
                         >
                           <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
-                            <div style={{ paddingTop: "1px", color: isSelected ? "#818cf8" : "var(--color-text-muted)" }}>
+                            <div style={{ paddingTop: "1px", color: isSelected ? "var(--accent)" : "var(--color-text-muted)" }}>
                               {isSelected ? <CheckSquare size={14} /> : <Square size={14} />}
                             </div>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <strong style={{ color: "#f8fafc", display: "block" }}>{item.knowledge_key}</strong>
-                              <p style={{ margin: "2px 0 0", color: "#cbd5e1", fontSize: "0.76rem", lineHeight: 1.35 }}>
+                              <strong style={{ color: "var(--ink)", display: "block" }}>{item.knowledge_key}</strong>
+                              <p style={{ margin: "2px 0 0", color: "var(--studio-secondary)", fontSize: "0.76rem", lineHeight: 1.35 }}>
                                 {typeof item.value === "string" ? item.value : JSON.stringify(item.value)}
                               </p>
                             </div>
@@ -1830,8 +1840,8 @@ export default function AIStudio() {
               {/* 5. Collapsible Manual Generation Tool (Flat & Non-glowing) */}
               <details style={{
                 borderRadius: "10px",
-                background: "rgba(255, 255, 255, 0.02)",
-                border: "1px solid rgba(255, 255, 255, 0.08)",
+                background: "var(--studio-neutral-soft)",
+                border: "1px solid var(--studio-neutral-soft)",
                 padding: "10px 14px",
               }}>
                 <summary style={{
@@ -1848,7 +1858,7 @@ export default function AIStudio() {
                     <Sliders size={14} />
                     Manual Post Generation & Overrides (Optional)
                   </span>
-                  <span style={{ fontSize: "0.72rem", color: "#818cf8" }}>Show Controls ▾</span>
+                  <span style={{ fontSize: "0.72rem", color: "var(--accent)" }}>Show Controls ▾</span>
                 </summary>
 
                 <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "12px" }}>
@@ -1866,9 +1876,9 @@ export default function AIStudio() {
                             gap: "5px",
                             padding: "5px 10px",
                             borderRadius: "6px",
-                            border: isSel ? "1px solid #6366f1" : "1px solid rgba(255, 255, 255, 0.08)",
-                            background: isSel ? "rgba(99, 102, 241, 0.2)" : "rgba(255, 255, 255, 0.03)",
-                            color: isSel ? "#fff" : "var(--color-text-muted)",
+                            border: isSel ? "1px solid #6366f1" : "1px solid var(--studio-neutral-soft)",
+                            background: isSel ? "rgba(99, 102, 241, 0.2)" : "var(--studio-neutral-soft)",
+                            color: isSel ? "var(--ink)" : "var(--color-text-muted)",
                             cursor: "pointer",
                             fontSize: "0.75rem",
                           }}
@@ -1905,9 +1915,9 @@ export default function AIStudio() {
                         padding: "8px 12px",
                         fontSize: "0.8rem",
                         fontWeight: 600,
-                        background: "rgba(255, 255, 255, 0.05)",
-                        border: "1px solid rgba(255, 255, 255, 0.12)",
-                        color: "#f8fafc",
+                        background: "var(--studio-neutral-soft)",
+                        border: "1px solid var(--studio-neutral-border)",
+                        color: "var(--ink)",
                         boxShadow: "none",
                         display: "flex",
                         alignItems: "center",
@@ -1941,13 +1951,13 @@ export default function AIStudio() {
                   gap: "3px"
                 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" }}>
-                    <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "#818cf8", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                       ⚡ NEXT UPCOMING POST
                     </span>
                     <span style={{
                       fontSize: "0.7rem",
                       fontWeight: 700,
-                      color: "#38bdf8",
+                      color: "var(--studio-info)",
                       background: "rgba(56, 189, 248, 0.12)",
                       border: "1px solid rgba(56, 189, 248, 0.25)",
                       padding: "1px 7px",
@@ -1957,7 +1967,7 @@ export default function AIStudio() {
                     </span>
                   </div>
                   <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px" }}>
-                    <h4 style={{ margin: 0, fontSize: "0.92rem", fontWeight: 700, color: "#f8fafc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <h4 style={{ margin: 0, fontSize: "0.92rem", fontWeight: 700, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {activeDispatchConcept.conceptTitle}
                     </h4>
                     <span style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", flexShrink: 0 }}>
@@ -1981,9 +1991,9 @@ export default function AIStudio() {
                           gap: "5px",
                           padding: "4px 9px",
                           borderRadius: "6px",
-                          border: isActive ? "1px solid #6366f1" : "1px solid rgba(255, 255, 255, 0.08)",
-                          background: isActive ? "rgba(99, 102, 241, 0.25)" : "rgba(255, 255, 255, 0.03)",
-                          color: isActive ? "#ffffff" : "var(--color-text-muted)",
+                          border: isActive ? "1px solid #6366f1" : "1px solid var(--studio-neutral-soft)",
+                          background: isActive ? "rgba(99, 102, 241, 0.25)" : "var(--studio-neutral-soft)",
+                          color: isActive ? "var(--on-accent)" : "var(--color-text-muted)",
                           cursor: "pointer",
                           fontSize: "0.75rem",
                           fontWeight: isActive ? 700 : 500,
@@ -1999,8 +2009,8 @@ export default function AIStudio() {
 
                 {/* Interactive Social Feed Card (Unified Preview + Edit) */}
                 <div style={{
-                  background: "rgba(15, 23, 42, 0.65)",
-                  border: "1px solid rgba(255, 255, 255, 0.09)",
+                  background: "var(--surface2)",
+                  border: "1px solid var(--studio-neutral-border)",
                   borderRadius: "10px",
                   padding: "12px",
                   display: "flex",
@@ -2018,7 +2028,7 @@ export default function AIStudio() {
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        color: "#fff",
+                        color: "var(--ink)",
                         fontWeight: 800,
                         fontSize: "0.78rem",
                         flexShrink: 0,
@@ -2026,7 +2036,7 @@ export default function AIStudio() {
                         {s?.brand?.name?.[0] || s?.workspace?.name?.[0] || "C"}
                       </div>
                       <div style={{ minWidth: 0, overflow: "hidden" }}>
-                        <strong style={{ fontSize: "0.8rem", color: "#f8fafc", display: "block", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                        <strong style={{ fontSize: "0.8rem", color: "var(--ink)", display: "block", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
                           {s?.brand?.name || s?.workspace?.name || "ContentOS"}
                         </strong>
                         <span style={{ fontSize: "0.68rem", color: "var(--color-text-muted)" }}>
@@ -2040,9 +2050,9 @@ export default function AIStudio() {
                         type="button"
                         onClick={() => setIsEditingDispatchCopy(!isEditingDispatchCopy)}
                         style={{
-                          background: isEditingDispatchCopy ? "rgba(99, 102, 241, 0.2)" : "rgba(255, 255, 255, 0.05)",
-                          border: isEditingDispatchCopy ? "1px solid #818cf8" : "1px solid rgba(255, 255, 255, 0.1)",
-                          color: isEditingDispatchCopy ? "#818cf8" : "var(--color-text-muted)",
+                          background: isEditingDispatchCopy ? "rgba(99, 102, 241, 0.2)" : "var(--studio-neutral-soft)",
+                          border: isEditingDispatchCopy ? "1px solid var(--accent)" : "1px solid var(--studio-neutral-border)",
+                          color: isEditingDispatchCopy ? "var(--accent)" : "var(--color-text-muted)",
                           borderRadius: "5px",
                           padding: "3px 8px",
                           fontSize: "0.7rem",
@@ -2072,8 +2082,8 @@ export default function AIStudio() {
                           toast.success('Copied ' + activePreviewPlatform + ' caption!');
                         }}
                         style={{
-                          background: "rgba(255, 255, 255, 0.05)",
-                          border: "1px solid rgba(255, 255, 255, 0.1)",
+                          background: "var(--studio-neutral-soft)",
+                          border: "1px solid var(--studio-neutral-border)",
                           color: "var(--color-text-muted)",
                           borderRadius: "5px",
                           padding: "3px 8px",
@@ -2114,7 +2124,7 @@ export default function AIStudio() {
                           borderRadius: "6px",
                           background: "rgba(2, 6, 23, 0.7)",
                           border: "1px solid rgba(99, 102, 241, 0.35)",
-                          color: "#f8fafc",
+                          color: "var(--ink)",
                           resize: "vertical",
                         }}
                         autoFocus
@@ -2133,7 +2143,7 @@ export default function AIStudio() {
                       <p style={{
                         margin: 0,
                         fontSize: "0.8rem",
-                        color: "#e2e8f0",
+                        color: "var(--ink)",
                         lineHeight: 1.45,
                         whiteSpace: "pre-line",
                       }}>
@@ -2150,7 +2160,7 @@ export default function AIStudio() {
                         position: "relative",
                         borderRadius: "8px",
                         overflow: "hidden",
-                        border: "1px solid rgba(255, 255, 255, 0.1)",
+                        border: "1px solid var(--studio-neutral-border)",
                         background: "#090d16",
                         cursor: "pointer",
                         height: "135px",
@@ -2181,7 +2191,7 @@ export default function AIStudio() {
                           bottom: "6px",
                           right: "6px",
                           background: "rgba(0, 0, 0, 0.75)",
-                          color: "#fff",
+                          color: "var(--ink)",
                           padding: "2px 7px",
                           borderRadius: "4px",
                           fontSize: "9px",
@@ -2198,8 +2208,8 @@ export default function AIStudio() {
                           position: "absolute",
                           top: "6px",
                           left: "6px",
-                          background: "rgba(15, 23, 42, 0.8)",
-                          color: "#38bdf8",
+                          background: "var(--surface2)",
+                          color: "var(--studio-info)",
                           border: "1px solid rgba(56, 189, 248, 0.3)",
                           padding: "2px 6px",
                           borderRadius: "5px",
@@ -2218,8 +2228,8 @@ export default function AIStudio() {
                       padding: "16px",
                       textAlign: "center",
                       borderRadius: "6px",
-                      background: "rgba(255, 255, 255, 0.02)",
-                      border: "1px dashed rgba(255, 255, 255, 0.08)",
+                      background: "var(--studio-neutral-soft)",
+                      border: "1px dashed var(--studio-neutral-soft)",
                       color: "var(--color-text-muted)",
                       fontSize: "0.75rem",
                     }}>
@@ -2233,7 +2243,7 @@ export default function AIStudio() {
                     alignItems: "center",
                     justifyContent: "space-between",
                     paddingTop: "6px",
-                    borderTop: "1px solid rgba(255, 255, 255, 0.06)",
+                    borderTop: "1px solid var(--studio-neutral-soft)",
                     fontSize: "0.72rem",
                     color: "var(--color-text-muted)",
                   }}>
@@ -2252,7 +2262,7 @@ export default function AIStudio() {
                 {/* Collapsible Prompt Accordion */}
                 {activeDispatchConcept.prompt && (
                   <details style={{
-                    background: "rgba(0, 0, 0, 0.25)",
+                    background: "var(--surface2)",
                     border: "1px solid rgba(168, 85, 247, 0.2)",
                     borderRadius: "6px",
                     padding: "6px 10px",
@@ -2260,7 +2270,7 @@ export default function AIStudio() {
                   }}>
                     <summary style={{
                       cursor: "pointer",
-                      color: "#c084fc",
+                      color: "var(--studio-purple)",
                       fontWeight: 600,
                       display: "flex",
                       alignItems: "center",
@@ -2273,7 +2283,7 @@ export default function AIStudio() {
                       <span style={{ fontSize: "0.68rem", color: "var(--color-text-muted)" }}>View / Copy Prompt ▾</span>
                     </summary>
                     <div style={{ marginTop: "6px", paddingTop: "6px", borderTop: "1px dashed rgba(168, 85, 247, 0.2)" }}>
-                      <p style={{ margin: "0 0 6px", color: "#cbd5e1", fontStyle: "italic", lineHeight: 1.4 }}>
+                      <p style={{ margin: "0 0 6px", color: "var(--studio-secondary)", fontStyle: "italic", lineHeight: 1.4 }}>
                         &ldquo;{activeDispatchConcept.prompt}&rdquo;
                       </p>
                       <button
@@ -2286,7 +2296,7 @@ export default function AIStudio() {
                         style={{
                           background: "rgba(168, 85, 247, 0.15)",
                           border: "1px solid rgba(168, 85, 247, 0.3)",
-                          color: "#d8b4fe",
+                          color: "var(--studio-purple)",
                           fontSize: "0.68rem",
                           borderRadius: "4px",
                           padding: "3px 8px",
@@ -2335,8 +2345,8 @@ export default function AIStudio() {
                 textAlign: "center",
                 padding: "36px 20px",
                 borderRadius: "12px",
-                background: "rgba(15, 23, 42, 0.4)",
-                border: "1px dashed rgba(255, 255, 255, 0.08)",
+                background: "var(--surface2)",
+                border: "1px dashed var(--studio-neutral-soft)",
                 gap: "12px",
               }}>
                 <div style={{
@@ -2348,12 +2358,12 @@ export default function AIStudio() {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  color: "#818cf8",
+                  color: "var(--accent)",
                 }}>
                   <FileText size={22} />
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <h4 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 600, color: "#f8fafc" }}>
+                  <h4 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 600, color: "var(--ink)" }}>
                     No Upcoming Post Scheduled
                   </h4>
                   <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)", maxWidth: "260px", lineHeight: 1.5 }}>
@@ -2389,7 +2399,7 @@ export default function AIStudio() {
                           borderRadius: "6px",
                           border: "none",
                           background: isActive ? "#6366f1" : "var(--surface2)",
-                          color: isActive ? "#fff" : "var(--color-text-muted)",
+                          color: isActive ? "var(--on-accent)" : "var(--color-text-muted)",
                           cursor: "pointer",
                           fontSize: "0.8rem",
                         }}

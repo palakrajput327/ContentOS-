@@ -28,7 +28,7 @@ export function topicHash(item: any) {
 export function groupKnowledge(rows: any[]) {
   const groups = new Map<string, any>();
   for (const row of rows) {
-    const hash = topicHash(row);
+    const hash = createHash("sha256").update(`${row.document_id}:${topicHash(row)}`).digest("hex");
     const source = {
       knowledgeId: row.id,
       documentId: row.document_id,
@@ -127,6 +127,7 @@ export class KnowledgeAutomationService {
       excerpt?: string;
       sourceVisualContext?: string;
       documentName?: string;
+      documentId?: string;
       brand?: any;
     }) => {
       const { ClipdropService } = await import("../clipdrop/clipdrop.service.js");
@@ -141,10 +142,14 @@ export class KnowledgeAutomationService {
         brand: context.brand,
         platform: "Instagram",
       });
+      const { BrandIdentityService } = await import("../documents/brand-identity.service.js");
+      const brandService = new BrandIdentityService();
+      if (!context.documentId) throw new Error("A source PDF is required for branding.");
+
       const genResult = await service.generateImage({
         workspaceId: context.workspaceId,
         userId: context.actorId,
-        prompt: suggested.prompt,
+        prompt: suggested.prompt + "\nDo not draw logos, domains or URLs. Approved branding is added afterward.",
         engine: "flux",
         aspectRatio: "1:1",
         headline: suggested.headline || context.title,
@@ -460,6 +465,7 @@ export class KnowledgeAutomationService {
           reservation.topic.sources?.find((s: any) => s.sourceMediaAssetId)?.sourceMediaAssetId;
 
         const docId = evidence[0]?.documentId || reservation.topic.sources[0]?.documentId;
+
         const pageNum = evidence[0]?.pageStart || reservation.topic.sources[0]?.pageStart;
 
         let sourceVisualContext: string | undefined;
@@ -479,7 +485,8 @@ export class KnowledgeAutomationService {
               knowledgeValue: reservation.topic.value,
               excerpt: evidence[0]?.excerpt || reservation.topic.sources[0]?.excerpt,
               sourceVisualContext,
-              documentName: reservation.topic.sources?.[0]?.documentName || "Redhash.pdf",
+              documentId: docId,
+              documentName: reservation.topic.sources?.find((s: any) => s.documentId === docId)?.documentName,
               brand: reservation.brand,
             });
             if (gen) {
@@ -489,7 +496,7 @@ export class KnowledgeAutomationService {
               usedHeadline = gen.headline;
             }
           } catch (genErr: any) {
-            console.warn("[ContentOS] AI Visual generation failed, will try source asset fallback:", genErr?.message || genErr);
+            throw genErr;
           }
         }
 
@@ -606,7 +613,8 @@ export class KnowledgeAutomationService {
                 knowledgeValue: reservation.topic.value,
                 excerpt: evidence[0]?.excerpt || reservation.topic.sources[0]?.excerpt,
                 sourceVisualContext,
-                documentName: reservation.topic.sources?.[0]?.documentName || "Redhash.pdf",
+                documentId: docId,
+              documentName: reservation.topic.sources?.find((s: any) => s.documentId === docId)?.documentName,
                 brand: reservation.brand,
               });
               if (gen) {
@@ -616,7 +624,7 @@ export class KnowledgeAutomationService {
                 usedHeadline = gen.headline;
               }
             } catch (fallbackErr: any) {
-              console.warn("[ContentOS] Fallback AI visual generation error:", fallbackErr?.message || fallbackErr);
+              throw fallbackErr;
             }
           }
 
@@ -668,6 +676,12 @@ export class KnowledgeAutomationService {
             }
           }
 
+          if (docId && autoVisualAssetId && autoVisualUrl) {
+            const { BrandIdentityService } = await import("../documents/brand-identity.service.js");
+            const branded = await new BrandIdentityService().brandGeneratedImage({ documentId: docId, workspaceId, userId: reservation.actorId, assetId: autoVisualAssetId, url: autoVisualUrl });
+            autoVisualAssetId = branded.assetId;
+            autoVisualUrl = branded.url;
+          }
           const variants: Record<string, any> = {};
           for (const p of reservation.platforms) {
             variants[p] = {

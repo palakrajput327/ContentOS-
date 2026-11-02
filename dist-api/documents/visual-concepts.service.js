@@ -277,19 +277,22 @@ Return JSON with "concepts" array.`;
      * Generates a 1024x1024 visual via FLUX.1 for a specific concept
      */
     async generateConceptVisual(opts) {
-        const row = (await pool.query(`SELECT id, concept_title, prompt FROM document_visual_concepts WHERE id = $1 AND workspace_id = $2`, [opts.conceptId, opts.workspaceId])).rows[0];
+        const row = (await pool.query(`SELECT id, concept_title, prompt FROM document_visual_concepts WHERE id = $1 AND workspace_id = $2 AND document_id = $3`, [opts.conceptId, opts.workspaceId, opts.documentId])).rows[0];
         if (!row) {
             throw new Error("Visual concept not found in this document.");
         }
         const promptToUse = (opts.customPrompt && opts.customPrompt.trim().length > 10)
             ? opts.customPrompt.trim()
             : row.prompt;
+        const { BrandIdentityService } = await import("./brand-identity.service.js");
+        const brandService = new BrandIdentityService();
         const isForce = opts.force ?? true;
         const clipdropService = new ClipdropService();
         const result = await clipdropService.generateImage({
             workspaceId: opts.workspaceId,
             userId: opts.userId,
-            prompt: promptToUse,
+            prompt: promptToUse + "\nDo not draw company logos, domains or URLs. Approved branding is added afterward.",
+            enableOverlay: false,
             headline: row.concept_title,
             aspectRatio: "1:1",
             engine: "flux",
@@ -301,48 +304,9 @@ Return JSON with "concepts" array.`;
         let finalImageUrl = result.url;
         const rawAssetId = result.assetId;
         const rawImageUrl = result.url;
-        // Check if brand identity is configured for this document and applyToAllPosters is enabled
-        try {
-            const { BrandIdentityService } = await import("./brand-identity.service.js");
-            const brandService = new BrandIdentityService();
-            const brand = await brandService.getOrCreateBrandIdentity(opts.documentId, opts.workspaceId);
-            if (brand && brand.applyToAllPosters && (brand.logoUrl || brand.websiteDomain)) {
-                console.log(`[VisualConceptsService] Applying automatic brand identity (${brand.companyName || 'Brand'}, ${brand.websiteDomain}) to concept ${opts.conceptId}...`);
-                const bgBuffer = await brandService.fetchBufferFromUrl(result.url);
-                const brandedBuffer = await brandService.composeBrandOverlay({
-                    backgroundBuffer: bgBuffer,
-                    brand,
-                });
-                const { provider, bucket } = (await import("../storage/storage.factory.js")).getStorageProvider();
-                const { uploadManagedMedia } = await import("../storage/managed-media.js");
-                const brandedAssetId = randomUUID();
-                const objectKey = `workspaces/${opts.workspaceId}/generated_asset/${brandedAssetId}/branded_poster.png`;
-                await uploadManagedMedia({
-                    assetId: brandedAssetId,
-                    workspaceId: opts.workspaceId,
-                    userId: opts.userId,
-                    provider,
-                    bucket,
-                    objectKey,
-                    body: brandedBuffer,
-                    mimeType: "image/png",
-                    filename: `branded_poster_${Date.now()}.png`,
-                    type: "GENERATED_ASSET",
-                    metadata: {
-                        document_id: opts.documentId,
-                        concept_id: opts.conceptId,
-                        branded: true,
-                        raw_asset_id: rawAssetId,
-                    },
-                });
-                finalImageUrl = await provider.getSignedDownloadUrl(bucket, objectKey, 30 * 86400);
-                finalAssetId = brandedAssetId;
-                console.log(`[VisualConceptsService] Brand compositing complete: ${finalImageUrl}`);
-            }
-        }
-        catch (brandErr) {
-            console.warn("[VisualConceptsService] Automatic brand overlay notice:", brandErr);
-        }
+        const branded = await brandService.brandGeneratedImage({ documentId: opts.documentId, workspaceId: opts.workspaceId, userId: opts.userId, assetId: result.assetId, url: result.url });
+        finalAssetId = branded.assetId;
+        finalImageUrl = branded.url;
         // Save both final (branded) poster and raw (pure AI artwork) to concept row
         await pool.query(`UPDATE document_visual_concepts
        SET asset_id = $1, image_url = $2, raw_asset_id = $3, raw_image_url = $4, prompt = $5, updated_at = NOW()
@@ -359,7 +323,7 @@ Return JSON with "concepts" array.`;
     async dispatchConcept(opts) {
         const row = (await pool.query(`SELECT id, concept_title, prompt, source_excerpt, asset_id, image_url 
          FROM document_visual_concepts 
-         WHERE id = $1 AND workspace_id = $2`, [opts.conceptId, opts.workspaceId])).rows[0];
+         WHERE id = $1 AND workspace_id = $2 AND document_id = $3`, [opts.conceptId, opts.workspaceId, opts.documentId])).rows[0];
         if (!row) {
             throw new Error("Visual concept not found in this document.");
         }
@@ -378,8 +342,29 @@ Return JSON with "concepts" array.`;
                 console.log(`[VisualConcepts] Auto visual synthesis complete: ${genRes.imageUrl}`);
             }
             catch (genErr) {
-                console.warn("[VisualConcepts] Auto image generation fallback warning:", genErr);
+                throw genErr;
             }
+        }
+        const { BrandIdentityService } = await import("./brand-identity.service.js");
+        const brandService = new BrandIdentityService();
+        try {
+            const brand = await brandService.getOrCreateBrandIdentity(opts.documentId, opts.workspaceId);
+            if (brandService.isBrandReady(brand)) {
+                try {
+                    const branded = await brandService.recomposeConceptPoster(opts);
+                    row.image_url = branded.imageUrl;
+                    row.asset_id = branded.assetId;
+                }
+                catch {
+                    await brandService.warnOptionalBrand(opts.documentId, opts.workspaceId);
+                }
+            }
+            else {
+                await brandService.warnOptionalBrand(opts.documentId, opts.workspaceId);
+            }
+        }
+        catch {
+            await brandService.warnOptionalBrand(opts.documentId, opts.workspaceId);
         }
         const dispatchedAt = new Date().toISOString();
         const channels = opts.channels && opts.channels.length > 0 ? opts.channels : ["linkedin"];

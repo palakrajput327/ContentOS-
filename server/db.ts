@@ -83,10 +83,28 @@ poolConfig.idleTimeoutMillis = 5000;
 poolConfig.allowExitOnIdle = true;
 poolConfig.keepAlive = true;
 poolConfig.keepAliveInitialDelayMillis = 5000;
-poolConfig.ssl = localDatabase ? false : {
-  rejectUnauthorized: false,
-  servername: databaseHost || undefined,
-};
+// Determine SSL configuration flexibly
+const isExplicitlyDisabled = rawConnectionString ? /sslmode=disable|ssl=false/i.test(rawConnectionString) : false;
+const isExplicitlyRequired = rawConnectionString ? /sslmode=(require|verify-ca|verify-full|prefer)|ssl=true/i.test(rawConnectionString) : false;
+const isProduction = process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
+
+let useSsl = false;
+if (isExplicitlyRequired) {
+  useSsl = true;
+} else if (!isExplicitlyDisabled) {
+  if (!localDatabase) {
+    useSsl = true;
+  } else if (isProduction || process.env.PGSSL === "true" || process.env.DATABASE_SSL === "true") {
+    useSsl = true;
+  }
+}
+
+poolConfig.ssl = useSsl
+  ? {
+      rejectUnauthorized: false,
+      servername: databaseHost && !localDatabase ? databaseHost : undefined,
+    }
+  : false;
 
 export const pool = new Pool(poolConfig);
 

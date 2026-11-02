@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   Palette,
@@ -42,7 +43,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
   const [companyName, setCompanyName] = useState("");
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [websiteDomain, setWebsiteDomain] = useState("");
-  const [brandColors, setBrandColors] = useState<string[]>(["#2563eb", "#06b6d4", "#f59e0b"]);
+  const [brandColors, setBrandColors] = useState<string[]>([]);
   const [selectedColor, setSelectedColor] = useState("#2563eb");
   const [applyToAllPosters, setApplyToAllPosters] = useState(true);
   const [logoPosition, setLogoPosition] = useState<"top-left" | "top-right" | "bottom-left" | "bottom-right">("bottom-right");
@@ -52,6 +53,15 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
   const [status, setStatus] = useState<string>("PENDING_REVIEW");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [isOpen, onClose]);
 
   // Fetch or auto-detect brand identity on modal open
   useEffect(() => {
@@ -67,6 +77,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
         setCompanyName(brand.companyName || "");
         setLogoUrl(brand.logoUrl || null);
         setWebsiteDomain(brand.websiteDomain || "");
+        setBrandColors(brand.brandColors || []);
         if (Array.isArray(brand.brandColors) && brand.brandColors.length > 0) {
           setBrandColors(brand.brandColors);
           setSelectedColor(brand.brandColors[0]);
@@ -115,7 +126,9 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
         const dataUrl = reader.result as string;
         const res = await documentsApi.uploadBrandLogo(documentId, dataUrl, file.name);
         setLogoUrl(res.logoUrl);
-        setStatus("CONFIRMED");
+        setStatus("PENDING_REVIEW");
+        const detected = await documentsApi.getBrandIdentity(documentId);
+        setBrandColors(detected.brandColors || []);
         toast.success("✅ Brand logo uploaded successfully!");
       } catch (err: any) {
         toast.error(err?.message || "Failed to upload logo.");
@@ -288,7 +301,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
   // Fallback demo poster artwork for live preview if no sample image URL is passed
   const previewBg = sampleImageUrl || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1000&q=80";
 
-  return (
+  return createPortal(
     <div
       style={{
         position: "fixed",
@@ -300,19 +313,25 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
         alignItems: "center",
         justifyContent: "center",
         padding: "16px",
+        boxSizing: "border-box",
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
+        className="brand-identity-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Brand Identity Integration"
         style={{
           width: "100%",
           maxWidth: "1040px",
           maxHeight: "92vh",
+          minHeight: 0,
           display: "flex",
           flexDirection: "column",
-          background: "#0b1329",
+          background: "var(--surface)",
           border: "1px solid rgba(99, 102, 241, 0.25)",
           borderRadius: "16px",
           boxShadow: "0 25px 60px -15px rgba(0, 0, 0, 0.7), 0 0 35px rgba(99, 102, 241, 0.15)",
@@ -323,14 +342,16 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
         <div
           style={{
             padding: "18px 24px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+            borderBottom: "1px solid var(--studio-neutral-soft)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            background: "linear-gradient(90deg, rgba(99, 102, 241, 0.08) 0%, rgba(15, 23, 42, 0.4) 100%)",
+            background: "linear-gradient(90deg, rgba(99, 102, 241, 0.08) 0%, var(--surface2) 100%)",
+            flexShrink: 0,
+            gap: "12px",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
             <div
               style={{
                 width: "38px",
@@ -343,11 +364,11 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                 boxShadow: "0 4px 12px rgba(79, 70, 229, 0.35)",
               }}
             >
-              <Palette size={20} color="#ffffff" />
+              <Palette size={20} color="var(--ink)" />
             </div>
-            <div>
+            <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700, color: "#f8fafc" }}>
+                <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700, color: "var(--ink)" }}>
                   Brand Identity Integration
                 </h3>
                 {status === "CONFIRMED" ? (
@@ -358,7 +379,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                       padding: "2px 8px",
                       borderRadius: "9999px",
                       background: "rgba(16, 185, 129, 0.15)",
-                      color: "#34d399",
+                      color: "var(--success)",
                       border: "1px solid rgba(16, 185, 129, 0.3)",
                       display: "inline-flex",
                       alignItems: "center",
@@ -386,21 +407,22 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                   </span>
                 )}
               </div>
-              <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "#94a3b8" }}>
-                Per-PDF branding for <strong style={{ color: "#cbd5e1" }}>{documentName}</strong> • Every poster automatically includes your exact logo & domain.
+              <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "var(--muted)" }}>
+                Per-PDF branding for <strong style={{ color: "var(--studio-secondary)" }}>{documentName}</strong> • Review the extracted logo and domain, then save to enable automatic branding.
               </p>
             </div>
           </div>
 
           <button
+            aria-label="Close Brand Identity"
             onClick={onClose}
             style={{
-              background: "rgba(255, 255, 255, 0.05)",
-              border: "1px solid rgba(255, 255, 255, 0.1)",
+              background: "var(--studio-neutral-soft)",
+              border: "1px solid var(--studio-neutral-border)",
               borderRadius: "8px",
               padding: "6px",
               cursor: "pointer",
-              color: "#94a3b8",
+              color: "var(--muted)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -413,7 +435,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
 
         {/* Modal Body */}
         {loading ? (
-          <div style={{ padding: "80px 20px", textAlign: "center", color: "#94a3b8" }}>
+          <div style={{ padding: "80px 20px", textAlign: "center", color: "var(--muted)" }}>
             <RefreshCw size={28} className="animate-spin" style={{ margin: "0 auto 12px", color: "#6366f1" }} />
             <p style={{ fontSize: "0.9rem", margin: 0 }}>Analyzing PDF & auto-detecting brand identity...</p>
           </div>
@@ -421,8 +443,10 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1.15fr 0.85fr",
+              gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
               overflowY: "auto",
+              overflowX: "hidden",
+              minHeight: 0,
               flex: 1,
             }}
           >
@@ -430,7 +454,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
             <div
               style={{
                 padding: "22px 24px",
-                borderRight: "1px solid rgba(255, 255, 255, 0.08)",
+                borderRight: "1px solid var(--studio-neutral-soft)",
                 display: "flex",
                 flexDirection: "column",
                 gap: "18px",
@@ -438,8 +462,8 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
             >
               {/* Company Name */}
               <div>
-                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 600, color: "#cbd5e1", marginBottom: "6px" }}>
-                  <Building2 size={13} style={{ display: "inline", verticalAlign: "middle", marginRight: "6px", color: "#818cf8" }} />
+                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 600, color: "var(--studio-secondary)", marginBottom: "6px" }}>
+                  <Building2 size={13} style={{ display: "inline", verticalAlign: "middle", marginRight: "6px", color: "var(--accent)" }} />
                   Company Name (Extracted from PDF)
                 </label>
                 <input
@@ -450,11 +474,11 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                   style={{
                     width: "100%",
                     height: "36px",
-                    background: "rgba(15, 23, 42, 0.7)",
-                    border: "1px solid rgba(255, 255, 255, 0.12)",
+                    background: "var(--surface2)",
+                    border: "1px solid var(--studio-neutral-border)",
                     borderRadius: "8px",
                     padding: "0 12px",
-                    color: "#f8fafc",
+                    color: "var(--ink)",
                     fontSize: "0.85rem",
                     outline: "none",
                     boxSizing: "border-box",
@@ -464,8 +488,8 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
 
               {/* Logo Upload & Preview */}
               <div>
-                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 600, color: "#cbd5e1", marginBottom: "6px" }}>
-                  <Shield size={13} style={{ display: "inline", verticalAlign: "middle", marginRight: "6px", color: "#818cf8" }} />
+                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 600, color: "var(--studio-secondary)", marginBottom: "6px" }}>
+                  <Shield size={13} style={{ display: "inline", verticalAlign: "middle", marginRight: "6px", color: "var(--accent)" }} />
                   Company Logo (Extracted from PDF or Uploaded)
                 </label>
                 <div
@@ -474,8 +498,8 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                     alignItems: "center",
                     gap: "14px",
                     padding: "10px 14px",
-                    background: "rgba(15, 23, 42, 0.6)",
-                    border: "1px dashed rgba(255, 255, 255, 0.15)",
+                    background: "var(--surface2)",
+                    border: "1px dashed var(--studio-neutral-border)",
                     borderRadius: "10px",
                   }}
                 >
@@ -485,7 +509,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                       height: "60px",
                       borderRadius: "8px",
                       background: "rgba(0, 0, 0, 0.4)",
-                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      border: "1px solid var(--studio-neutral-border)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -500,7 +524,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                         style={{ maxWidth: "90%", maxHeight: "90%", objectFit: "contain" }}
                       />
                     ) : (
-                      <span style={{ fontSize: "0.65rem", color: "#64748b", textAlign: "center" }}>No Logo</span>
+                      <span style={{ fontSize: "0.65rem", color: "var(--muted)", textAlign: "center" }}>No Logo</span>
                     )}
                   </div>
 
@@ -516,7 +540,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                           background: "rgba(99, 102, 241, 0.2)",
                           border: "1px solid rgba(99, 102, 241, 0.4)",
                           borderRadius: "6px",
-                          color: "#c7d2fe",
+                          color: "var(--accent)",
                           fontSize: "0.75rem",
                           fontWeight: 600,
                           cursor: "pointer",
@@ -536,7 +560,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                         onChange={handleLogoUpload}
                       />
                     </div>
-                    <p style={{ margin: "4px 0 0", fontSize: "0.7rem", color: "#64748b" }}>
+                    <p style={{ margin: "4px 0 0", fontSize: "0.7rem", color: "var(--muted)" }}>
                       Supports transparent PNG, SVG, WebP, JPG. Never distorted by AI.
                     </p>
                   </div>
@@ -545,8 +569,8 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
 
               {/* Website Domain */}
               <div>
-                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 600, color: "#cbd5e1", marginBottom: "6px" }}>
-                  <Globe size={13} style={{ display: "inline", verticalAlign: "middle", marginRight: "6px", color: "#818cf8" }} />
+                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 600, color: "var(--studio-secondary)", marginBottom: "6px" }}>
+                  <Globe size={13} style={{ display: "inline", verticalAlign: "middle", marginRight: "6px", color: "var(--accent)" }} />
                   Website Domain (Printed on every poster with 100% spelling accuracy)
                 </label>
                 <div style={{ position: "relative" }}>
@@ -558,26 +582,26 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                     style={{
                       width: "100%",
                       height: "36px",
-                      background: "rgba(15, 23, 42, 0.7)",
-                      border: "1px solid rgba(255, 255, 255, 0.12)",
+                      background: "var(--surface2)",
+                      border: "1px solid var(--studio-neutral-border)",
                       borderRadius: "8px",
                       padding: "0 12px",
-                      color: "#f8fafc",
+                      color: "var(--ink)",
                       fontSize: "0.85rem",
                       outline: "none",
                       boxSizing: "border-box",
                     }}
                   />
                 </div>
-                <p style={{ margin: "4px 0 0", fontSize: "0.7rem", color: "#64748b" }}>
+                <p style={{ margin: "4px 0 0", fontSize: "0.7rem", color: "var(--muted)" }}>
                   Automatically formatted into a frosted luxury glass badge. Zero typos.
                 </p>
               </div>
 
               {/* Brand Colors */}
               <div>
-                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 600, color: "#cbd5e1", marginBottom: "6px" }}>
-                  <Palette size={13} style={{ display: "inline", verticalAlign: "middle", marginRight: "6px", color: "#818cf8" }} />
+                <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 600, color: "var(--studio-secondary)", marginBottom: "6px" }}>
+                  <Palette size={13} style={{ display: "inline", verticalAlign: "middle", marginRight: "6px", color: "var(--accent)" }} />
                   Brand Colors (Detected from PDF / Logo)
                 </label>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -591,15 +615,15 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                         height: "32px",
                         borderRadius: "8px",
                         background: c,
-                        border: selectedColor === c ? "2px solid #ffffff" : "1px solid rgba(255, 255, 255, 0.2)",
+                        border: selectedColor === c ? "2px solid var(--ink)" : "1px solid var(--studio-neutral-border)",
                         cursor: "pointer",
-                        boxShadow: selectedColor === c ? "0 0 10px rgba(255,255,255,0.4)" : "none",
+                        boxShadow: selectedColor === c ? "0 0 10px var(--studio-neutral-border)" : "none",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
                       }}
                     >
-                      {selectedColor === c && <Check size={14} color="#ffffff" />}
+                      {selectedColor === c && <Check size={14} color="var(--ink)" />}
                     </button>
                   ))}
                   <div style={{ display: "flex", alignItems: "center", gap: "6px", marginLeft: "6px" }}>
@@ -621,7 +645,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                         background: "none",
                       }}
                     />
-                    <span style={{ fontSize: "0.72rem", color: "#94a3b8" }}>{selectedColor}</span>
+                    <span style={{ fontSize: "0.72rem", color: "var(--muted)" }}>{selectedColor}</span>
                   </div>
                 </div>
               </div>
@@ -631,23 +655,23 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                 style={{
                   padding: "14px",
                   borderRadius: "10px",
-                  background: "rgba(15, 23, 42, 0.5)",
-                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  background: "var(--surface2)",
+                  border: "1px solid var(--studio-neutral-soft)",
                   display: "flex",
                   flexDirection: "column",
                   gap: "12px",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#e2e8f0" }}>
-                    <Sliders size={13} style={{ display: "inline", verticalAlign: "middle", marginRight: "6px", color: "#38bdf8" }} />
+                  <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--ink)" }}>
+                    <Sliders size={13} style={{ display: "inline", verticalAlign: "middle", marginRight: "6px", color: "var(--studio-info)" }} />
                     Poster Positioning & Size Settings
                   </span>
                 </div>
 
                 {/* Logo Position */}
                 <div>
-                  <span style={{ fontSize: "0.72rem", color: "#94a3b8", display: "block", marginBottom: "6px" }}>
+                  <span style={{ fontSize: "0.72rem", color: "var(--muted)", display: "block", marginBottom: "6px" }}>
                     Logo Corner Position
                   </span>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "6px" }}>
@@ -662,9 +686,9 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                           fontSize: "0.7rem",
                           fontWeight: 600,
                           cursor: "pointer",
-                          background: logoPosition === pos ? "rgba(99, 102, 241, 0.3)" : "rgba(255, 255, 255, 0.04)",
-                          border: logoPosition === pos ? "1px solid #6366f1" : "1px solid rgba(255, 255, 255, 0.08)",
-                          color: logoPosition === pos ? "#ffffff" : "#94a3b8",
+                          background: logoPosition === pos ? "rgba(99, 102, 241, 0.3)" : "var(--studio-neutral-soft)",
+                          border: logoPosition === pos ? "1px solid #6366f1" : "1px solid var(--studio-neutral-soft)",
+                          color: logoPosition === pos ? "var(--ink)" : "var(--muted)",
                           textTransform: "capitalize",
                         }}
                       >
@@ -676,7 +700,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
 
                 {/* Domain Placement */}
                 <div>
-                  <span style={{ fontSize: "0.72rem", color: "#94a3b8", display: "block", marginBottom: "6px" }}>
+                  <span style={{ fontSize: "0.72rem", color: "var(--muted)", display: "block", marginBottom: "6px" }}>
                     Website Domain Placement
                   </span>
                   <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: "6px" }}>
@@ -691,9 +715,9 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                           fontSize: "0.7rem",
                           fontWeight: 600,
                           cursor: "pointer",
-                          background: domainPosition === pos ? "rgba(6, 182, 212, 0.3)" : "rgba(255, 255, 255, 0.04)",
-                          border: domainPosition === pos ? "1px solid #06b6d4" : "1px solid rgba(255, 255, 255, 0.08)",
-                          color: domainPosition === pos ? "#ffffff" : "#94a3b8",
+                          background: domainPosition === pos ? "rgba(6, 182, 212, 0.3)" : "var(--studio-neutral-soft)",
+                          border: domainPosition === pos ? "1px solid #06b6d4" : "1px solid var(--studio-neutral-soft)",
+                          color: domainPosition === pos ? "var(--ink)" : "var(--muted)",
                           textTransform: "capitalize",
                         }}
                       >
@@ -705,7 +729,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
 
                 {/* Logo Size */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: "0.72rem", color: "#94a3b8" }}>Logo Size</span>
+                  <span style={{ fontSize: "0.72rem", color: "var(--muted)" }}>Logo Size</span>
                   <div style={{ display: "flex", gap: "6px" }}>
                     {(["small", "medium", "large"] as const).map((s) => (
                       <button
@@ -718,9 +742,9 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                           fontSize: "0.7rem",
                           fontWeight: 600,
                           cursor: "pointer",
-                          background: logoSize === s ? "rgba(99, 102, 241, 0.3)" : "rgba(255, 255, 255, 0.04)",
-                          border: logoSize === s ? "1px solid #6366f1" : "1px solid rgba(255, 255, 255, 0.08)",
-                          color: logoSize === s ? "#ffffff" : "#94a3b8",
+                          background: logoSize === s ? "rgba(99, 102, 241, 0.3)" : "var(--studio-neutral-soft)",
+                          border: logoSize === s ? "1px solid #6366f1" : "1px solid var(--studio-neutral-soft)",
+                          color: logoSize === s ? "var(--ink)" : "var(--muted)",
                           textTransform: "capitalize",
                         }}
                       >
@@ -744,10 +768,10 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                 }}
               >
                 <div>
-                  <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#34d399", display: "block" }}>
+                  <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--success)", display: "block" }}>
                     Apply branding to every poster
                   </span>
-                  <span style={{ fontSize: "0.7rem", color: "#94a3b8" }}>
+                  <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>
                     Enabled by default. Automatically composites this identity onto all future generated artwork.
                   </span>
                 </div>
@@ -766,18 +790,18 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                 padding: "22px 24px",
                 display: "flex",
                 flexDirection: "column",
-                background: "rgba(10, 15, 30, 0.5)",
+                background: "var(--surface2)",
               }}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
-                <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#e2e8f0", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <Eye size={13} color="#38bdf8" /> Live Composition Preview
+                <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--ink)", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <Eye size={13} color="var(--studio-info)" /> Live Composition Preview
                 </span>
-                <span style={{ fontSize: "0.68rem", color: "#94a3b8" }}>Real-time 1024x1024 poster preview</span>
+                <span style={{ fontSize: "0.68rem", color: "var(--muted)" }}>Real-time 1024x1024 poster preview</span>
               </div>
 
               {/* Poster Canvas Preview Container */}
-              <div
+              <div className="studio-artwork-preview"
                 style={{
                   position: "relative",
                   width: "100%",
@@ -785,7 +809,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                   borderRadius: "12px",
                   overflow: "hidden",
                   boxShadow: "0 15px 35px rgba(0,0,0,0.6)",
-                  border: "1px solid rgba(255, 255, 255, 0.15)",
+                  border: "1px solid var(--studio-neutral-border)",
                   background: "#020617",
                 }}
               >
@@ -823,7 +847,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                         width: "7px",
                         height: "7px",
                         borderRadius: "50%",
-                        background: selectedColor || "#38bdf8",
+                        background: selectedColor || "var(--studio-info)",
                         display: "inline-block",
                       }}
                     />
@@ -837,12 +861,12 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                 style={{
                   margin: "12px 0 0",
                   fontSize: "0.72rem",
-                  color: "#94a3b8",
+                  color: "var(--muted)",
                   lineHeight: 1.4,
-                  background: "rgba(255, 255, 255, 0.03)",
+                  background: "var(--studio-neutral-soft)",
                   padding: "8px 12px",
                   borderRadius: "6px",
-                  border: "1px solid rgba(255, 255, 255, 0.05)",
+                  border: "1px solid var(--studio-neutral-soft)",
                 }}
               >
                 💡 <strong>Original Artwork Protected:</strong> The raw AI visual is preserved separately. Repositioning your logo or editing your domain re-composites in seconds without consuming image generation credits.
@@ -882,11 +906,14 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
         <div
           style={{
             padding: "14px 24px",
-            borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+            borderTop: "1px solid var(--studio-neutral-soft)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            background: "rgba(10, 15, 30, 0.6)",
+            background: "var(--surface2)",
+            flexShrink: 0,
+            gap: "12px",
+            flexWrap: "wrap",
           }}
         >
           <button
@@ -896,9 +923,9 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
               height: "34px",
               padding: "0 16px",
               borderRadius: "8px",
-              background: "rgba(255, 255, 255, 0.05)",
-              border: "1px solid rgba(255, 255, 255, 0.1)",
-              color: "#cbd5e1",
+              background: "var(--studio-neutral-soft)",
+              border: "1px solid var(--studio-neutral-border)",
+              color: "var(--studio-secondary)",
               fontSize: "0.8rem",
               fontWeight: 600,
               cursor: "pointer",
@@ -918,7 +945,7 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
                 borderRadius: "8px",
                 background: "linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%)",
                 border: "none",
-                color: "#ffffff",
+                color: "var(--ink)",
                 fontSize: "0.82rem",
                 fontWeight: 700,
                 cursor: "pointer",
@@ -934,7 +961,8 @@ export const BrandIdentityModal: React.FC<BrandIdentityModalProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
