@@ -47,3 +47,6 @@ ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS raw_image_url text
 ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS raw_asset_id uuid;
 
 ALTER TABLE content ADD COLUMN IF NOT EXISTS image_asset_id uuid REFERENCES media_assets(id) ON DELETE SET NULL;
+
+ALTER TABLE knowledge_automation_settings ADD COLUMN IF NOT EXISTS poster_style text NOT NULL DEFAULT 'AI_POSTER';
+

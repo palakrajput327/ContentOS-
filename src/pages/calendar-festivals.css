@@ -1,0 +1,319 @@
+/* ====================================================================
+   Festive Calendar Styling - Dark & Light Mode Polish
+   ==================================================================== */
+
+/* Festival Month Summary Banner */
+.festival-month-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  font-size: 0.85rem;
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.12) 0%, rgba(99, 102, 241, 0.1) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  backdrop-filter: blur(8px);
+}
+
+:root[data-theme="light"] .festival-month-banner {
+  background: linear-gradient(90deg, #fef3c7 0%, #e0e7ff 100%);
+  border-color: #fde68a;
+  color: #78350f;
+}
+
+.festival-banner-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.festival-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid transparent;
+}
+
+/* Day Cell Festive Accents */
+.calendar-cell.has-festival {
+  position: relative;
+}
+
+.calendar-cell.has-festival::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--festive-bar, linear-gradient(90deg, #f59e0b, #ec4899));
+  border-radius: 3px 3px 0 0;
+  opacity: 0.85;
+}
+
+.calendar-cell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.calendar-add-post-btn {
+  opacity: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.calendar-cell:hover .calendar-add-post-btn {
+  opacity: 1;
+}
+
+.calendar-add-post-btn:hover {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+}
+
+/* Elegant Festival Tag Pills */
+.festive-tag-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  user-select: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.festive-tag-pill:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.1);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+}
+
+.festive-tag-pill .pill-emoji {
+  font-size: 0.85rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.festive-tag-pill .pill-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+/* Community Specific Colors - Dark Mode */
+.festive-tag-pill.community-hindu {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fde047;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.festive-tag-pill.community-sikh {
+  background: rgba(249, 115, 22, 0.15);
+  color: #fed7aa;
+  border: 1px solid rgba(249, 115, 22, 0.35);
+}
+
+.festive-tag-pill.community-islamic {
+  background: rgba(16, 185, 129, 0.15);
+  color: #a7f3d0;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.festive-tag-pill.community-christian {
+  background: rgba(56, 189, 248, 0.15);
+  color: #bae6fd;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.festive-tag-pill.community-national {
+  background: rgba(99, 102, 241, 0.15);
+  color: #c7d2fe;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+}
+
+.festive-tag-pill.community-all,
+.festive-tag-pill.community-jain,
+.festive-tag-pill.community-buddhist {
+  background: rgba(168, 85, 247, 0.15);
+  color: #e9d5ff;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+}
+
+/* Light Mode Overrides for Perfect Contrast */
+:root[data-theme="light"] .festive-tag-pill.community-hindu {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
+:root[data-theme="light"] .festive-tag-pill.community-sikh {
+  background: #ffedd5;
+  color: #9a3412;
+  border-color: #fdba74;
+}
+
+:root[data-theme="light"] .festive-tag-pill.community-islamic {
+  background: #d1fae5;
+  color: #065f46;
+  border-color: #6ee7b7;
+}
+
+:root[data-theme="light"] .festive-tag-pill.community-christian {
+  background: #e0f2fe;
+  color: #075985;
+  border-color: #7dd3fc;
+}
+
+:root[data-theme="light"] .festive-tag-pill.community-national {
+  background: #ede9fe;
+  color: #4338ca;
+  border-color: #c4b5fd;
+}
+
+:root[data-theme="light"] .festive-tag-pill.community-all,
+:root[data-theme="light"] .festive-tag-pill.community-jain,
+:root[data-theme="light"] .festive-tag-pill.community-buddhist {
+  background: #f3e8ff;
+  color: #6b21a8;
+  border-color: #d8b4fe;
+}
+
+/* Stacked "+X more" Pill */
+.festive-more-pill {
+  font-size: 0.68rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface3);
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s ease;
+  margin-bottom: 4px;
+}
+
+.festive-more-pill:hover {
+  background: var(--surface2);
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+/* Festival Modal Card */
+.festival-modal-hero {
+  position: relative;
+  border-radius: 14px;
+  padding: 24px;
+  overflow: hidden;
+  margin-bottom: 20px;
+  color: #ffffff;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+}
+
+.festival-modal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  margin-bottom: 12px;
+}
+
+.festival-wish-box {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.festival-tab-btn {
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+
+.festival-tab-btn.active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+:root[data-theme="light"] .festival-tab-btn:hover {
+  background: var(--surface3);
+}
+
+.festival-tab-btn:hover:not(.active) {
+  background: var(--surface3);
+  color: var(--ink);
+}
+
+.festival-automation-status-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  margin-bottom: 20px;
+  font-size: 0.85rem;
+}
+
+.status-indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+.status-indicator-dot.active {
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.status-indicator-dot.inactive {
+  background: #94a3b8;
+}

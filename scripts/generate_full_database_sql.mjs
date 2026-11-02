@@ -7,8 +7,65 @@ const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort
 let sql = `-- ====================================================================
 -- ContentOS Full Database Schema & Initial Setup
 -- Generated for cPanel PostgreSQL (phpPgAdmin / psql)
--- Includes migrations 001 to 027 + Seed Admin User, Workspace & Social Accounts
+-- Auto-Wipes Existing Schema and Rebuilds Everything Cleanly
 -- ====================================================================
+
+-- 0. Safely Drop All Existing Conflicting Tables & Custom Types
+DROP TABLE IF EXISTS
+  document_brand_identities,
+  document_visual_concepts,
+  administrative_audit_logs,
+  user_consents,
+  subscription_events,
+  subscription_payments,
+  workspace_subscriptions,
+  workspace_trials,
+  subscription_plans,
+  api_rate_limits,
+  queue_recurring_tasks,
+  queue_worker_leases,
+  queue_jobs,
+  system_admin_events,
+  system_admin_sessions,
+  source_media_analysis,
+  document_source_media,
+  knowledge_content_plans,
+  knowledge_automation_settings,
+  scheduled_festival_posts,
+  meta_oauth_pending,
+  content_comments,
+  notifications,
+  posting_slots,
+  batch_child_items,
+  batch_jobs,
+  document_knowledge,
+  ai_generation_sources,
+  document_chunks,
+  document_pages,
+  documents,
+  media_assets,
+  ai_generations,
+  activity_logs,
+  published_posts,
+  scheduled_posts,
+  approvals,
+  content_versions,
+  content,
+  oauth_states,
+  social_account_tokens,
+  social_accounts,
+  brand_kits,
+  workspace_members,
+  workspaces,
+  email_outbox,
+  auth_events,
+  auth_sessions,
+  auth_tokens,
+  users,
+  schema_migrations
+CASCADE;
+
+DROP TYPE IF EXISTS media_asset_type, document_status CASCADE;
 
 -- 1. Create Schema Migrations Table
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -69,13 +126,36 @@ VALUES (
 ) ON CONFLICT (id) DO NOTHING;
 
 -- 3. Workspace Membership (Owner)
-INSERT INTO workspace_members (workspace_id, user_id, role, created_at)
+INSERT INTO workspace_members (workspace_id, user_id, role)
 VALUES (
   '${workspaceId}',
   '${userId}',
-  'Owner',
+  'Owner'
+) ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = EXCLUDED.role;
+
+UPDATE users SET active_workspace_id = '${workspaceId}'
+WHERE id = '${userId}';
+
+-- 4. Knowledge Automation Settings (Autopilot & Poster Style)
+INSERT INTO knowledge_automation_settings (
+  workspace_id, actor_id, enabled, autopilot_enabled, horizon_days, cooldown_days, platforms, posting_time, poster_style, next_run_at, updated_at
+) VALUES (
+  '${workspaceId}',
+  '${userId}',
+  true,
+  true,
+  14,
+  90,
+  '["LinkedIn","Instagram","Facebook","Telegram"]'::jsonb,
+  '10:00',
+  'AI_POSTER',
+  now(),
   now()
-) ON CONFLICT DO NOTHING;
+) ON CONFLICT (workspace_id) DO UPDATE SET
+  enabled = true,
+  autopilot_enabled = true,
+  poster_style = 'AI_POSTER',
+  platforms = '["LinkedIn","Instagram","Facebook","Telegram"]'::jsonb;
 
 -- 4. Active Workspace Subscription (5 Years Scale Plan)
 INSERT INTO workspace_subscriptions (

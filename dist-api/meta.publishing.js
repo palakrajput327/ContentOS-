@@ -14,7 +14,7 @@ export function isLocalOrPrivateUrl(urlString) {
             url.password !== "" ||
             /^(localhost|127\.|0\.|10\.|192\.168\.|\[?::1\]?)/i.test(url.hostname) ||
             /^172\.(1[6-9]|2\d|3[01])\./.test(url.hostname) ||
-            url.hostname.includes("hidustansocialnetwork.in"));
+            false /* hidustansocialnetwork.in is public */);
     }
     catch {
         return true;
@@ -37,7 +37,7 @@ export async function uploadBufferToPublicHost(buffer, mimeType, filename = "med
     form.append("reqtype", "fileupload");
     form.append("fileToUpload", new Blob([new Uint8Array(buffer)], { type: mimeType }), filename);
     const res = await fetch("https://catbox.moe/user/api.php", {
-        method: "POST",
+        method: "POST", headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0" },
         body: form,
         signal: AbortSignal.timeout(30000),
     });

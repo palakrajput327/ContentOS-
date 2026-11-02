@@ -1,0 +1,30 @@
+:root {
+  --studio-secondary: #cbd5e1;
+  --studio-info: #7dd3fc;
+  --studio-purple: #d8b4fe;
+  --studio-neutral-soft: rgba(255, 255, 255, .04);
+  --studio-neutral-border: rgba(255, 255, 255, .14);
+}
+:root[data-theme="light"] {
+  --studio-secondary: #334155;
+  --studio-info: #0369a1;
+  --studio-purple: #7e22ce;
+  --studio-neutral-soft: #f1f5f9;
+  --studio-neutral-border: #cbd5e1;
+}
+.ai-studio-container, .brand-identity-dialog { color: var(--ink); }
+.ai-studio-container input, .brand-identity-dialog input { color-scheme: inherit; }
+.ai-studio-container button[style*="linear-gradient"],
+.brand-identity-dialog button[style*="linear-gradient"],
+.ai-studio-container button[style*="background: rgb(79, 70, 229)"],
+.ai-studio-container button[style*="background: rgb(99, 102, 241)"],
+.ai-studio-container button[style*="background: rgb(16, 185, 129)"] {
+  color: var(--on-accent) !important;
+}
+.brand-identity-dialog { box-shadow: var(--shadow-lg) !important; }
+.studio-artwork-preview {
+  --ink: #ffffff;
+  --studio-secondary: #cbd5e1;
+  --muted: #94a3b8;
+  --surface2: rgba(15, 23, 42, .8);
+}
