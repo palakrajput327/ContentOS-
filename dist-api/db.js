@@ -78,22 +78,24 @@ poolConfig.keepAliveInitialDelayMillis = 5000;
 // Determine SSL configuration flexibly
 const isExplicitlyDisabled = rawConnectionString ? /sslmode=disable|ssl=false/i.test(rawConnectionString) : false;
 const isExplicitlyRequired = rawConnectionString ? /sslmode=(require|verify-ca|verify-full|prefer)|ssl=true/i.test(rawConnectionString) : false;
-
 let useSsl = false;
 if (isExplicitlyDisabled) {
-  useSsl = false;
-} else if (isExplicitlyRequired) {
-  useSsl = true;
-} else if (!localDatabase) {
-  // Remote cloud database (e.g. Neon, AWS RDS, Supabase) requires SSL
-  useSsl = true;
-} else if (process.env.PGSSL === "true" || process.env.DATABASE_SSL === "true") {
-  useSsl = true;
-} else {
-  // Local cPanel PostgreSQL (127.0.0.1 / localhost) does not support SSL
-  useSsl = false;
+    useSsl = false;
 }
-
+else if (isExplicitlyRequired) {
+    useSsl = true;
+}
+else if (!localDatabase) {
+    // Remote cloud database (e.g. Neon, AWS RDS, Supabase) requires SSL
+    useSsl = true;
+}
+else if (process.env.PGSSL === "true" || process.env.DATABASE_SSL === "true") {
+    useSsl = true;
+}
+else {
+    // Local cPanel PostgreSQL (127.0.0.1 / localhost) does not support SSL
+    useSsl = false;
+}
 poolConfig.ssl = useSsl
     ? {
         rejectUnauthorized: false,
