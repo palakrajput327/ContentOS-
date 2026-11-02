@@ -117,3 +117,4 @@ INSERT INTO workspace_trials (
 
 fs.writeFileSync('database_full_setup.sql', sql, 'utf8');
 console.log('Successfully generated database_full_setup.sql! Size:', fs.statSync('database_full_setup.sql').size, 'bytes');
+
