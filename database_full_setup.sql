@@ -1025,6 +1025,16 @@ INSERT INTO schema_migrations (name, applied_at)
 VALUES ('027_document_brand_identity.sql', now())
 ON CONFLICT (name) DO NOTHING;
 
+-- --------------------------------------------------------------------
+-- Migration: 028_visual_concept_captions.sql
+-- --------------------------------------------------------------------
+-- Migration 028: Add rich caption column to document_visual_concepts
+ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS caption text;
+
+INSERT INTO schema_migrations (name, applied_at)
+VALUES ('028_visual_concept_captions.sql', now())
+ON CONFLICT (name) DO NOTHING;
+
 -- ====================================================================
 -- Initial Seed Data: User, Workspace, Membership & Active Subscription
 -- ====================================================================

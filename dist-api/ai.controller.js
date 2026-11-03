@@ -36,7 +36,7 @@ function extractContextualHashtags(title, content, existingHashtags) {
     const uniqueKeywords = [...new Set(keywords)].slice(0, 4);
     const dynamicTags = uniqueKeywords.map(k => `#${k.charAt(0).toUpperCase() + k.slice(1)}`);
     const userTags = existingHashtags ? existingHashtags.split(/\s+/).filter(t => t.startsWith('#')) : [];
-    const allTags = [...new Set([...dynamicTags, ...userTags, '#hindustansoftwaresolution'])];
+    const allTags = [...new Set([...dynamicTags, ...userTags])];
     return allTags.join(' ');
 }
 function generateFallbackCaptions(topic, tone = "Professional", goal = "Engagement", platforms = ["LinkedIn"], brandData) {
@@ -157,7 +157,7 @@ export async function generateCaptions(topic, tone = "Professional", goal = "Eng
                 const enhancedVariants = {};
                 for (const p of platforms) {
                     let text = variantsMap[p] || "";
-                    if (!text.includes("#hindustansoftwaresolution")) {
+                    if (!text.includes("#")) {
                         const tags = extractContextualHashtags(title, text, brandData?.hashtags);
                         text = `${text.trim()}\n\n${tags}`;
                     }

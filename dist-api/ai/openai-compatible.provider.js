@@ -41,7 +41,7 @@ export class OpenAICompatibleProvider {
                     const status = response.status;
                     const errText = await response.text().catch(() => "");
                     console.error(`[LLM Provider Error] ${this.providerName} (${status}):`, errText);
-                    const isQuotaExceeded = /quota|RESOURCE_EXHAUSTED|limit exceeded|per day/i.test(errText);
+                    const isQuotaExceeded = /quota|RESOURCE_EXHAUSTED|limit exceeded|per day|credit_balance_exhausted|insufficient_quota|no credits/i.test(errText);
                     const isRetryable = (status === 429 && !isQuotaExceeded) || (status >= 500 && status !== 501);
                     // If Gemini model hits 429 quota or 404, automatically try next working Gemini model
                     if (this.providerName === "gemini") {

@@ -38,6 +38,7 @@ import {
 import { Button, PlatformIcon, StatusBadge } from "../components/ui";
 import { platforms, type Platform, type Snapshot } from "../lib/model";
 import { data, request, documentsApi, clipdropApi, resolveMediaUrl, type DocItem, type KnowledgeItem, type DocumentBrandIdentity } from "../lib/api";
+import { buildRichCaption, formatCaptionForPlatform } from "../lib/caption-builder";
 import { useSession } from "../lib/session";
 import { PublishPreviewModal } from "../components/PublishPreviewModal";
 import { ClipdropImageModal } from "../components/ClipdropImageModal";
@@ -90,56 +91,43 @@ function formatPostingTimeSlots(rawTime?: string): string {
 export function getPlatformCopyForConcept(
   concept: any,
   platform: string,
-  docName?: string
+  docName?: string,
+  websiteDomain?: string,
+  phone?: string
 ): { caption: string; hashtags: string[] } {
   if (!concept) return { caption: "", hashtags: [] };
-  const title = concept.conceptTitle || concept.title || "Business Strategy & Execution";
-  const rawExcerpt = concept.sourceExcerpt || concept.prompt || "";
-  const excerpt = rawExcerpt.replace(/\s+/g, " ").trim();
-  const cleanDoc = (docName || "Business Document").replace(/\.pdf$/i, "").replace(/[-_]/g, " ");
 
-  // Extract clean keywords for hashtags
-  const topicWords = title
-    .split(/\s+/)
-    .map((w: string) => w.replace(/[^a-zA-Z0-9]/g, ""))
-    .filter((w: string) => w.length > 3);
-  const baseTags = [
-    cleanDoc.split(" ")[0] || "Business",
-    ...topicWords.slice(0, 3),
-    "DueDiligence",
-    "Strategy",
-    "Growth",
-  ];
-  const uniqueTags = Array.from(new Set(baseTags.map((t) => `#${t.charAt(0).toUpperCase() + t.slice(1)}`))).slice(0, 5);
-  const tagString = uniqueTags.join(" ");
+  let baseCaption = concept.caption;
+  const titleL = (concept.conceptTitle || concept.title || "").toLowerCase();
+  const isBoosterTopic = titleL.includes("booster") || titleL.includes("accelerator");
+  const hasRepetitiveBronze = !isBoosterTopic && baseCaption?.includes("Bronze Tier – Begin Your Journey");
+  const hasBrandMismatch =
+    (titleL + " " + (concept.prompt || "")).toLowerCase().includes("tradeorbit") &&
+    baseCaption?.includes("Regulus Liquidity");
 
-  if (platform === "LinkedIn") {
-    return {
-      caption: `Strategic Architecture: ${title}\n\nIn modern enterprise governance, foundational clarity and rigorous verification drive sustainable advantage. Core operational principle from our official strategic roadmap:\n\n"${excerpt || "Rigorous diligence and transparent verification systems establish defensible market leadership."}"\n\nExplore our business frameworks, transparent milestones, and complete operational disclosures at www.redhash.world\n\n${tagString}`,
-      hashtags: uniqueTags,
-    };
-  } else if (platform === "Instagram") {
-    return {
-      caption: `✨ ${title.toUpperCase()}\n\nExecution begins with uncompromising standards. Key strategic insight from our corporate documentation:\n\n📌 "${excerpt || "Continuous diligence and precision governance empower long-term value creation."}"\n\nDrop a comment with your perspective below or tap the link in bio for the complete disclosure.\n\n.\n.\n${tagString} #ExecutiveFocus #EnterpriseExcellence`,
-      hashtags: uniqueTags,
-    };
-  } else if (platform === "Telegram") {
-    return {
-      caption: `📊 **${title}**\n\nOfficial Insight Briefing from **${cleanDoc}**:\n\n> "${excerpt || "Comprehensive platform architecture guarantees transparent, verifiable participation."}"\n\n🔗 Official portal & documentation: https://t.me/hindustan_social_network\n\n${tagString}`,
-      hashtags: uniqueTags,
-    };
-  } else if (platform === "Facebook") {
-    return {
-      caption: `${title}\n\nFoundational diligence and operational transparency remain essential in today's digital economy. Here is a highlighted insight from our verified corporate presentation:\n\n"${excerpt || "Strategic clarity and consistent execution build predictable, high-value outcomes."}"\n\nShare this update with your network and follow our page for daily executive insights!\n\n${tagString}`,
-      hashtags: uniqueTags,
-    };
-  } else {
-    // X (Twitter)
-    return {
-      caption: `${title}: "${excerpt ? (excerpt.length > 130 ? excerpt.slice(0, 127) + "..." : excerpt) : "Foundational diligence drives market resilience."}"\n\n${uniqueTags.slice(0, 3).join(" ")}`,
-      hashtags: uniqueTags.slice(0, 3),
-    };
+  if (
+    !baseCaption ||
+    baseCaption.includes("In modern enterprise governance, foundational clarity") ||
+    hasRepetitiveBronze ||
+    hasBrandMismatch
+  ) {
+    baseCaption = buildRichCaption({
+      title: concept.conceptTitle || concept.title || "Accelerator & Strategic Growth",
+      companyName: concept.documentName || docName,
+      websiteDomain,
+      phoneNumber: phone,
+      excerpt: concept.sourceExcerpt,
+      prompt: concept.prompt,
+      sourcePage: concept.sourcePage || 1,
+    });
   }
+
+  const formatted = formatCaptionForPlatform(baseCaption, platform);
+  const tagMatches = formatted.match(/#[A-Za-z0-9_]+/g) || [];
+  return {
+    caption: formatted,
+    hashtags: Array.from(new Set(tagMatches)),
+  };
 }
 
 export default function AIStudio() {
@@ -773,10 +761,19 @@ export default function AIStudio() {
     }
     setIsPostingLiveNow(true);
     try {
+      const activeCaption =
+        editedDispatchCaptions[activeDispatchConcept.id + '_' + activePreviewPlatform] ??
+        getPlatformCopyForConcept(activeDispatchConcept, activePreviewPlatform, activeDoc?.original_filename, activeBrandIdentity?.websiteDomain).caption;
+
+      const docIdToUse = activeDispatchConcept.document_id || activeDispatchConcept.documentId || selectedDocId;
+
       await request(
-        `/documents/${selectedDocId}/visual-concepts/${activeDispatchConcept.id}/dispatch`,
+        `/documents/${docIdToUse}/visual-concepts/${activeDispatchConcept.id}/dispatch`,
         "POST",
-        { channels: selectedPlatforms.length ? selectedPlatforms : ["LinkedIn", "Instagram", "Facebook", "Telegram"] }
+        {
+          channels: selectedPlatforms.length ? selectedPlatforms : ["LinkedIn", "Instagram", "Facebook", "Telegram"],
+          caption: activeCaption,
+        }
       );
       toast.success("🚀 Post published successfully to live social channels!");
       await Promise.all([
@@ -2048,7 +2045,25 @@ export default function AIStudio() {
                     <div style={{ display: "flex", alignItems: "center", gap: "5px", flexShrink: 0 }}>
                       <button
                         type="button"
-                        onClick={() => setIsEditingDispatchCopy(!isEditingDispatchCopy)}
+                        onClick={async () => {
+                          if (isEditingDispatchCopy && selectedDocId && activeDispatchConcept) {
+                            const newText = editedDispatchCaptions[activeDispatchConcept.id + '_' + activePreviewPlatform];
+                            if (newText) {
+                              const docIdToUse = activeDispatchConcept.document_id || activeDispatchConcept.documentId || selectedDocId;
+                              try {
+                                await request(
+                                  `/documents/${docIdToUse}/visual-concepts/${activeDispatchConcept.id}/caption`,
+                                  "PATCH",
+                                  { caption: newText }
+                                );
+                                toast.success("Caption saved!");
+                              } catch {
+                                // silent
+                              }
+                            }
+                          }
+                          setIsEditingDispatchCopy(!isEditingDispatchCopy);
+                        }}
                         style={{
                           background: isEditingDispatchCopy ? "rgba(99, 102, 241, 0.2)" : "var(--studio-neutral-soft)",
                           border: isEditingDispatchCopy ? "1px solid var(--accent)" : "1px solid var(--studio-neutral-border)",
@@ -2065,7 +2080,7 @@ export default function AIStudio() {
                       >
                         {isEditingDispatchCopy ? (
                           <>
-                            <Check size={11} /> Done
+                            <Check size={11} /> Save Copy
                           </>
                         ) : (
                           <>
@@ -2076,7 +2091,7 @@ export default function AIStudio() {
                       <button
                         type="button"
                         onClick={() => {
-                          const copyData = getPlatformCopyForConcept(activeDispatchConcept, activePreviewPlatform, activeDoc?.original_filename);
+                          const copyData = getPlatformCopyForConcept(activeDispatchConcept, activePreviewPlatform, activeDoc?.original_filename, activeBrandIdentity?.websiteDomain);
                           const textToCopy = editedDispatchCaptions[activeDispatchConcept.id + '_' + activePreviewPlatform] ?? copyData.caption;
                           navigator.clipboard?.writeText(textToCopy);
                           toast.success('Copied ' + activePreviewPlatform + ' caption!');
@@ -2104,10 +2119,10 @@ export default function AIStudio() {
                   {isEditingDispatchCopy ? (
                     <div>
                       <textarea
-                        rows={4}
+                        rows={6}
                         value={
                           editedDispatchCaptions[activeDispatchConcept.id + '_' + activePreviewPlatform] ??
-                          getPlatformCopyForConcept(activeDispatchConcept, activePreviewPlatform, activeDoc?.original_filename).caption
+                          getPlatformCopyForConcept(activeDispatchConcept, activePreviewPlatform, activeDoc?.original_filename, activeBrandIdentity?.websiteDomain).caption
                         }
                         onChange={(e) => {
                           const val = e.target.value;
@@ -2131,12 +2146,12 @@ export default function AIStudio() {
                       />
                       <div style={{ textAlign: "right", fontSize: "0.68rem", color: "var(--color-text-muted)", marginTop: "2px" }}>
                         {(editedDispatchCaptions[activeDispatchConcept.id + '_' + activePreviewPlatform] ??
-                          getPlatformCopyForConcept(activeDispatchConcept, activePreviewPlatform, activeDoc?.original_filename).caption).length} chars
+                          getPlatformCopyForConcept(activeDispatchConcept, activePreviewPlatform, activeDoc?.original_filename, activeBrandIdentity?.websiteDomain).caption).length} chars
                       </div>
                     </div>
                   ) : (
                     <div style={{
-                      maxHeight: "110px",
+                      maxHeight: "160px",
                       overflowY: "auto",
                       paddingRight: "4px",
                     }}>
@@ -2148,7 +2163,7 @@ export default function AIStudio() {
                         whiteSpace: "pre-line",
                       }}>
                         {editedDispatchCaptions[activeDispatchConcept.id + '_' + activePreviewPlatform] ??
-                          getPlatformCopyForConcept(activeDispatchConcept, activePreviewPlatform, activeDoc?.original_filename).caption}
+                          getPlatformCopyForConcept(activeDispatchConcept, activePreviewPlatform, activeDoc?.original_filename, activeBrandIdentity?.websiteDomain).caption}
                       </p>
                     </div>
                   )}

@@ -573,7 +573,7 @@ export class KnowledgeAutomationController {
         dvc.asset_id,
         dvc.image_url,
         dvc.status,
-        COALESCE(dvc.target_channels, '["LinkedIn", "Instagram", "Facebook", "Telegram"]'::jsonb) as target_channels,
+        COALESCE(dvc.target_channels, ARRAY['LinkedIn', 'Instagram', 'Facebook', 'Telegram']::text[]) as target_channels,
         dvc.scheduled_at,
         dvc.dispatched_at,
         dvc.created_at,

@@ -1,10 +1,30 @@
 import { pool } from "../db.js";
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { getStorageProvider } from "../storage/storage.factory.js";
 import { uploadManagedMedia } from "../storage/managed-media.js";
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadImage, GlobalFonts } from "@napi-rs/canvas";
 import type { DB } from "../db.js";
 import { BadRequestException, NotFoundException } from "@nestjs/common";
+
+// Pre-register crisp Latin font to prevent missing glyph boxes ("tofu") across all OS / Linux / cPanel environments
+try {
+  const fontCandidates = [
+    path.resolve(process.cwd(), "server/assets/fonts/arial.ttf"),
+    path.resolve(process.cwd(), "dist-api/assets/fonts/arial.ttf"),
+    path.resolve(process.cwd(), "assets/fonts/arial.ttf"),
+    "C:/Windows/Fonts/arial.ttf",
+  ];
+  for (const fp of fontCandidates) {
+    if (fs.existsSync(fp)) {
+      GlobalFonts.registerFromPath(fp, "BrandSans");
+      break;
+    }
+  }
+} catch {
+  // Graceful fallback to default system fonts
+}
 
 export interface DocumentBrandIdentity {
   documentId: string;
@@ -291,7 +311,7 @@ export class BrandIdentityService {
       try {
         const displayDomain = rawDomain.replace(/^https?:\/\//i, "").replace(/\/$/, "");
         const fontSize = Math.max(16, Math.round(canvasWidth * 0.022));
-        ctx.font = `600 ${fontSize}px sans-serif`;
+        ctx.font = `600 ${fontSize}px BrandSans, Arial, sans-serif`;
 
         const textMetrics = ctx.measureText(displayDomain);
         const textW = textMetrics.width;
@@ -367,7 +387,7 @@ export class BrandIdentityService {
 
         // Draw Clean Domain Text
         ctx.fillStyle = "#ffffff";
-        ctx.font = `600 ${fontSize}px sans-serif`;
+        ctx.font = `600 ${fontSize}px BrandSans, Arial, sans-serif`;
         ctx.textBaseline = "middle";
         ctx.fillText(displayDomain, dotX + dotRadius + 8, dotY);
       } catch (domainErr) {
@@ -389,10 +409,10 @@ export class BrandIdentityService {
   }): Promise<{ imageUrl: string; assetId: string }> {
     const concept = (
       await pool.query(
-        `SELECT id, image_url, raw_image_url, asset_id, raw_asset_id
+        `SELECT id, document_id, image_url, raw_image_url, asset_id, raw_asset_id
          FROM document_visual_concepts
-         WHERE id = $1 AND workspace_id = $2 AND document_id = $3`,
-        [opts.conceptId, opts.workspaceId, opts.documentId],
+         WHERE id = $1 AND workspace_id = $2`,
+        [opts.conceptId, opts.workspaceId],
       )
     ).rows[0];
 
@@ -400,7 +420,8 @@ export class BrandIdentityService {
       throw new Error("Visual concept not found.");
     }
 
-    const brand = await this.getOrCreateBrandIdentity(opts.documentId, opts.workspaceId);
+    const effectiveDocId = concept.document_id || opts.documentId;
+    const brand = await this.getOrCreateBrandIdentity(effectiveDocId, opts.workspaceId);
     this.requireApprovedBrand(brand);
     const sourceImageUrl = concept.raw_image_url || concept.image_url;
 

@@ -39,7 +39,7 @@ function extractContextualHashtags(title: string, content: string, existingHasht
   const dynamicTags = uniqueKeywords.map(k => `#${k.charAt(0).toUpperCase() + k.slice(1)}`);
   
   const userTags = existingHashtags ? existingHashtags.split(/\s+/).filter(t => t.startsWith('#')) : [];
-  const allTags = [...new Set([...dynamicTags, ...userTags, '#hindustansoftwaresolution'])];
+  const allTags = [...new Set([...dynamicTags, ...userTags])];
   return allTags.join(' ');
 }
 
@@ -178,7 +178,7 @@ export async function generateCaptions(
         const enhancedVariants: Record<string, string> = {};
         for (const p of platforms) {
           let text = variantsMap[p] || "";
-          if (!text.includes("#hindustansoftwaresolution")) {
+          if (!text.includes("#")) {
             const tags = extractContextualHashtags(title, text, brandData?.hashtags);
             text = `${text.trim()}\n\n${tags}`;
           }

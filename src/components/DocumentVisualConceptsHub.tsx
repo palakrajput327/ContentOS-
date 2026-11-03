@@ -19,11 +19,13 @@ import {
   Wand2,
   Cpu,
   FileText,
+  Pencil,
   Image as ImageIcon,
 } from "lucide-react";
 import { Button, PlatformIcon } from "./ui";
 import { request, resolveMediaUrl } from "../lib/api";
 import { useWorkspace } from "./Shell";
+import { buildRichCaption, formatCaptionForPlatform } from "../lib/caption-builder";
 
 export interface VisualConceptItem {
   id: string;
@@ -33,6 +35,7 @@ export interface VisualConceptItem {
   sourcePage: number;
   sourceExcerpt: string;
   prompt: string;
+  caption?: string;
   assetId?: string | null;
   imageUrl?: string | null;
   status?: string;
@@ -40,6 +43,32 @@ export interface VisualConceptItem {
   dispatchedAt?: string | null;
   targetChannels?: string[];
   createdAt: string;
+}
+
+function getEffectiveConceptCaption(concept: VisualConceptItem, docName?: string): string {
+  const cap = concept.caption?.trim() || "";
+  const titleL = (concept.conceptTitle || "").toLowerCase();
+  const isBoosterTopic = titleL.includes("booster") || titleL.includes("accelerator");
+  const hasRepetitiveBronze = !isBoosterTopic && cap.includes("Bronze Tier – Begin Your Journey");
+  const hasBrandMismatch =
+    (titleL + " " + (concept.prompt || "")).toLowerCase().includes("tradeorbit") &&
+    cap.includes("Regulus Liquidity");
+
+  if (
+    !cap ||
+    cap.includes("In modern enterprise governance, foundational clarity") ||
+    hasRepetitiveBronze ||
+    hasBrandMismatch
+  ) {
+    return buildRichCaption({
+      title: concept.conceptTitle,
+      companyName: concept.documentName || docName,
+      excerpt: concept.sourceExcerpt,
+      prompt: concept.prompt,
+      sourcePage: concept.sourcePage || 1,
+    });
+  }
+  return cap;
 }
 
 interface DocumentVisualConceptsHubProps {
@@ -133,6 +162,10 @@ export function DocumentVisualConceptsHub({
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
   const [allDispatched, setAllDispatched] = useState<boolean>(false);
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
+  const [editingCaptionId, setEditingCaptionId] = useState<string | null>(null);
+  const [editedCaptions, setEditedCaptions] = useState<Record<string, string>>({});
+  const [copiedCaptionId, setCopiedCaptionId] = useState<string | null>(null);
+  const [expandedCaptions, setExpandedCaptions] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (previewImage) {
@@ -362,8 +395,9 @@ export function DocumentVisualConceptsHub({
     setGeneratingConceptId(concept.id);
     setError(null);
     try {
+      const docId = concept.documentId || documentId;
       const data = await request<{ conceptId: string; assetId: string; imageUrl: string }>(
-        `/documents/${documentId}/visual-concepts/${concept.id}/generate-image`,
+        `/documents/${docId}/visual-concepts/${concept.id}/generate-image`,
         "POST",
         { prompt: concept.prompt, force: true }
       );
@@ -392,16 +426,39 @@ export function DocumentVisualConceptsHub({
     }
   };
 
+  const handleSaveCaption = async (conceptId: string) => {
+    const textToSave = editedCaptions[conceptId];
+    if (textToSave !== undefined) {
+      try {
+        const targetConcept = concepts.find((c) => c.id === conceptId);
+        const docId = targetConcept?.documentId || documentId;
+        await request(`/documents/${docId}/visual-concepts/${conceptId}/caption`, "PATCH", { caption: textToSave });
+        setConcepts((prev) => prev.map((c) => (c.id === conceptId ? { ...c, caption: textToSave } : c)));
+      } catch (err) {
+        console.warn("Failed to save caption:", err);
+      }
+    }
+    setEditingCaptionId(null);
+  };
+
+  const handleCopyCaption = (conceptId: string, captionText: string) => {
+    navigator.clipboard?.writeText(captionText);
+    setCopiedCaptionId(conceptId);
+    setTimeout(() => setCopiedCaptionId(null), 2000);
+  };
+
   // Immediate or automated dispatch of a concept
-  const handleDispatchPost = async (conceptId: string) => {
+  const handleDispatchPost = async (conceptId: string, customCaption?: string) => {
     if (dispatchingConceptId) return;
     setDispatchingConceptId(conceptId);
     setError(null);
     try {
+      const targetConcept = concepts.find((c) => c.id === conceptId);
+      const docId = targetConcept?.documentId || documentId;
       await request(
-        `/documents/${documentId}/visual-concepts/${conceptId}/dispatch`,
+        `/documents/${docId}/visual-concepts/${conceptId}/dispatch`,
         "POST",
-        { channels: selectedChannels }
+        { channels: selectedChannels, caption: customCaption }
       );
 
       // Dynamically remove the dispatched concept from pending view
@@ -1435,6 +1492,171 @@ export function DocumentVisualConceptsHub({
                       "{concept.prompt}"
                     </div>
                   </div>
+
+                  {/* Generated Social Media Caption Preview & Editor */}
+                  <div style={{ marginBottom: "16px" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: "6px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "0.7rem",
+                          fontWeight: 700,
+                          letterSpacing: "0.8px",
+                          textTransform: "uppercase",
+                          color: "var(--accent)",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "5px",
+                        }}
+                      >
+                        <Sparkles size={12} />
+                        Social Media Caption:
+                      </span>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (editingCaptionId === concept.id) {
+                              handleSaveCaption(concept.id);
+                            } else {
+                              setEditingCaptionId(concept.id);
+                              setEditedCaptions((prev) => ({
+                                ...prev,
+                                [concept.id]: prev[concept.id] ?? getEffectiveConceptCaption(concept, documentName),
+                              }));
+                            }
+                          }}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "var(--accent)",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                            padding: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                        >
+                          {editingCaptionId === concept.id ? (
+                            <>
+                              <Check size={11} color="var(--success)" />
+                              <span>Save</span>
+                            </>
+                          ) : (
+                            <>
+                              <Pencil size={11} />
+                              <span>Edit</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cap = editedCaptions[concept.id] ?? getEffectiveConceptCaption(concept, documentName);
+                            handleCopyCaption(concept.id, cap);
+                          }}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: copiedCaptionId === concept.id ? "var(--success)" : "var(--muted)",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                            padding: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                        >
+                          {copiedCaptionId === concept.id ? (
+                            <>
+                              <Check size={11} color="var(--success)" />
+                              <span>Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy size={11} />
+                              <span>Copy</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {editingCaptionId === concept.id ? (
+                      <textarea
+                        rows={6}
+                        value={
+                          editedCaptions[concept.id] ?? getEffectiveConceptCaption(concept, documentName)
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditedCaptions((prev) => ({
+                            ...prev,
+                            [concept.id]: val,
+                          }));
+                        }}
+                        style={{
+                          width: "100%",
+                          fontSize: "0.8rem",
+                          lineHeight: 1.45,
+                          background: "rgba(0, 0, 0, 0.4)",
+                          color: "var(--ink)",
+                          padding: "10px 12px",
+                          borderRadius: "8px",
+                          border: "1px solid rgba(99, 102, 241, 0.4)",
+                          resize: "vertical",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          fontSize: "0.8rem",
+                          color: "var(--ink)",
+                          lineHeight: 1.45,
+                          background: "rgba(0, 0, 0, 0.35)",
+                          padding: "10px 14px",
+                          borderRadius: "8px",
+                          border: "1px solid var(--studio-neutral-soft)",
+                          maxHeight: expandedCaptions[concept.id] ? "none" : "115px",
+                          overflowY: expandedCaptions[concept.id] ? "visible" : "hidden",
+                          position: "relative",
+                          whiteSpace: "pre-line",
+                        }}
+                      >
+                        {editedCaptions[concept.id] ?? getEffectiveConceptCaption(concept, documentName)}
+                        {!expandedCaptions[concept.id] && (
+                          <div
+                            onClick={() => setExpandedCaptions((prev) => ({ ...prev, [concept.id]: true }))}
+                            style={{
+                              position: "absolute",
+                              bottom: 0,
+                              left: 0,
+                              right: 0,
+                              height: "36px",
+                              background: "linear-gradient(to bottom, transparent, rgba(10, 15, 30, 0.95))",
+                              display: "flex",
+                              alignItems: "flex-end",
+                              justifyContent: "center",
+                              paddingBottom: "4px",
+                              cursor: "pointer",
+                              fontSize: "0.72rem",
+                              color: "var(--accent)",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Show full caption...
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Live Image Preview & Actions Area */}
@@ -1538,7 +1760,7 @@ export function DocumentVisualConceptsHub({
 
                     <Button
                       variant="primary"
-                      onClick={() => handleDispatchPost(concept.id)}
+                      onClick={() => handleDispatchPost(concept.id, editedCaptions[concept.id] ?? concept.caption)}
                       disabled={isDispatchingThis || isGeneratingThis}
                       style={{
                         flex: 1.2,

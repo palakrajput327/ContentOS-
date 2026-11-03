@@ -11,7 +11,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
 import { queueBackend } from '../queue-backend.js';
-import { Body, Controller, Delete, Get, Param, Post, Put, Req, Res, NotFoundException, BadRequestException, } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Patch, Req, Res, NotFoundException, BadRequestException, } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { audit, pool, transaction } from "../db.js";
@@ -207,6 +207,19 @@ let DocumentsController = class DocumentsController {
             workspaceId: r.workspace.id,
             userId: r.user.id,
             channels: body?.channels,
+            caption: body?.caption,
+            variants: body?.variants,
+        });
+    }
+    async updateVisualConceptCaption(r, documentId, conceptId, body) {
+        assertPermission(r.workspace.role, "edit");
+        const { VisualConceptsService } = await import("./visual-concepts.service.js");
+        const service = new VisualConceptsService();
+        return service.updateConceptCaption({
+            documentId,
+            conceptId,
+            workspaceId: r.workspace.id,
+            caption: body?.caption || "",
         });
     }
     async syncVisualSchedule(r, documentId, body) {
@@ -599,6 +612,17 @@ __decorate([
     __metadata("design:paramtypes", [Object, String, String, Object]),
     __metadata("design:returntype", Promise)
 ], DocumentsController.prototype, "dispatchVisualConcept", null);
+__decorate([
+    WorkspaceRequired(),
+    Patch(":documentId/visual-concepts/:conceptId/caption"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __param(2, Param("conceptId")),
+    __param(3, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String, Object]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "updateVisualConceptCaption", null);
 __decorate([
     WorkspaceRequired(),
     Post(":documentId/visual-concepts/sync-schedule"),

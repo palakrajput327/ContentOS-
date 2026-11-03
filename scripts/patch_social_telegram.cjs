@@ -169,3 +169,4 @@ if (pub.includes(targetPub2)) {
 
 fs.writeFileSync('server/publishing.ts', pub, 'utf8');
 console.log('All patches applied successfully!');
+

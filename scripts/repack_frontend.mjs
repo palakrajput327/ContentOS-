@@ -1,14 +1,25 @@
 import fs from 'node:fs';
-import { execSync } from 'node:child_process';
+import path from 'node:path';
+import { zipSync } from 'fflate';
 
-if (fs.existsSync('frontend-deploy.zip')) {
-  fs.unlinkSync('frontend-deploy.zip');
+const sourceDir = path.resolve('dist');
+const entries = {};
+
+function walk(current) {
+  for (const item of fs.readdirSync(current, { withFileTypes: true })) {
+    const full = path.join(current, item.name);
+    const rel = path.relative(sourceDir, full).split(path.sep).join('/');
+    if (item.isDirectory()) {
+      walk(full);
+    } else if (item.isFile()) {
+      entries[rel] = fs.readFileSync(full);
+    }
+  }
 }
 
-execSync(
-  `powershell -NoProfile -Command "$ProgressPreference = 'SilentlyContinue'; Compress-Archive -Path 'dist\\*' -DestinationPath 'frontend-deploy.zip' -Force"`,
-  { stdio: 'inherit' }
-);
+walk(sourceDir);
+const zipped = zipSync(entries, { level: 6 });
+fs.writeFileSync('frontend-deploy.zip', zipped);
 
-console.log('Successfully repacked frontend-deploy.zip! Size:', fs.statSync('frontend-deploy.zip').size, 'bytes');
+console.log('Successfully repacked frontend-deploy.zip! Size:', zipped.length, 'bytes, Total files:', Object.keys(entries).length);
 

@@ -44,6 +44,14 @@ if (!tscPath) {
   if (r1.status !== 0 && !fs.existsSync('dist-api/phase-main.js')) process.exit(r1.status || 1);
 }
 
+// Copy server static assets (fonts, templates) and migrations into dist-api
+if (fs.existsSync('server/assets')) {
+  fs.cpSync('server/assets', 'dist-api/assets', { recursive: true });
+}
+if (fs.existsSync('server/migrations')) {
+  fs.cpSync('server/migrations', 'dist-api/migrations', { recursive: true });
+}
+
 // 3. Skip frontend in cloud (Frontend deploys separately to Vercel)
 if (process.env.RENDER || process.env.SKIP_FRONTEND_BUILD === 'true') {
   console.log('[ContentOS] Skipping frontend build in backend cloud environment (Render).');

@@ -7,6 +7,7 @@ import {
   Param,
   Post,
   Put,
+  Patch,
   Req,
   Res,
   NotFoundException,
@@ -278,7 +279,7 @@ export class DocumentsController {
     @Req() r: AuthedRequest,
     @Param("documentId") documentId: string,
     @Param("conceptId") conceptId: string,
-    @Body() body: { channels?: string[] },
+    @Body() body: { channels?: string[]; caption?: string; variants?: Record<string, any> },
   ) {
     assertPermission(r.workspace.role, "schedule");
     const { VisualConceptsService } = await import("./visual-concepts.service.js");
@@ -289,6 +290,27 @@ export class DocumentsController {
       workspaceId: r.workspace.id,
       userId: r.user.id,
       channels: body?.channels,
+      caption: body?.caption,
+      variants: body?.variants,
+    });
+  }
+
+  @WorkspaceRequired()
+  @Patch(":documentId/visual-concepts/:conceptId/caption")
+  async updateVisualConceptCaption(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+    @Param("conceptId") conceptId: string,
+    @Body() body: { caption: string },
+  ) {
+    assertPermission(r.workspace.role, "edit");
+    const { VisualConceptsService } = await import("./visual-concepts.service.js");
+    const service = new VisualConceptsService();
+    return service.updateConceptCaption({
+      documentId,
+      conceptId,
+      workspaceId: r.workspace.id,
+      caption: body?.caption || "",
     });
   }
 
