@@ -22,6 +22,7 @@ async function validateTenant(queue: string, data: any, db: DB) {
       'pdf-processing': ['documents','documentId'],
       'content-generation': ['ai_generations','generationId'],
       'batch-processing': ['batch_jobs','batchId'],
+      'knowledge-automation': ['documents','documentId'],
     };
     const entry = mapping[queue];
     if (!entry || !data.workspaceId) throw new Error('Unsupported queue or missing tenant');

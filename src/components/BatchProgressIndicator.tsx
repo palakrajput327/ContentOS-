@@ -90,7 +90,7 @@ export function BatchProgressIndicator({
   async function handleRetryFailed() {
     try {
       setRetrying(true);
-      await request(`/batch/${batchId}/retry-failed`, "POST");
+      await request(`/batch/${batchId}/retry-failed`, "POST", { confirm: true });
       toast.success("Retrying failed items in batch!");
       await fetchStatus();
     } catch (err: any) {

@@ -167,6 +167,18 @@ export function DocumentVisualConceptsHub({
   const [copiedCaptionId, setCopiedCaptionId] = useState<string | null>(null);
   const [expandedCaptions, setExpandedCaptions] = useState<Record<string, boolean>>({});
 
+  const [loadTimedOut, setLoadTimedOut] = useState<boolean>(false);
+
+  useEffect(() => {
+    let t: any;
+    if (loading && concepts.length === 0) {
+      t = setTimeout(() => setLoadTimedOut(true), 12000);
+    } else {
+      setLoadTimedOut(false);
+    }
+    return () => clearTimeout(t);
+  }, [loading, concepts.length]);
+
   useEffect(() => {
     if (previewImage) {
       document.body.style.overflow = "hidden";
@@ -396,7 +408,7 @@ export function DocumentVisualConceptsHub({
     setError(null);
     try {
       const docId = concept.documentId || documentId;
-      const data = await request<{ conceptId: string; assetId: string; imageUrl: string }>(
+      const data = await request<{ conceptId: string; assetId: string; imageUrl: string; caption?:string }>(
         `/documents/${docId}/visual-concepts/${concept.id}/generate-image`,
         "POST",
         { prompt: concept.prompt, force: true }
@@ -406,7 +418,7 @@ export function DocumentVisualConceptsHub({
       setConcepts((prev) =>
         prev.map((c) =>
           c.id === concept.id
-            ? { ...c, assetId: data.assetId, imageUrl: freshUrl }
+            ? { ...c, assetId: data.assetId, imageUrl: freshUrl, caption:data.caption||c.caption }
             : c
         )
       );
@@ -455,12 +467,13 @@ export function DocumentVisualConceptsHub({
     try {
       const targetConcept = concepts.find((c) => c.id === conceptId);
       const docId = targetConcept?.documentId || documentId;
-      await request(
+      const result=await request<{success:boolean;results?:Array<{error?:string}>}>(
         `/documents/${docId}/visual-concepts/${conceptId}/dispatch`,
         "POST",
         { channels: selectedChannels, caption: customCaption }
       );
 
+      if(!result.success)throw new Error(result.results?.find(r=>r.error)?.error||"Publication not completed. Review the content in Library.");
       // Dynamically remove the dispatched concept from pending view
       setConcepts((prev) => {
         const remaining = prev.filter((c) => c.id !== conceptId);
@@ -1054,6 +1067,32 @@ export function DocumentVisualConceptsHub({
           <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--accent)" }}>
             Connecting to AI Analysis Engine...
           </p>
+          <p style={{ margin: "6px 0 0", fontSize: "0.75rem", color: "var(--muted)" }}>
+            Extracting visual concepts and business knowledge from document...
+          </p>
+          {loadTimedOut && (
+            <div style={{ marginTop: "14px" }}>
+              <p style={{ fontSize: "0.78rem", color: "var(--muted)", margin: "0 0 10px 0" }}>
+                Deep PDF extraction is processing in the background. You can trigger a live check:
+              </p>
+              <button
+                type="button"
+                onClick={() => fetchConcepts(false)}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: "6px",
+                  fontSize: "0.75rem",
+                  fontWeight: 600,
+                  background: "var(--surface2)",
+                  border: "1px solid var(--accent)",
+                  color: "var(--accent)",
+                  cursor: "pointer",
+                }}
+              >
+                Check Concepts Now
+              </button>
+            </div>
+          )}
         </div>
       )}
 

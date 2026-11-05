@@ -3,6 +3,7 @@ import { test, mock } from 'node:test';
 import { Readable } from 'node:stream';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 
+process.env.QUEUE_BACKEND='bullmq'; // This fixture tests the row lease; PostgreSQL lane leases have a real-DB suite.
 let workers = 0, redisClients = 0;
 mock.module('bullmq', { namedExports: {
   Worker: class { constructor() { workers++; } },
@@ -26,6 +27,7 @@ mock.module('../dist-api/db.js', { namedExports: {
     return { rowCount: 1, rows: [{ id: 'document' }] };
   } }), audit: async () => {},
 } });
+mock.module('../dist-api/billing/entitlement.service.js',{namedExports:{assertWorkspaceActive:async()=>({isLocked:false})}});
 const { processPDFDocument } = await import('../dist-api/pdf-processing.js');
 
 test('PDF utility imports do not instantiate workers or Redis clients', () => {

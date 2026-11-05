@@ -1,7 +1,9 @@
+import { googleAuthClient,googleAuthConfigured } from "./google-auth.js";
 import {
   Body,
   Controller,
   Get,
+  Query,
   Post,
   Req,
   Res,
@@ -17,6 +19,8 @@ import { z } from "zod";
 import { pool, transaction, type DB } from "./db.js";
 import {
   hash,
+  encryptToken,
+  decryptToken,
   hashPassword,
   verifyPassword,
   Public,
@@ -45,7 +49,10 @@ const registration = z
     termsVersion: z.string().default("v1.0"),
     privacyVersion: z.string().default("v1.0"),
   })
-  .passthrough();
+  .passthrough().superRefine((v,ctx)=>{
+    if(v.passwordConfirmation!==undefined && v.password!==v.passwordConfirmation)ctx.addIssue({code:z.ZodIssueCode.custom,path:['passwordConfirmation'],message:'Passwords do not match'});
+    if(v.termsAccepted!==true && v.terms_accepted!==true)ctx.addIssue({code:z.ZodIssueCode.custom,path:['termsAccepted'],message:'Accept the Terms of Service and Privacy Policy.'});
+  });
 const pair = z
   .object({ password, passwordConfirmation: z.string() })
   .refine((v) => v.password === v.passwordConfirmation, {
@@ -109,6 +116,59 @@ function clearCookies(res: Response) {
 }
 @Controller("auth")
 export class PhaseAuthController {
+  @Public() @Get('google/status') googleStatus(){return {enabled:googleAuthConfigured()};}
+  @Public() @Post('google/start') async googleStart(@Body() input:unknown,@Res({passthrough:true}) res:Response){
+    z.object({termsAccepted:z.literal(true)}).parse(input);
+    const client=googleAuthClient();
+    const state=randomBytes(32).toString('base64url'),nonce=randomBytes(32).toString('base64url');
+    const {codeVerifier,codeChallenge}=await client.generateCodeVerifierAsync();
+    await pool.query("DELETE FROM auth_oauth_states WHERE expires_at<now()");
+    await pool.query("INSERT INTO auth_oauth_states(state,nonce,verifier_ciphertext,terms_accepted,expires_at) VALUES($1,$2,$3,true,now()+interval '10 minutes')",[hash(state),nonce,encryptToken(codeVerifier,'google:'+hash(state))]);
+    res.cookie('contentos_google_state',state,{httpOnly:true,secure:process.env.APP_ENV==='production',sameSite:'lax',path:'/api/v1/auth/google',maxAge:600000});
+    const url=client.generateAuthUrl({scope:['openid','email','profile'],state,nonce,code_challenge:codeChallenge,code_challenge_method:'S256' as any,prompt:'select_account'});
+    return {url};
+  }
+  @Public() @Get('google/callback') async googleCallback(@Req() req:AuthedRequest,@Res() res:Response,@Query() query:Record<string,string>){
+    const frontend=new URL('/signup',process.env.APP_URL||'http://localhost:5173');
+    const stateCookie=req.cookies?.contentos_google_state;
+    res.clearCookie('contentos_google_state',{path:'/api/v1/auth/google',httpOnly:true,secure:process.env.APP_ENV==='production',sameSite:'lax'});
+    try{
+      if(query.error || !query.code || !query.state || typeof stateCookie!=='string' || query.state.length>128 || hash(query.state)!==hash(stateCookie)) throw new UnauthorizedException('Invalid Google state');
+      const record=(await pool.query('DELETE FROM auth_oauth_states WHERE state=$1 AND expires_at>now() RETURNING *',[hash(query.state)])).rows[0];
+      if(!record?.terms_accepted || !record.nonce || !record.verifier_ciphertext)throw new UnauthorizedException('Expired Google state');
+      const client=googleAuthClient();
+      const {tokens}=await client.getToken({code:query.code,codeVerifier:decryptToken(record.verifier_ciphertext,'google:'+hash(query.state))});
+      if(!tokens.id_token)throw new UnauthorizedException('Missing Google identity');
+      const ticket=await client.verifyIdToken({idToken:tokens.id_token,audience:process.env.GOOGLE_AUTH_CLIENT_ID});
+      const identity=ticket.getPayload();
+      if(!identity?.sub || !identity.email || identity.email_verified!==true || (identity as any).nonce!==record.nonce)throw new UnauthorizedException('Invalid Google identity');
+      const verifiedEmail=email.parse(identity.email);
+      const result=await transaction(async db=>{
+        await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,32032))',[verifiedEmail]);
+        let user=(await db.query('SELECT * FROM users WHERE google_id=$1 FOR UPDATE',[identity.sub])).rows[0];
+        if(!user){
+          const existing=(await db.query('SELECT id FROM users WHERE email=$1',[verifiedEmail])).rows[0];
+          if(existing)throw new ConflictException('Use email login for the existing account; Google is not linked.');
+          const id=randomUUID();
+          const randomPassword=await hashPassword(randomBytes(48).toString('base64url'));
+          user=(await db.query("INSERT INTO users(id,email,name,password_hash,email_verified_at,terms_accepted_at,terms_version,google_id,avatar_url) VALUES($1,$2,$3,$4,now(),now(),'v1.0',$5,$6) RETURNING *",[id,verifiedEmail,(identity.name||verifiedEmail.split('@')[0]).slice(0,100),randomPassword,identity.sub,identity.picture||null])).rows[0];
+          await db.query("INSERT INTO user_consents(id,user_id,terms_version,privacy_version,ip_address,source) VALUES($1,$2,'v1.0','v1.0',$3,'google_signup')",[randomUUID(),id,req.ip||null]);
+          await authEvent(db,id,'USER_REGISTERED',req.requestId);
+        }
+        const session=await newSession(db,user.id);
+        await authEvent(db,user.id,'USER_LOGIN',req.requestId);
+        return {id:user.id,session};
+      });
+      await workspaceForUser(result.id);
+      setCookies(res,result.session);
+      return res.redirect(new URL('/app',frontend).toString());
+    }catch(error){
+      const code=error instanceof ConflictException?'existing_account':error instanceof ForbiddenException?'inactive_account':'google_failed';
+      frontend.searchParams.set('googleError',code);
+      return res.redirect(frontend.toString());
+    }
+  }
+
   @Public() @Post(["register", "signup"]) async register(
     @Body() input: unknown,
     @Req() req: AuthedRequest,

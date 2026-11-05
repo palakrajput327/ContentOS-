@@ -88,7 +88,7 @@ const isExplicitlyDisabled = rawConnectionString ? /sslmode=disable|ssl=false/i.
 const isExplicitlyRequired = rawConnectionString ? /sslmode=(require|verify-ca|verify-full|prefer)|ssl=true/i.test(rawConnectionString) : false;
 
 let useSsl = false;
-if (isExplicitlyDisabled) {
+if (localDatabase || isExplicitlyDisabled) {
   useSsl = false;
 } else if (isExplicitlyRequired) {
   useSsl = true;

@@ -37,7 +37,7 @@ export async function migrate(options: {only?:string;list?:boolean} = {}) {
       await client.query("BEGIN");
       try {
         await client.query(await readFile(`${dir}/${f}`, "utf8"));
-        await client.query("INSERT INTO schema_migrations(name) VALUES($1)", [
+        await client.query("INSERT INTO schema_migrations(name) VALUES($1) ON CONFLICT(name) DO NOTHING", [
           f,
         ]);
         await client.query("COMMIT");

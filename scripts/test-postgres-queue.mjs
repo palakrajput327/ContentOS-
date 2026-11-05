@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
-import { spawn } from 'node:child_process';
+import { spawn,execFile } from 'node:child_process';
+import {promisify} from 'node:util';
 import EmbeddedPostgres from 'embedded-postgres';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 
@@ -38,6 +39,7 @@ async function publication({state='PENDING',status='SCHEDULED',version=1,jobVers
   const content=randomUUID(),schedule=randomUUID();
   await pool.query(`INSERT INTO content(id,workspace_id,title,body,platforms,status,version,created_by,updated_by)
     VALUES($1,$2,'Queue fixture','Publishing fixture','["Telegram"]',$3,$4,$5,$5)`,[content,ids.ws,status,version,ids.user]);
+  await pool.query('UPDATE content SET approved_by=$2 WHERE id=$1',[content,ids.user]);
   await pool.query(`INSERT INTO scheduled_posts(id,workspace_id,content_id,account_id,content_version,execute_at,timezone,state)
     VALUES($1,$2,$3,$4,$5,$6,'UTC',$7)`,[schedule,ids.ws,content,ids.account,jobVersion,when,state]);
   return {content,schedule};
@@ -47,7 +49,7 @@ async function enqueuePublish(record){return queue.enqueue('social-publishing','
 before(async()=>{
   const port=await freePort();
   cluster=new EmbeddedPostgres({databaseDir:join(testDir,'database'),port,user:'queue_test',password:'local-test-only',
-    persistent:true,createPostgresUser:false,postgresFlags:['-h','127.0.0.1'],onLog:()=>{},onError:()=>{}});
+    persistent:true,createPostgresUser:false,initdbFlags:['--encoding=UTF8','--locale=C'],postgresFlags:['-h','127.0.0.1'],onLog:()=>{},onError:()=>{}});
   await cluster.initialise();await cluster.start();await cluster.createDatabase('contentos_queue_test');
   Object.assign(process.env,{
     DATABASE_URL:`postgresql://queue_test:local-test-only@127.0.0.1:${port}/contentos_queue_test`,QUEUE_BACKEND:'postgres',
@@ -68,6 +70,7 @@ before(async()=>{
     VALUES($1,'queue-user@example.test','Fixture',$2,now(),now(),'ACTIVE')`,[ids.user,await hashPassword('Fixture-password-123')]);
   for(const ws of [ids.ws,ids.other]){
     await pool.query(`INSERT INTO workspaces(id,name,timezone,require_approval) VALUES($1,'Fixture','UTC',true)`,[ws]);
+    await pool.query("INSERT INTO workspace_subscriptions(id,workspace_id,status,custom_daily_limit) VALUES($1,$2,'ADMIN_GRANTED',50)",[randomUUID(),ws]);
     await pool.query(`INSERT INTO workspace_members(workspace_id,user_id,role) VALUES($1,$2,'Owner')`,[ws,ids.user]);
   }
   await pool.query(`INSERT INTO social_accounts(id,workspace_id,platform,provider_id,name,state)
@@ -81,7 +84,7 @@ before(async()=>{
 after(async()=>{
   if(app)await app.close();
   if(pool)await pool.end();
-  if(cluster)await cluster.stop();
+  if(cluster){if(process.platform==='win32'){const {pg_ctl}=await import('@embedded-postgres/windows-x64');await promisify(execFile)(pg_ctl,['-D',join(testDir,'database'),'-m','immediate','-w','stop'],{timeout:15000});cluster.process=undefined;}else await cluster.stop();}
   process.chdir(originalCwd);
   // This unique test directory contains only artifacts created by this suite.
   assert.ok(testDir.startsWith(tmpdir()));await rm(testDir,{recursive:true,force:true});

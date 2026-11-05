@@ -1,3 +1,4 @@
+import { assertWorkspaceActive } from "../billing/entitlement.service.js";
 import { queueBackend } from '../queue-backend.js';
 import { randomUUID, createHash } from "node:crypto";
 import { pool, audit } from "../db.js";
@@ -15,6 +16,7 @@ export class KnowledgeService {
      * Process asynchronous knowledge extraction for a queued document_knowledge generation
      */
     async processKnowledgeExtraction(generationId, documentId, workspaceId) {
+        await assertWorkspaceActive(workspaceId, "knowledge extraction");
         console.log(`[KnowledgeService] Starting extraction for generation ${generationId}, document ${documentId}`);
         // 1. Fetch document & chunks with workspace isolation
         const docRes = await pool.query("SELECT id, original_filename, status FROM documents WHERE id = $1 AND workspace_id = $2", [documentId, workspaceId]);
@@ -187,6 +189,12 @@ export class KnowledgeService {
             // Ensure document status is set to READY
             await pool.query("UPDATE documents SET status = 'READY', processing_completed_at = NOW() WHERE id = $1", [documentId]);
             await audit(pool, workspaceId, null, "KNOWLEDGE_EXTRACTION_COMPLETED", "ai_generation", generationId, doc.original_filename, null, { factCount });
+            const automation = (await pool.query("SELECT enabled,autopilot_enabled FROM knowledge_automation_settings WHERE workspace_id=$1", [workspaceId])).rows[0];
+            if (factCount > 0 && automation?.enabled && automation.autopilot_enabled) {
+                await pool.query('UPDATE knowledge_automation_settings SET next_run_at=now() WHERE workspace_id=$1', [workspaceId]);
+                const { createQueue } = await import('../queues.js');
+                await createQueue('knowledge-automation').add('plan', { workspaceId, documentId }, { jobId: 'document-ready-' + documentId, attempts: 3, backoff: { type: 'exponential', delay: 60000 } });
+            }
             console.log(`[KnowledgeService] Successfully extracted ${factCount} facts for document ${documentId}`);
         }
         catch (err) {

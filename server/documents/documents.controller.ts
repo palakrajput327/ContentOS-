@@ -1,3 +1,4 @@
+import { assertWorkspaceActive } from "../billing/entitlement.service.js";
 import { queueBackend } from '../queue-backend.js';
 import {
   Body,
@@ -44,6 +45,7 @@ export class DocumentsController {
   @Post()
   async createDocument(@Req() r: AuthedRequest, @Body() input: unknown) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const v = createDocumentSchema.parse(input);
     const w = r.workspace.id;
 
@@ -87,6 +89,9 @@ export class DocumentsController {
         ],
       );
 
+      // An authorized upload starts the existing PDF pipeline; an explicit pause is preserved.
+      if(['Owner','Admin'].includes(r.workspace.role))await db.query(
+        "INSERT INTO knowledge_automation_settings(workspace_id,actor_id,enabled,autopilot_enabled,horizon_days,cooldown_days,platforms,poster_style) VALUES($1,$2,true,true,14,90,'[\"LinkedIn\",\"Instagram\",\"Facebook\",\"Telegram\",\"X\"]'::jsonb,'AI_POSTER') ON CONFLICT(workspace_id) DO NOTHING",[w,r.user.id]);
       await pdfProcessingQueue.add(
         "extract",
         {
@@ -116,7 +121,7 @@ export class DocumentsController {
     });
 
     // Proactively start PDF extraction immediately
-    import("../pdf-processing.js")
+    if (queueBackend() !== 'postgres') import("../pdf-processing.js")
       .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
       .catch((err) => console.warn(`[PDF Immediate Trigger] For ${documentId}:`, err?.message || err));
 
@@ -247,6 +252,7 @@ export class DocumentsController {
   @Post(":documentId/visual-concepts/regenerate")
   async regenerateVisualConcepts(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const { VisualConceptsService } = await import("./visual-concepts.service.js");
     const service = new VisualConceptsService();
     return service.regenerateConcepts(documentId, r.workspace.id);
@@ -261,6 +267,7 @@ export class DocumentsController {
     @Body() body: { prompt?: string; force?: boolean },
   ) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const { VisualConceptsService } = await import("./visual-concepts.service.js");
     const service = new VisualConceptsService();
     return service.generateConceptVisual({
@@ -304,6 +311,7 @@ export class DocumentsController {
     @Body() body: { caption: string },
   ) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const { VisualConceptsService } = await import("./visual-concepts.service.js");
     const service = new VisualConceptsService();
     return service.updateConceptCaption({
@@ -349,6 +357,7 @@ export class DocumentsController {
     @Body() body: any,
   ) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const { BrandIdentityService } = await import("./brand-identity.service.js");
     const service = new BrandIdentityService();
     const updated = await service.updateBrandIdentity(documentId, r.workspace.id, body || {});
@@ -378,6 +387,7 @@ export class DocumentsController {
     @Body() body: { dataUrl: string; filename?: string },
   ) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     if (!body?.dataUrl || !body.dataUrl.includes(",")) {
       throw new BadRequestException("Valid base64 dataUrl is required for logo upload.");
     }
@@ -406,6 +416,7 @@ export class DocumentsController {
     @Param("documentId") documentId: string,
   ) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const { BrandIdentityService } = await import("./brand-identity.service.js");
     const service = new BrandIdentityService();
     return service.recomposeAllDocumentPosters(documentId, r.workspace.id, r.user.id);
@@ -485,6 +496,7 @@ export class DocumentsController {
   @Post(":documentId/reprocess")
   async reprocessDocument(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const w = r.workspace.id;
 
     const docRes = await pool.query(
@@ -538,6 +550,7 @@ export class DocumentsController {
   @Post(":documentId/fast-track")
   async fastTrackDocument(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const w = r.workspace.id;
 
     const docRes = await pool.query(
@@ -660,6 +673,7 @@ export class DocumentsController {
   @Delete(":documentId")
   async deleteDocument(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const w = r.workspace.id;
 
     const docRes = await pool.query(

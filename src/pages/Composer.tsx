@@ -507,7 +507,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
           const res = await request<{ success: boolean; status?: string; error?: string; providerPostId?: string; videoId?: string; url?: string }>(
             `/content/${saved.id}/publish`,
             "POST",
-            { socialAccountId: acc.id },
+            { socialAccountId: acc.id, manualPublish: true },
           );
           if (res.success === true && (res.providerPostId || res.videoId)) {
             publishResults.push({ platform: p, accountName: acc.name, success: true, status:'success', providerPostId:res.providerPostId || res.videoId, url:res.url });
@@ -621,14 +621,15 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         youtube: ytPayload || undefined,
       });
 
-      // 2. Transition if approval required and user has approval permissions
+      // 2. If workspace requires approval, auto-approve before scheduling
+      //    (manual schedule by an authorized user = self-approved, same as Publish Now)
       const canApprove = ["Owner", "Admin", "Approver"].includes(s.workspace.role);
       if (s.workspace.requireApproval && canApprove) {
         try {
           await data.transition(saved.id, "review");
           await data.transition(saved.id, "approve");
         } catch {
-          // ignore if already approved
+          // already in NEEDS_REVIEW or APPROVED — continue to schedule
         }
       }
 
@@ -1351,9 +1352,10 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         brandCta={s?.brand?.cta}
         onAttach={(result) => {
           if (visualTarget !== 'shared') {
-            setVariants(prev=>({...prev,[visualTarget]:{...prev[visualTarget],mediaType:'image',mediaAssetId:result.assetId,mediaUrl:result.url}}));
+            setVariants(prev=>({...prev,[visualTarget]:{...prev[visualTarget],...(result.caption?{caption:result.caption}:{}),mediaType:'image',mediaAssetId:result.assetId,mediaUrl:result.url}}));
             return;
           }
+          if(result.caption)setBody(result.caption);
           setMediaUrl(result.url);
           setMediaAssetId(result.assetId);
           setPostType("image");

@@ -117,7 +117,7 @@ let KnowledgeAutomationController = class KnowledgeAutomationController {
             accounts: accounts.rows,
             canManage: ["Owner", "Admin"].includes(r.workspace.role),
             canEdit: ["Owner", "Admin", "Content Manager", "Editor"].includes(r.workspace.role),
-            mode: "REVIEW",
+            mode: settings.rows[0]?.autopilot_enabled ? "AUTOPILOT" : "REVIEW",
         };
     }
     async settings(r, input) {

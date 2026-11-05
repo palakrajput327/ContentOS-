@@ -7,6 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+import { assertWorkspaceActive } from "./billing/entitlement.service.js";
 import { loadEnvFile } from "node:process";
 try {
     loadEnvFile(".env");
@@ -74,6 +75,10 @@ let PhaseGuard = class PhaseGuard {
             if (!m.rowCount)
                 throw new ForbiddenException("Workspace access denied.");
             r.workspace = { id: wid, role: m.rows[0].role };
+            const protectedPath = /^\/api\/v1\/(content|ai|clipdrop|documents|instagram-studio|calendar|knowledge|batch)(\/|$)/.test(r.path);
+            const safeAction = r.method === 'DELETE' || /\/(cancel|reject)$/.test(r.path);
+            if (protectedPath && !['GET', 'HEAD', 'OPTIONS'].includes(r.method) && !safeAction)
+                await assertWorkspaceActive(wid, 'this operation');
         }
         return true;
     }
@@ -104,6 +109,14 @@ let ErrorFilter = class ErrorFilter {
         }
         else if (e instanceof MetaGraphError) {
             status = e.status && e.status >= 400 && e.status < 600 ? e.status : 400;
+            message = e.message;
+        }
+        else if (e?.code === '23505') {
+            status = 409;
+            message = 'The request conflicts with an existing record or publication.';
+        }
+        else if (e?.code === '23514') {
+            status = 409;
             message = e.message;
         }
         else {
@@ -183,6 +196,7 @@ import { FestivalController } from "./calendar/festival.controller.js";
 import { NotificationsController } from "./notifications/notifications.controller.js";
 import { CommentsController } from "./comments/comments.controller.js";
 import { ClipdropController } from "./clipdrop/clipdrop.controller.js";
+import { InstagramStudioController } from "./creative/instagram-studio.controller.js";
 import { ClipdropService } from "./clipdrop/clipdrop.service.js";
 import { BillingController } from "./billing/billing.controller.js";
 let PhaseModule = class PhaseModule {
@@ -212,6 +226,7 @@ PhaseModule = __decorate([
             NotificationsController,
             CommentsController,
             ClipdropController,
+            InstagramStudioController,
         ],
         providers: [AdminGuard, { provide: APP_GUARD, useClass: PhaseGuard }, ClipdropService],
     })
@@ -386,7 +401,29 @@ export async function bootstrap() {
         port: rawPort,
     }));
     // Built-in Auto-Scheduler Loop: Checks every 30s for due posts and publishes automatically
+    // Reuse the leased durable worker lane in API-only PostgreSQL deployments.
+    const backgroundStop = new AbortController();
+    let backgroundRun;
+    const backgroundTimer = setInterval(() => {
+        if (config.APP_ENV === 'test' || backgroundRun)
+            return;
+        backgroundRun = (async () => {
+            const { queueBackend } = await import('./queue-backend.js');
+            if (queueBackend() !== 'postgres')
+                return;
+            const { postgresQueue } = await import('./queues.js');
+            const { runCron } = await import('./cron-runtime.js');
+            const { prepareCron } = await import('./cron-tasks.js');
+            const { executeCronJob } = await import('./cron-job.js');
+            await runCron(postgresQueue, { lane: 'background', budgetMs: 20000,
+                signal: backgroundStop.signal, prepare: () => prepareCron('background'),
+                handle: executeCronJob });
+        })().catch(error => console.warn('[ContentOS] Background processing:', error.message))
+            .finally(() => { backgroundRun = undefined; });
+    }, 5000);
     const autoPublishInterval = setInterval(async () => {
+        if (config.APP_ENV === 'test')
+            return;
         try {
             const { relayScheduledPosts } = await import("./cron-tasks.js");
             await relayScheduledPosts(pool);
@@ -408,7 +445,7 @@ export async function bootstrap() {
             // Auto-dispatch due visual concepts from Document Knowledge Base / AI Studio
             try {
                 const dueConcepts = (await pool.query(`SELECT dvc.id, dvc.document_id, dvc.workspace_id, dvc.target_channels, 
-                  COALESCE(d.created_by, (SELECT id FROM users LIMIT 1)) as user_id
+                  COALESCE((SELECT m.user_id FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE m.workspace_id=dvc.workspace_id AND m.role='Owner' AND u.account_status='ACTIVE' LIMIT 1),d.created_by) as user_id
            FROM document_visual_concepts dvc
            LEFT JOIN documents d ON d.id = dvc.document_id
            WHERE dvc.scheduled_at IS NOT NULL 
@@ -442,7 +479,9 @@ export async function bootstrap() {
         }
     }, 30000);
     // Immediate check on startup for overdue posts
-    setTimeout(async () => {
+    const startupPublishTimer = setTimeout(async () => {
+        if (config.APP_ENV === 'test')
+            return;
         try {
             const duePosts = (await pool.query(`SELECT id FROM scheduled_posts 
          WHERE state = 'ENQUEUED' AND execute_at <= NOW()
@@ -494,6 +533,9 @@ export async function bootstrap() {
         }
     }, 3000);
     let closing = false;
+    const originalClose = app.close.bind(app);
+    app.close = async () => { clearInterval(backgroundTimer); backgroundStop.abort(); if (backgroundRun)
+        await backgroundRun; clearInterval(autoPublishInterval); clearTimeout(startupPublishTimer); return originalClose(); };
     const close = async () => {
         if (closing)
             return;

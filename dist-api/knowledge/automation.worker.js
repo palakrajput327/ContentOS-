@@ -13,7 +13,13 @@ await knowledgeAutomationQueue.upsertJobScheduler("knowledge-planner", { every: 
     data: {},
     opts: { removeOnComplete: true, removeOnFail: 100 },
 });
-export const knowledgeAutomationWorker = new Worker("knowledge-automation", async () => {
+export const knowledgeAutomationWorker = new Worker("knowledge-automation", async (job) => {
+    if (job.data.workspaceId && job.data.documentId) {
+        const document = await pool.query('SELECT id FROM documents WHERE id=$1 AND workspace_id=$2', [job.data.documentId, job.data.workspaceId]);
+        if (!document.rowCount)
+            throw new Error('Queue document tenant mismatch');
+        return new KnowledgeAutomationService().run(job.data.workspaceId, 3, job.data.documentId);
+    }
     const workspaces = (await pool.query("SELECT workspace_id FROM knowledge_automation_settings WHERE enabled=true AND next_run_at<=now() ORDER BY next_run_at LIMIT 10")).rows;
     for (const workspace of workspaces) {
         // SQL leases protect individual topics even if multiple processes run this worker.

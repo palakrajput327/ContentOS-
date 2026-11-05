@@ -83,6 +83,14 @@ export default function Admin() {
   const [filter, setFilter] = useState("");
   const [page, setPage] = useState(1);
   const [mobile, setMobile] = useState(false);
+  const [decision,setDecision]=useState<{id:string;action:'verify'|'reject'}|null>(null);
+  const [decisionNote,setDecisionNote]=useState('');
+  const [actionBusy,setActionBusy]=useState(false);
+  const [subscriptionAction,setSubscriptionAction]=useState('activate');
+  const [subscriptionPlan,setSubscriptionPlan]=useState('GROWTH');
+  const [subscriptionDays,setSubscriptionDays]=useState(5);
+  const [subscriptionLimit,setSubscriptionLimit]=useState('');
+  const [subscriptionExpiry,setSubscriptionExpiry]=useState('');
   const [selected, setSelected] = useState<any>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
@@ -189,26 +197,19 @@ export default function Admin() {
   }
 
   // Payment approval actions
-  async function handleVerifyPayment(paymentId: string) {
-    try {
-      await request(`/admin/payments/${paymentId}/verify`, "POST", { note: "Approved in Super Admin console" });
-      toast.success("Payment verified! Subscription activated.");
-      query.refetch();
-    } catch (err: any) {
-      toast.error("Verification failed", { description: err.message });
-    }
+  function handleVerifyPayment(id:string){setDecisionNote('');setDecision({id,action:'verify'});}
+  function handleRejectPayment(id:string){setDecisionNote('');setDecision({id,action:'reject'});}
+  async function applyDecision(){
+    if(!decision)return;
+    setActionBusy(true);
+    try{await request('/admin/payments/'+decision.id+'/'+decision.action,'POST',decision.action==='verify'?{note:decisionNote}:{reason:decisionNote});toast.success('Request '+(decision.action==='verify'?'approved':'rejected'));setDecision(null);query.refetch();}
+    catch(e:any){toast.error(e.message);}finally{setActionBusy(false);}
   }
-
-  async function handleRejectPayment(paymentId: string) {
-    const reason = prompt("Enter reason for rejecting this payment:");
-    if (!reason) return;
-    try {
-      await request(`/admin/payments/${paymentId}/reject`, "POST", { reason });
-      toast.success("Payment rejected");
-      query.refetch();
-    } catch (err: any) {
-      toast.error("Action failed", { description: err.message });
-    }
+  async function applySubscription(){
+    if(!selected || !decisionNote.trim())return;
+    setActionBusy(true);
+    try{if(subscriptionAction==='cancel'||subscriptionAction==='edit'){await request('/admin/subscriptions/'+selected.id,'PATCH',subscriptionAction==='cancel'?{cancelAtPeriodEnd:true,adminOverrideNote:decisionNote}:{customDailyLimit:subscriptionLimit?Number(subscriptionLimit):null,...(subscriptionExpiry?{currentPeriodEnd:new Date(subscriptionExpiry).toISOString()}:{}),adminOverrideNote:decisionNote});}else await request('/admin/subscriptions/'+selected.id+'/'+subscriptionAction,'POST',subscriptionAction==='activate'?{planCode:subscriptionPlan,billingPeriod:selected.billingPeriod,note:decisionNote}:subscriptionAction==='extend'?{days:subscriptionDays,reason:decisionNote}:{reason:decisionNote});toast.success('Subscription updated');setSelected(null);query.refetch();}
+    catch(e:any){toast.error(e.message);}finally{setActionBusy(false);}
   }
 
   async function handleSavePlan(e: React.FormEvent) {
@@ -297,6 +298,7 @@ export default function Admin() {
       (r: any) =>
         paged || JSON.stringify(r).toLowerCase().includes(search.toLowerCase()),
     )
+    .filter((r:any)=>section!=="subscriptions" || !filter || r.status===filter)
     .filter(
       (r: any) =>
         section !== "users" ||
@@ -714,7 +716,7 @@ export default function Admin() {
                               <td>
                                 <button
                                   type="button"
-                                  onClick={() => setSelected(s)}
+                                  onClick={() => {setDecisionNote("");setSubscriptionPlan(s.planCode);setSubscriptionLimit(s.customDailyLimit?.toString()||'');setSubscriptionExpiry('');setSelected(s);}}
                                   style={{
                                     padding: "5px 10px",
                                     borderRadius: "6px",
@@ -754,7 +756,7 @@ export default function Admin() {
                     >
                       <option value="">All payment statuses</option>
                       <option value="PENDING">PENDING (Action required)</option>
-                      <option value="VERIFIED">VERIFIED</option>
+                      <option value="VERIFIED">VERIFIED</option><option value="APPROVED">APPROVED (simulated)</option>
                       <option value="REJECTED">REJECTED</option>
                     </select>
                     <small>{records.length} requests</small>
@@ -801,8 +803,8 @@ export default function Admin() {
                                 </code>
                               </td>
                               <td>
-                                <Badge variant={p.status === "VERIFIED" ? "success" : p.status === "PENDING" ? "warning" : "danger"}>
-                                  {p.status}
+                                <Badge variant={(p.status === "VERIFIED" || p.status === "APPROVED") ? "success" : p.status === "PENDING" ? "warning" : "danger"}>
+                                  {p.status}{p.isSimulated ? " · Simulated" : ""}
                                 </Badge>
                               </td>
                               <td>{date(p.createdAt)}</td>
@@ -1150,6 +1152,29 @@ export default function Admin() {
               )}
             </>
           )}
+
+          {decision && <ModalFrame open onClose={()=>!actionBusy&&setDecision(null)} title="Review purchase request">
+            <h2>{decision.action==='verify'?'Approve':'Reject'} request</h2>
+            <p>{data?.payments?.find((p:any)=>p.id===decision.id)?.workspaceName} · {data?.payments?.find((p:any)=>p.id===decision.id)?.planName} · {data?.payments?.find((p:any)=>p.id===decision.id)?.billingPeriod}</p>
+            <p>{data?.payments?.find((p:any)=>p.id===decision.id)?.isSimulated?'Simulated request: grants access only. No financial transaction is verified.':'Manual payment: approve only after verifying the transfer.'}</p>
+            <label>Reason / review note<textarea value={decisionNote} onChange={e=>setDecisionNote(e.target.value)} maxLength={500}/></label>
+            <Button disabled={actionBusy || !decisionNote.trim()} onClick={applyDecision}>Confirm {decision.action==='verify'?'approval':'rejection'}</Button>
+            <Button variant="secondary" disabled={actionBusy} onClick={()=>setDecision(null)}>Cancel</Button>
+          </ModalFrame>}
+          {selected && <ModalFrame open onClose={()=>!actionBusy&&setSelected(null)} title="Manage subscription">
+            <h2>{selected.workspaceName}</h2><p>{selected.ownerEmail} · {selected.status} · {selected.planName}</p>
+            <p>Started {date(selected.startAt)} · Ends {date(selected.currentPeriodEnd)} · {selected.daysRemaining ?? 'Unlimited'} days remaining</p>
+            <p>Today: {selected.postsUsedToday} successful · {selected.postsReservedToday} reserved · {selected.postsRemainingToday} remaining / {selected.dailyPostingLimit}</p>
+            <p>Publishing: {selected.diagnostics?.pending || 0} pending · {selected.diagnostics?.failed || 0} failed · {selected.diagnostics?.uncertain || 0} uncertain · {selected.diagnostics?.blocked || 0} blocked by subscription</p>
+            <p>AI generation records: {selected.aiGenerations || 0}</p>
+            <label>Action<select value={subscriptionAction} onChange={e=>setSubscriptionAction(e.target.value)}><option value="activate">Activate / renew / change plan</option><option value="extend">Extend trial or subscription</option><option value="suspend">Suspend access</option><option value="edit">Edit expiry & quota override</option><option value="cancel">Cancel at period end</option></select></label>
+            {subscriptionAction==='activate' && <label>Plan<select value={subscriptionPlan} onChange={e=>setSubscriptionPlan(e.target.value)}><option value="STARTER">Starter · ₹15,000 · 3/day</option><option value="GROWTH">Growth · ₹25,000 · 5/day</option><option value="SCALE">Scale · ₹50,000 · 10/day</option></select></label>}
+            {subscriptionAction==='extend' && <label>Additional days<input type="number" min={1} max={365} value={subscriptionDays} onChange={e=>setSubscriptionDays(Number(e.target.value))}/></label>}
+            {subscriptionAction==='edit' && <><label>Daily limit override (blank uses plan)<input type="number" min={1} max={50} value={subscriptionLimit} onChange={e=>setSubscriptionLimit(e.target.value)}/></label><label>New expiry (optional)<input type="datetime-local" value={subscriptionExpiry} onChange={e=>setSubscriptionExpiry(e.target.value)}/></label></>}
+            <label>Reason<textarea value={decisionNote} onChange={e=>setDecisionNote(e.target.value)} maxLength={500}/></label>
+            <p>Confirming applies this change to the workspace and all its members.</p>
+            <Button disabled={actionBusy || !decisionNote.trim()} onClick={applySubscription}>Confirm change</Button><Button variant="secondary" disabled={actionBusy} onClick={()=>setSelected(null)}>Cancel</Button>
+          </ModalFrame>}
 
           {/* User Detail Modal */}
           {selectedUserId && (

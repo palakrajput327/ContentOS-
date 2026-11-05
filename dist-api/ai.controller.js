@@ -10,7 +10,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
-import { Body, Controller, Post, Req, BadRequestException, } from "@nestjs/common";
+import { Body, Controller, Post, Req, BadRequestException, NotFoundException, } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { pool, audit, transaction } from "./db.js";
@@ -45,6 +45,10 @@ function generateFallbackCaptions(topic, tone = "Professional", goal = "Engageme
     if (cleanContent.startsWith("{")) {
         try {
             const parsed = JSON.parse(cleanContent);
+            if (parsed.imagePrompt) {
+                cleanTitle = String(parsed.imagePrompt).replace(/^(create|generate|draw)\s+(an?\s+)?(image|poster|picture)\s+(of\s+)?/i, '').slice(0, 100);
+                cleanContent = parsed.captionAngle === 'Conversation' ? 'What stands out to you about ' + cleanTitle + '?' : parsed.captionAngle === 'Benefit' ? 'A fresh perspective on ' + cleanTitle + '. Save this idea for your next creative project.' : 'A moment inspired by ' + cleanTitle + '. Small details can tell a memorable story.';
+            }
             if (parsed.knowledge) {
                 cleanTitle = String(parsed.knowledge).replace(/^"|"$/g, "").slice(0, 100).trim();
                 cleanContent = (parsed.evidence?.[0]?.excerpt || cleanTitle) + "\n\n" + (cleanTitle !== parsed.evidence?.[0]?.excerpt ? cleanTitle : "");
@@ -176,6 +180,11 @@ export async function generateCaptions(topic, tone = "Professional", goal = "Eng
     return generateFallbackCaptions(topic, tone, goal, platforms, brandData);
 }
 let AIController = class AIController {
+    async imageCaptions(r, input) {
+        assertPermission(r.workspace.role, 'edit');
+        const v = z.object({ assetId: z.string().uuid(), platform: platformSchema.default('Instagram'), prompt: z.string().trim().max(15000).optional() }).parse(input);
+        return generateImageCaptions(r.workspace.id, r.user.id, v.assetId, v.platform, v.prompt);
+    }
     async captions(r, input) {
         assertPermission(r.workspace.role, "edit");
         await assertWorkspaceActive(r.workspace.id, "AI generation");
@@ -203,6 +212,14 @@ let AIController = class AIController {
     }
 };
 __decorate([
+    Post('image-captions'),
+    __param(0, Req()),
+    __param(1, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], AIController.prototype, "imageCaptions", null);
+__decorate([
     Post("captions"),
     __param(0, Req()),
     __param(1, Body()),
@@ -215,3 +232,23 @@ AIController = __decorate([
     Controller("ai")
 ], AIController);
 export { AIController };
+/** Reuse the caption provider after an owned image exists; no image-recognition claims. */
+export async function generateImageCaptions(workspaceId, userId, assetId, platform, prompt) {
+    await assertWorkspaceActive(workspaceId, 'image captions');
+    const asset = (await pool.query("SELECT metadata FROM media_assets WHERE id=$1 AND workspace_id=$2 AND deleted_at IS NULL AND status='COMPLETED'", [assetId, workspaceId])).rows[0];
+    if (!asset)
+        throw new NotFoundException('Image not found in this workspace.');
+    const imagePrompt = String(asset.metadata?.prompt || prompt || '').trim();
+    if (imagePrompt.length < 5)
+        throw new BadRequestException('An image prompt is required for relevant captions.');
+    const brand = (await pool.query('SELECT data FROM brand_kits WHERE workspace_id=$1', [workspaceId])).rows[0]?.data || {};
+    const options = [];
+    for (const angle of ['Story', 'Benefit', 'Conversation']) {
+        const brief = JSON.stringify({ imagePrompt, captionAngle: angle, instructions: "Write a natural prompt-inspired caption with topic-specific hashtags. Never repeat rendering instructions or claim image recognition. Use a distinct opening and structure." });
+        const result = await generateCaptions(brief, brand.tone || 'Professional', angle === 'Conversation' ? 'Ask a relevant question' : angle === 'Benefit' ? 'Explain one practical benefit' : 'Tell a short engaging story', [platform], brand);
+        const caption = result.variants[platform];
+        options.push({ label: angle, caption, hashtags: Array.from(new Set(caption.match(/#[\p{L}\p{N}_]+/gu) || [])) });
+    }
+    await pool.query('INSERT INTO ai_generations(id,workspace_id,actor_id,provider,input,output) VALUES($1,$2,$3,$4,$5,$6)', [randomUUID(), workspaceId, userId, process.env.LLM_PROVIDER || 'openai-compatible', JSON.stringify({ assetId, imagePrompt, platform, kind: 'image_captions' }), JSON.stringify({ options })]);
+    return { assetId, platform, options };
+}

@@ -1,4 +1,6 @@
-import { pool } from "../db.js";
+import { PLATFORM_CAPABILITIES } from "../platform-capabilities.js";
+import { assertWorkspaceActive } from "../billing/entitlement.service.js";
+import { pool, transaction } from "../db.js";
 import { getLLMProvider } from "../ai/llm.service.js";
 import { ClipdropService } from "../clipdrop/clipdrop.service.js";
 import { randomUUID } from "node:crypto";
@@ -113,6 +115,7 @@ export class VisualConceptsService {
      * Forces fresh regeneration of visual concepts directly from document content using Gemini
      */
     async regenerateConcepts(documentId, workspaceId) {
+        await assertWorkspaceActive(workspaceId, "visual concept generation");
         // 1. Fetch document knowledge
         const kRes = await pool.query(`SELECT id, knowledge_key, value, source_excerpt, page_start
        FROM document_knowledge
@@ -395,6 +398,7 @@ Return JSON with "concepts" array.`;
      * Generates a 1024x1024 visual via FLUX.1 for a specific concept
      */
     async generateConceptVisual(opts) {
+        await assertWorkspaceActive(opts.workspaceId, "visual content");
         const row = (await pool.query(`SELECT id, document_id, concept_title, prompt FROM document_visual_concepts WHERE id = $1 AND workspace_id = $2`, [opts.conceptId, opts.workspaceId])).rows[0];
         if (!row) {
             throw new Error("Visual concept not found.");
@@ -426,12 +430,22 @@ Return JSON with "concepts" array.`;
         const branded = await brandService.brandGeneratedImage({ documentId: effectiveDocId, workspaceId: opts.workspaceId, userId: opts.userId, assetId: result.assetId, url: result.url });
         finalAssetId = branded.assetId;
         finalImageUrl = branded.url;
+        let generatedCaption;
+        try {
+            const { generateImageCaptions } = await import('../ai.controller.js');
+            const copy = await generateImageCaptions(opts.workspaceId, opts.userId, rawAssetId, 'Instagram', promptToUse);
+            generatedCaption = copy.options[0]?.caption;
+        }
+        catch (e) {
+            console.warn('[VisualConcepts] Image retained; caption generation can be retried');
+        }
         // Save both final (branded) poster and raw (pure AI artwork) to concept row
         await pool.query(`UPDATE document_visual_concepts
-       SET asset_id = $1, image_url = $2, raw_asset_id = $3, raw_image_url = $4, prompt = $5, updated_at = NOW()
-       WHERE id = $6`, [finalAssetId, finalImageUrl, rawAssetId, rawImageUrl, promptToUse, opts.conceptId]);
+       SET asset_id = $1, image_url = $2, raw_asset_id = $3, raw_image_url = $4, prompt = $5, caption=COALESCE($7,caption), updated_at = NOW()
+       WHERE id = $6`, [finalAssetId, finalImageUrl, rawAssetId, rawImageUrl, promptToUse, opts.conceptId, generatedCaption || null]);
         return {
             conceptId: opts.conceptId,
+            caption: generatedCaption,
             assetId: finalAssetId,
             imageUrl: finalImageUrl,
         };
@@ -490,7 +504,7 @@ Return JSON with "concepts" array.`;
         const dispatchedAt = new Date().toISOString();
         const channels = Array.isArray(opts.channels) && opts.channels.length > 0 ? opts.channels : ["linkedin"];
         // Fetch connected accounts for this workspace
-        const accountsRes = await pool.query(`SELECT id, platform, name FROM social_accounts WHERE workspace_id = $1 AND state = 'CONNECTED'`, [opts.workspaceId]);
+        const accountsRes = await pool.query(`SELECT id, platform, name FROM social_accounts WHERE workspace_id = $1 AND lower(state) = 'connected'`, [opts.workspaceId]);
         const connectedAccounts = accountsRes.rows;
         // Resolve high-converting structured caption with website, phone, highlights & hashtags
         let caption = (opts.caption && opts.caption.trim()) || (row.caption && row.caption.trim());
@@ -522,63 +536,42 @@ Return JSON with "concepts" array.`;
                 mediaUrl: row.image_url,
             };
         }
-        // Create content item with status = 'SCHEDULED' so claim() can claim it
-        const contentId = randomUUID();
-        await pool.query(`INSERT INTO content (id, workspace_id, created_by, updated_by, title, body, variants, platforms, status, image_asset_id, created_at, updated_at)
-       VALUES ($1, $2, $3, $3, $4, $5, $6, $7, 'SCHEDULED', $8, NOW(), NOW())`, [
-            contentId,
-            opts.workspaceId,
-            opts.userId,
-            row.concept_title,
-            caption,
-            JSON.stringify(variants),
-            JSON.stringify(channels),
-            row.asset_id || null,
-        ]);
-        // Create content_versions record
-        await pool.query(`INSERT INTO content_versions (id, workspace_id, content_id, version, snapshot, created_by, created_at)
-       VALUES ($1, $2, $3, 1, $4, $5, NOW())`, [
-            randomUUID(),
-            opts.workspaceId,
-            contentId,
-            JSON.stringify({ title: row.concept_title, body: caption, variants, platforms: channels }),
-            opts.userId,
-        ]);
-        // Create scheduled_posts for each connected matching account and publish live!
-        const publishResults = [];
-        let publishedCount = 0;
+        const prepared = await transaction(async (db) => {
+            const concept = (await db.query("SELECT content_id FROM document_visual_concepts WHERE id=$1 AND workspace_id=$2 FOR UPDATE", [opts.conceptId, opts.workspaceId])).rows[0];
+            if (!concept)
+                throw new Error("Visual concept not found.");
+            if (concept.content_id && (await db.query("SELECT id FROM content WHERE id=$1 AND workspace_id=$2", [concept.content_id, opts.workspaceId])).rowCount)
+                return concept.content_id;
+            const id = randomUUID();
+            await db.query("INSERT INTO content(id,workspace_id,created_by,updated_by,title,body,variants,platforms,status,image_asset_id) VALUES($1,$2,$3,$3,$4,$5,$6,$7,'DRAFT',$8)", [id, opts.workspaceId, opts.userId, row.concept_title, caption, JSON.stringify(variants), JSON.stringify(channels.map(ch => Object.keys(PLATFORM_CAPABILITIES).find(p => p.toLowerCase() === ch.toLowerCase()) || ch)), row.asset_id || null]);
+            await db.query("INSERT INTO content_versions(id,workspace_id,content_id,version,snapshot,created_by) SELECT $1,workspace_id,id,version,to_jsonb(content),$2 FROM content WHERE id=$3", [randomUUID(), opts.userId, id]);
+            await db.query("UPDATE document_visual_concepts SET content_id=$1 WHERE id=$2 AND workspace_id=$3", [id, opts.conceptId, opts.workspaceId]);
+            return id;
+        });
+        const results = [];
+        const { publishContentNow } = await import("../publishing.js");
         for (const ch of channels) {
-            const matchedAccount = connectedAccounts.find((a) => a.platform.toLowerCase() === ch.toLowerCase());
-            if (matchedAccount) {
-                const spId = randomUUID();
-                await pool.query(`INSERT INTO scheduled_posts (id, workspace_id, content_id, account_id, content_version, execute_at, timezone, state, created_at)
-           VALUES ($1, $2, $3, $4, 1, NOW() - INTERVAL '5 seconds', 'UTC', 'ENQUEUED', NOW())`, [spId, opts.workspaceId, contentId, matchedAccount.id]);
-                try {
-                    const { executePublishRecord } = await import("../publishing.js");
-                    console.log(`[VisualConcepts] Auto-publishing live to ${matchedAccount.platform} (${matchedAccount.name})...`);
-                    const res = await executePublishRecord(spId, { now: new Date(Date.now() + 10000), attemptsMade: 0, maxAttempts: 3 });
-                    publishResults.push({ platform: matchedAccount.platform, result: res });
-                    if (res.success)
-                        publishedCount++;
-                }
-                catch (pubErr) {
-                    console.warn(`[VisualConcepts] Direct publish error for ${matchedAccount.platform}:`, pubErr?.message || pubErr);
-                    publishResults.push({ platform: matchedAccount.platform, error: pubErr?.message || String(pubErr) });
-                }
+            const account = connectedAccounts.find((a) => a.platform.toLowerCase() === ch.toLowerCase());
+            if (!account) {
+                results.push({ platform: ch, success: false, error: "No healthy account" });
+                continue;
+            }
+            const done = (await pool.query("SELECT 1 FROM scheduled_posts WHERE workspace_id=$1 AND content_id=$2 AND account_id=$3 AND state='PUBLISHED'", [opts.workspaceId, prepared, account.id])).rowCount;
+            if (done) {
+                results.push({ platform: ch, success: true });
+                continue;
+            }
+            try {
+                results.push({ platform: ch, ...await publishContentNow(opts.workspaceId, opts.userId, prepared, account.id) });
+            }
+            catch (e) {
+                results.push({ platform: ch, success: false, error: e.message });
             }
         }
-        // Mark concept as DISPATCHED in database with live publish results
-        await pool.query(`UPDATE document_visual_concepts
-       SET status = 'DISPATCHED', dispatched_at = NOW(), target_channels = $1, post_result = $2::jsonb
-       WHERE id = $3`, [channels, JSON.stringify(publishResults), opts.conceptId]);
-        // Finalize content status
-        await pool.query(`UPDATE content SET status = 'PUBLISHED', updated_at = NOW() WHERE id = $1`, [contentId]);
-        return {
-            success: true,
-            conceptId: opts.conceptId,
-            dispatchedAt,
-            publishedCount,
-        };
+        const publishedCount = results.filter(r => r.success).length;
+        const success = results.length > 0 && publishedCount === results.length;
+        await pool.query("UPDATE document_visual_concepts SET status=CASE WHEN $1 THEN 'DISPATCHED' ELSE status END,dispatched_at=CASE WHEN $1 THEN now() ELSE dispatched_at END,target_channels=$2,post_result=$3::jsonb WHERE id=$4 AND workspace_id=$5", [success, JSON.stringify(channels), JSON.stringify(results), opts.conceptId, opts.workspaceId]);
+        return { success, conceptId: opts.conceptId, dispatchedAt: success ? dispatchedAt : "", publishedCount, contentId: prepared, results };
     }
     /**
      * Syncs and persists automated dispatch slots to the database

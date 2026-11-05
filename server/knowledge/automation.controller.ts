@@ -148,7 +148,7 @@ export class KnowledgeAutomationController {
       canEdit: ["Owner", "Admin", "Content Manager", "Editor"].includes(
         r.workspace.role,
       ),
-      mode: "REVIEW",
+      mode: settings.rows[0]?.autopilot_enabled ? "AUTOPILOT" : "REVIEW",
     };
   }
   @Patch("settings") async settings(

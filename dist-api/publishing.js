@@ -1,3 +1,7 @@
+import { assertWorkspaceActive, getWorkspaceEntitlement } from "./billing/entitlement.service.js";
+import { assertPublicationApproved } from "./publishing-policy.js";
+import { assertPermission } from "./security.js";
+import { ConflictException, NotFoundException } from "@nestjs/common";
 import { SocialProviderRegistry } from './social.provider.js';
 import { randomUUID } from "node:crypto";
 import { pool, transaction, audit } from "./db.js";
@@ -33,15 +37,9 @@ export async function claim(id, now = new Date()) {
         ])).rows[0];
         if (["CANCELLED", "PUBLISHED", "FAILED", "UNCERTAIN"].includes(job.state))
             return null;
-        const sub = (await db.query("SELECT status, current_period_end FROM workspace_subscriptions WHERE workspace_id = $1", [raw.workspace_id])).rows[0];
-        if (sub &&
-            (sub.status === "SUSPENDED" ||
-                sub.status === "EXPIRED" ||
-                sub.status === "CANCELED" || sub.status === "PAST_DUE" ||
-                (sub.status === "ADMIN_GRANTED" && sub.current_period_end && new Date(sub.current_period_end).getTime() <= now.getTime()) ||
-                (["TRIALING", "ACTIVE"].includes(sub.status) &&
-                    (!sub.current_period_end || new Date(sub.current_period_end).getTime() <= now.getTime())))) {
-            // Do not dispatch post while subscription is expired; preserve scheduled record safely
+        const entitlement = await getWorkspaceEntitlement(raw.workspace_id, db);
+        if (entitlement.isLocked) {
+            await db.query("UPDATE scheduled_posts SET error_code='SUBSCRIPTION_REQUIRED' WHERE id=$1", [id]);
             return null;
         }
         if (content.version !== job.content_version ||
@@ -56,6 +54,15 @@ export async function claim(id, now = new Date()) {
             await db.query("UPDATE scheduled_posts SET state='UNCERTAIN',error_code='INTERRUPTED_ATTEMPT' WHERE id=$1", [id]);
             await aggregate(db, content.id, job.workspace_id, job.content_version);
             await audit(db, job.workspace_id, null, "publishing requires verification", "content", content.id, content.title);
+            return null;
+        }
+        try {
+            await assertPublicationApproved(db, raw.workspace_id, content);
+        }
+        catch (error) {
+            if (!(error instanceof ConflictException))
+                throw error;
+            await db.query("UPDATE scheduled_posts SET error_code='APPROVAL_REQUIRED' WHERE id=$1", [id]);
             return null;
         }
         if (new Date(job.execute_at).getTime() > now.getTime())
@@ -82,12 +89,14 @@ export async function executePublishRecord(id, options) {
     const attemptsMade = options?.attemptsMade ?? 0;
     const maxAttempts = options?.maxAttempts ?? 1;
     const c = await claim(id, now);
-    if (!c)
-        return { success: false, state: "SKIPPED_OR_TERMINAL" };
+    if (!c) {
+        const blocked = (await pool.query("SELECT error_code FROM scheduled_posts WHERE id=$1", [id])).rows[0];
+        return ['SUBSCRIPTION_REQUIRED', 'APPROVAL_REQUIRED'].includes(blocked?.error_code) ? { success: false, state: 'BLOCKED', error: blocked.error_code, retry: true } : { success: false, state: 'SKIPPED_OR_TERMINAL' };
+    }
     const { account, content, job: record } = c;
     if (String(account.platform).toLowerCase() === "youtube") {
-        await publishYouTubeRecord(record, content, account);
-        return { success: true, state: "PUBLISHED" };
+        const result = await publishYouTubeRecord(record, content, account);
+        return { ...result, state: result.success ? "PUBLISHED" : result.status || "FAILED" };
     }
     let providerId;
     let dispatchStarted = false;
@@ -114,9 +123,9 @@ export async function executePublishRecord(id, options) {
                 }
             }
             dispatchStarted = true;
-            const result = await SocialProviderRegistry.getProvider(metaPlatform).publishText(metaPlatform === "telegram" ? { botToken: token, chatId: account.provider_id } : { token, author: account.provider_id }, { destination: account.provider_id, text: plan.caption, mediaUrl: plan.mediaUrl, mediaType: plan.mediaType, metadata: plan.metadata });
-            if (!result.success || !result.providerPostId)
-                throw new ProviderError(result.error || "META_PUBLISH_FAILED", false, Boolean(result.uncertain));
+            const result = await SocialProviderRegistry.getProvider(metaPlatform).publishText(metaPlatform === "telegram" ? { botToken: token, chatId: account.provider_id } : { token, author: account.provider_id }, { destination: account.provider_id, text: plan.caption, mediaUrl: plan.mediaUrl, mediaType: plan.mediaType, metadata: plan.metadata, mediaUrls: plan.metadata?.mediaUrls });
+            if (!result.success || !result.providerPostId || result.providerPostId === "unknown")
+                throw new ProviderError(result.error || "META_PUBLISH_FAILED", false, Boolean(result.uncertain || result.success && (!result.providerPostId || result.providerPostId === "unknown")));
             providerId = result.providerPostId;
         }
         else {
@@ -169,7 +178,8 @@ export async function executePublishRecord(id, options) {
                     `Post "${content.title.slice(0, 50)}" failed to publish on ${account.platform}: ${e.code}`,
                     JSON.stringify({ contentId: content.id, platform: account.platform, error: e.code }),
                 ]);
-                // Notify registered user through Gmail
+                // Optional mail errors must not abort the publication transaction.
+                await db.query("SAVEPOINT publish_mail");
                 try {
                     const userRow = (await db.query(`SELECT u.email, u.name FROM users u
                WHERE u.id = $1 OR u.id IN (
@@ -186,8 +196,10 @@ export async function executePublishRecord(id, options) {
                             layer: "Layer 5: Channel Publishing",
                         });
                     }
+                    await db.query("RELEASE SAVEPOINT publish_mail");
                 }
                 catch (mailErr) {
+                    await db.query("ROLLBACK TO SAVEPOINT publish_mail");
                     console.warn("[Publishing Failure Mail]", mailErr);
                 }
             }
@@ -218,7 +230,8 @@ export async function executePublishRecord(id, options) {
             `Your post "${content.title.slice(0, 50)}" was successfully published on ${account.platform}.`,
             JSON.stringify({ contentId: content.id, platform: account.platform, providerPostId: providerId }),
         ]);
-        // Notify registered user through Gmail
+        // Optional mail errors must not abort the publication transaction.
+        await db.query("SAVEPOINT publish_mail");
         try {
             const userRow = (await db.query(`SELECT u.email, u.name FROM users u
            WHERE u.id = $1 OR u.id IN (
@@ -235,12 +248,50 @@ export async function executePublishRecord(id, options) {
                     layer: "Layer 5: Social Publishing & Channel Dispatch",
                 });
             }
+            await db.query("RELEASE SAVEPOINT publish_mail");
         }
         catch (mailErr) {
+            await db.query("ROLLBACK TO SAVEPOINT publish_mail");
             console.warn("[Publishing Success Mail]", mailErr);
         }
     });
     // Immediately deliver success confirmation email
     import("./mail.js").then((m) => m.deliverEmails({ limit: 5 })).catch(() => { });
     return { success: true, state: "PUBLISHED", providerPostId: providerId };
+}
+/** Prepare durably before providers; direct callers share claims, policy and quota. */
+export async function publishContentNow(wid, userId, contentId, accountId, manualPublish) {
+    const id = await transaction(async (db) => {
+        const member = (await db.query("SELECT role FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", [wid, userId])).rows[0];
+        assertPermission(member?.role, "schedule");
+        await assertWorkspaceActive(wid, "publishing", db);
+        const content = (await db.query("SELECT * FROM content WHERE id=$1 AND workspace_id=$2 FOR UPDATE", [contentId, wid])).rows[0];
+        if (!content)
+            throw new NotFoundException("Content not found in this workspace.");
+        // Manual publish by an authorized user: auto-authorize DRAFT posts (mirrors Autopilot's self-authorization pattern).
+        // NEEDS_REVIEW posts are still blocked — they were explicitly submitted for team review and must go through that flow.
+        if (manualPublish && content.status === 'DRAFT' && !content.approved_by) {
+            await db.query("UPDATE content SET approved_by=$1 WHERE id=$2 AND workspace_id=$3", [userId, contentId, wid]);
+            content.approved_by = userId;
+            await db.query("INSERT INTO approvals(id,workspace_id,content_id,version,actor_id,decision) VALUES($1,$2,$3,$4,$5,'approve')", [randomUUID(), wid, contentId, content.version, userId]);
+        }
+        await assertPublicationApproved(db, wid, content);
+        if (!["DRAFT", "APPROVED", "FAILED", "PUBLISHED"].includes(content.status))
+            throw new ConflictException("Content is not available for direct publishing.");
+        const account = (await db.query("SELECT id FROM social_accounts WHERE id=$1 AND workspace_id=$2 AND lower(state)='connected'", [accountId, wid])).rows[0];
+        if (!account)
+            throw new NotFoundException("Connect a healthy account in this workspace.");
+        const previous = (await db.query("SELECT * FROM scheduled_posts WHERE workspace_id=$1 AND content_id=$2 AND account_id=$3 AND content_version=$4 FOR UPDATE", [wid, contentId, accountId, content.version])).rows[0];
+        if (previous && previous.state !== "FAILED")
+            throw new ConflictException("Publication already exists. Check its outcome before retrying.");
+        const recordId = previous?.id || randomUUID();
+        if (previous)
+            await db.query("UPDATE scheduled_posts SET state='ENQUEUED',execute_at=now(),error_code=NULL WHERE id=$1", [recordId]);
+        else
+            await db.query("INSERT INTO scheduled_posts(id,workspace_id,content_id,account_id,content_version,execute_at,timezone,state) VALUES($1,$2,$3,$4,$5,now(),'UTC','ENQUEUED')", [recordId, wid, contentId, accountId, content.version]);
+        await db.query("UPDATE content SET status='SCHEDULED',updated_by=$3,updated_at=now() WHERE id=$1 AND workspace_id=$2", [contentId, wid, userId]);
+        return recordId;
+    });
+    const result = await executePublishRecord(id);
+    return { ...result, contentId, providerPostId: result.providerPostId };
 }

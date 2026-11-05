@@ -1,3 +1,4 @@
+import { provisionWorkspaceBilling } from "./billing/lifecycle.js";
 import {
   Body,
   Controller,
@@ -57,6 +58,7 @@ export function serializePost(p: Record<string, any>) {
     createdAt: p.created_at,
     scheduledAt: p.scheduled_at,
     timezone: p.timezone,
+    providerPostId: p.provider_post_id || null,
   };
 }
 @Controller()
@@ -71,6 +73,7 @@ export class WorkspaceController {
     validateTimezone(v.timezone);
     const id = randomUUID();
     return transaction(async (db) => {
+      await db.query("SELECT id FROM users WHERE id=$1 FOR UPDATE",[r.user.id]);
       await db.query(
         "INSERT INTO workspaces(id,name,timezone) VALUES($1,$2,$3)",
         [id, v.name, v.timezone],
@@ -94,6 +97,7 @@ export class WorkspaceController {
           }),
         ],
       );
+      await provisionWorkspaceBilling(db,id,r.user.id);
       await audit(db, id, r.user.id, "created", "workspace", id, v.name);
       return { id };
     });
@@ -107,7 +111,12 @@ export class WorkspaceController {
         pool.query("SELECT * FROM workspaces WHERE id=$1", [w]),
         pool.query("SELECT data FROM brand_kits WHERE workspace_id=$1", [w]),
         pool.query(
-          "SELECT c.*,u.name AS creator FROM content c JOIN users u ON u.id=c.created_by WHERE c.workspace_id=$1 ORDER BY c.created_at DESC LIMIT 500",
+          `SELECT c.*, u.name AS creator,
+                  (SELECT sp.provider_post_id FROM scheduled_posts sp WHERE sp.content_id = c.id AND sp.state = 'PUBLISHED' AND sp.provider_post_id IS NOT NULL ORDER BY sp.execute_at DESC LIMIT 1) AS provider_post_id
+           FROM content c
+           JOIN users u ON u.id = c.created_by
+           WHERE c.workspace_id = $1
+           ORDER BY c.created_at DESC LIMIT 500`,
           [w],
         ),
         pool.query(

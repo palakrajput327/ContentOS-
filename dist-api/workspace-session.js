@@ -10,6 +10,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
+import { provisionWorkspaceBilling } from "./billing/lifecycle.js";
 import { Body, Controller, Get, Post, Req, ForbiddenException, } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -37,14 +38,7 @@ export async function workspaceForUser(userId) {
                     hashtags: "",
                 }),
             ]);
-            // Automatic 5-day trial (exact 120 hours) with 3 posts/day allowance
-            const trialEndsAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
-            await db.query(`INSERT INTO workspace_trials(id, workspace_id, started_at, ends_at, status, daily_post_limit)
-         VALUES($1, $2, now(), $3, 'ACTIVE', 3)
-         ON CONFLICT (workspace_id) DO NOTHING`, [randomUUID(), id, trialEndsAt]);
-            await db.query(`INSERT INTO workspace_subscriptions(id, workspace_id, plan_id, billing_period, status, start_at, current_period_end, custom_daily_limit)
-         VALUES($1, $2, (SELECT id FROM subscription_plans WHERE code='STARTER' LIMIT 1), 'MONTHLY', 'TRIALING', now(), $3, 3)
-         ON CONFLICT (workspace_id) DO NOTHING`, [randomUUID(), id, trialEndsAt]);
+            await provisionWorkspaceBilling(db, id, userId);
             await audit(db, id, userId, "created", "workspace", id, name);
         }
         await db.query("UPDATE users SET active_workspace_id=$2 WHERE id=$1", [

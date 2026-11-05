@@ -1,3 +1,4 @@
+import { assertWorkspaceActive } from "./billing/entitlement.service.js";
 import { randomUUID } from "node:crypto";
 import { pool, transaction, audit } from "./db.js";
 import { getStorageProvider } from "./storage/storage.factory.js";
@@ -17,6 +18,7 @@ export async function processPDFDocument(
   workspaceId: string,
   options?: { force?: boolean; skipKnowledge?:boolean },
 ) {
+  await assertWorkspaceActive(workspaceId,"PDF processing");
   if (queueBackend()!=='postgres') return processLockedPDFDocument(documentId,workspaceId,options);
   const key=`pdf:${workspaceId}:${documentId}`,owner=randomUUID();
   const leases=new PostgresQueue(pool);
@@ -243,6 +245,8 @@ async function processLockedPDFDocument(
 
       console.log(`[PDF Worker] Extraction completed successfully for ${documentId}: ${pageCount} pages, ${chunks.length} chunks.`);
 
+      // PostgreSQL already committed one durable extraction job above; never create a second generation.
+      if(queueBackend()==='postgres' || options?.skipKnowledge)return {pageCount,chunkCount:chunks.length};
       // 7. Auto-Extract Knowledge & Facts immediately
       try {
         const generationId = randomUUID();

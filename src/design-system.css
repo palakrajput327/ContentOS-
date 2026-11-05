@@ -251,6 +251,8 @@ select option { background: var(--surface); color: var(--ink); }
 .modal-frame.calendar-dialog { width: min(540px,calc(100vw - 32px)); }
 .modal-frame.calendar-dialog > .panel { padding: 24px; }
 .modal-frame.calendar-dialog > .panel { overflow: auto !important; }
+.modal-frame.bulk-delete-dialog { width: min(640px,calc(100vw - 32px)); display: grid; place-items: center; }
+.modal-frame.bulk-delete-dialog > .panel { padding: 24px 26px !important; border-radius: 18px !important; background: var(--surface) !important; color: var(--ink) !important; border: 1px solid var(--border) !important; }
 .modal-frame.visual-dialog > div { max-height: calc(100dvh - 32px) !important; box-shadow: var(--shadow-lg); border-color: var(--border) !important; }
 .dialog-overlay:has(+ .fullscreen-dialog) { z-index: 70; }
 .dialog-content.fullscreen-dialog { z-index: 71; width: calc(100vw - 24px); height: calc(100dvh - 24px); }
@@ -441,3 +443,13 @@ tbody tr:hover { background: var(--surface2); }
   .spin,.animate-spin { animation: none !important; }
   .page-enter { opacity: 1; transform: none; }
 }
+
+.library-post-menu { position: relative; }
+.library-post-menu summary { display: grid; place-items: center; cursor: pointer; padding: 5px; border-radius: 6px; list-style: none; }
+.library-post-menu summary::-webkit-details-marker { display: none; }
+.library-post-menu summary:hover, .library-post-menu[open] summary { background: var(--surface2); }
+.library-post-menu-items { position: absolute; z-index: 20; inset-inline-end: 0; top: calc(100% + 5px); min-width: 150px; padding: 5px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow); animation: overlay-in .15s ease-out; }
+.library-post-menu-items button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); text-align: start; cursor: pointer; white-space: nowrap; font-size: 0.85rem; }
+.library-post-menu-items button:hover { background: var(--surface2); }
+.library-post-menu-items .library-delete-action { color: var(--danger); font-weight: 500; }
+@media (prefers-reduced-motion: reduce) { .library-post-menu-items { animation: none; } }

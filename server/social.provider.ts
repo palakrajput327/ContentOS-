@@ -38,6 +38,7 @@ export interface PublishTextRequest {
   text: string;
   destination: string;
   mediaUrl?: string;
+  mediaUrls?: string[];
   mediaType?: string;
   metadata?: Record<string, any>;
 }

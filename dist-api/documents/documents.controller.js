@@ -10,6 +10,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
+import { assertWorkspaceActive } from "../billing/entitlement.service.js";
 import { queueBackend } from '../queue-backend.js';
 import { Body, Controller, Delete, Get, Param, Post, Put, Patch, Req, Res, NotFoundException, BadRequestException, } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
@@ -36,6 +37,7 @@ export const createDocumentSchema = z.object({
 let DocumentsController = class DocumentsController {
     async createDocument(r, input) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const v = createDocumentSchema.parse(input);
         const w = r.workspace.id;
         // Verify media asset exists, belongs to active workspace, is COMPLETED and is PDF
@@ -65,6 +67,9 @@ let DocumentsController = class DocumentsController {
                 asset.mime_type,
                 r.user.id,
             ]);
+            // An authorized upload starts the existing PDF pipeline; an explicit pause is preserved.
+            if (['Owner', 'Admin'].includes(r.workspace.role))
+                await db.query("INSERT INTO knowledge_automation_settings(workspace_id,actor_id,enabled,autopilot_enabled,horizon_days,cooldown_days,platforms,poster_style) VALUES($1,$2,true,true,14,90,'[\"LinkedIn\",\"Instagram\",\"Facebook\",\"Telegram\",\"X\"]'::jsonb,'AI_POSTER') ON CONFLICT(workspace_id) DO NOTHING", [w, r.user.id]);
             await pdfProcessingQueue.add("extract", {
                 documentId,
                 workspaceId: w,
@@ -78,9 +83,10 @@ let DocumentsController = class DocumentsController {
             };
         });
         // Proactively start PDF extraction immediately
-        import("../pdf-processing.js")
-            .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
-            .catch((err) => console.warn(`[PDF Immediate Trigger] For ${documentId}:`, err?.message || err));
+        if (queueBackend() !== 'postgres')
+            import("../pdf-processing.js")
+                .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
+                .catch((err) => console.warn(`[PDF Immediate Trigger] For ${documentId}:`, err?.message || err));
         return result;
     }
     async listDocuments(r) {
@@ -180,12 +186,14 @@ let DocumentsController = class DocumentsController {
     }
     async regenerateVisualConcepts(r, documentId) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const { VisualConceptsService } = await import("./visual-concepts.service.js");
         const service = new VisualConceptsService();
         return service.regenerateConcepts(documentId, r.workspace.id);
     }
     async generateConceptVisual(r, documentId, conceptId, body) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const { VisualConceptsService } = await import("./visual-concepts.service.js");
         const service = new VisualConceptsService();
         return service.generateConceptVisual({
@@ -213,6 +221,7 @@ let DocumentsController = class DocumentsController {
     }
     async updateVisualConceptCaption(r, documentId, conceptId, body) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const { VisualConceptsService } = await import("./visual-concepts.service.js");
         const service = new VisualConceptsService();
         return service.updateConceptCaption({
@@ -241,6 +250,7 @@ let DocumentsController = class DocumentsController {
     }
     async updateBrandIdentity(r, documentId, body) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const { BrandIdentityService } = await import("./brand-identity.service.js");
         const service = new BrandIdentityService();
         const updated = await service.updateBrandIdentity(documentId, r.workspace.id, body || {});
@@ -256,6 +266,7 @@ let DocumentsController = class DocumentsController {
     }
     async uploadBrandLogo(r, documentId, body) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         if (!body?.dataUrl || !body.dataUrl.includes(",")) {
             throw new BadRequestException("Valid base64 dataUrl is required for logo upload.");
         }
@@ -277,6 +288,7 @@ let DocumentsController = class DocumentsController {
     }
     async recomposePosters(r, documentId) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const { BrandIdentityService } = await import("./brand-identity.service.js");
         const service = new BrandIdentityService();
         return service.recomposeAllDocumentPosters(documentId, r.workspace.id, r.user.id);
@@ -316,6 +328,7 @@ let DocumentsController = class DocumentsController {
     }
     async reprocessDocument(r, documentId) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const w = r.workspace.id;
         const docRes = await pool.query("SELECT id, original_filename FROM documents WHERE id = $1 AND workspace_id = $2", [documentId, w]);
         if (!docRes.rowCount) {
@@ -340,6 +353,7 @@ let DocumentsController = class DocumentsController {
     }
     async fastTrackDocument(r, documentId) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const w = r.workspace.id;
         const docRes = await pool.query("SELECT id, original_filename, status FROM documents WHERE id = $1 AND workspace_id = $2", [documentId, w]);
         if (!docRes.rowCount) {
@@ -435,6 +449,7 @@ let DocumentsController = class DocumentsController {
     }
     async deleteDocument(r, documentId) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const w = r.workspace.id;
         const docRes = await pool.query("SELECT id, original_filename FROM documents WHERE id = $1 AND workspace_id = $2", [documentId, w]);
         if (!docRes.rowCount) {

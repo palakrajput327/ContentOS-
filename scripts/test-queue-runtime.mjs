@@ -21,6 +21,7 @@ mock.module('../dist-api/db.js', { namedExports: {
   pool: { query: async () => ({ rows: [] }), end: async () => {} },
   transaction: async () => {}, audit: async () => {},
 } });
+process.env.QUEUE_BACKEND = 'bullmq';
 process.env.REDIS_URL = 'redis://127.0.0.1:1';
 const { publishingQueue, redis } = await import('../dist-api/queues.js');
 
@@ -39,7 +40,7 @@ test('mail worker schedules delivery every 10 seconds without extra consumers', 
   let deliveries = 0;
   mock.module('../dist-api/config.js', { namedExports: { loadConfig: () => ({ REDIS_URL: process.env.REDIS_URL }) } });
   mock.module('../dist-api/codes.js', { namedExports: { requireMail() {} } });
-  mock.module('../dist-api/mail.js', { namedExports: { deliverEmails: async () => { deliveries++; } } });
+  mock.module('../dist-api/mail.js', { namedExports: { deliverEmails: async () => { deliveries++; }, queuePublishNotificationEmail: async()=>{} } });
   await import('../dist-api/mail-worker.js');
   const worker = workers.find(w => w.name === 'auth-email-dispatch');
   assert.equal(workers.length, 1);

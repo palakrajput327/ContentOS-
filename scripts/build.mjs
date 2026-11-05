@@ -4,19 +4,11 @@ import fs from 'node:fs';
 
 const cwd = fileURLToPath(new URL('../', import.meta.url));
 
-// 1. If precompiled backend exists and we are in production, cPanel, or missing devDependencies, succeed cleanly
-if (fs.existsSync('dist-api/phase-main.js')) {
-  if (
-    process.env.RENDER ||
-    process.env.NODE_ENV === 'production' ||
-    process.env.APP_ENV === 'production' ||
-    process.env.SKIP_BUILD === '1' ||
-    !fs.existsSync('node_modules/typescript') ||
-    !fs.existsSync('node_modules/vite')
-  ) {
-    console.log('[ContentOS] Precompiled dist-api is ready for deployment. Build step completed.');
-    process.exit(0);
-  }
+// Precompiled-only deployment is explicit; normal builds always verify fresh source.
+if (process.env.SKIP_BUILD === '1') {
+  if (!fs.existsSync('dist-api/phase-main.js') || !fs.existsSync('dist/index.html')) throw Error('Missing precompiled artifacts');
+  console.log('[ContentOS] Explicit precompiled-only deployment; source compilation was not verified.');
+  process.exit(0);
 }
 
 // 2. Otherwise compile Backend API
@@ -37,11 +29,11 @@ try {
 if (!tscPath) {
   console.log('[ContentOS] Running tsc via npx...');
   const r0 = spawnSync('npx', ['tsc', '-p', 'server/tsconfig.json'], { cwd, stdio: 'inherit', shell: true });
-  if (r0.status !== 0 && !fs.existsSync('dist-api/phase-main.js')) process.exit(r0.status || 1);
+  if (r0.status !== 0) process.exit(r0.status || 1);
 } else {
   console.log('[ContentOS] Compiling backend API with:', tscPath);
   const r1 = spawnSync(process.execPath, [tscPath, '-p', 'server/tsconfig.json'], { cwd, stdio: 'inherit' });
-  if (r1.status !== 0 && !fs.existsSync('dist-api/phase-main.js')) process.exit(r1.status || 1);
+  if (r1.status !== 0) process.exit(r1.status || 1);
 }
 
 // Copy server static assets (fonts, templates) and migrations into dist-api

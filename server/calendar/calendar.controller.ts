@@ -1,3 +1,4 @@
+import { requiresPublicationApproval } from "../publishing-policy.js";
 import {
   Controller,
   Get,
@@ -275,10 +276,10 @@ export class CalendarController {
           post.status='APPROVED';
         }
       }
-      const knowledge = (await client.query('SELECT 1 FROM knowledge_content_plans WHERE workspace_id=$1 AND content_id=$2 LIMIT 1',[ws.id,contentId])).rows.length > 0;
       const at = new Date(scheduledAtIso || '');
-      const approvalStatus = post.status === 'SCHEDULED' ? (post.approved_by ? 'APPROVED' : !workspace.require_approval ? 'DRAFT' : post.status) : post.status;
-      validateSchedule(approvalStatus, workspace.require_approval || knowledge, at);
+      const requiresApproval = await requiresPublicationApproval(client, ws.id, post.id);
+      const approvalStatus = post.status === 'SCHEDULED' ? (post.approved_by ? 'APPROVED' : !requiresApproval ? 'DRAFT' : post.status) : post.status;
+      validateSchedule(approvalStatus, requiresApproval, at);
       await assertDailySlot(client,ws.id,post,at);
       const accounts = (await client.query(`SELECT a.id,a.platform FROM social_accounts a JOIN social_account_tokens t ON t.account_id=a.id WHERE a.workspace_id=$1 AND lower(a.platform)=ANY($2) AND lower(a.state)='connected' AND t.ciphertext IS NOT NULL AND (t.expires_at IS NULL OR t.expires_at>now())`,[ws.id,post.platforms.map((p:string)=>p.toLowerCase())])).rows;
       if (!accounts.length || accounts.length !== post.platforms.length) throw new BadRequestException('Connect healthy publishing accounts for every target platform before scheduling.');

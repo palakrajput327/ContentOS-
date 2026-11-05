@@ -47,6 +47,10 @@ import KnowledgeAutomation from './KnowledgeAutomation';
 import { DocumentVisualConceptsHub } from '../components/DocumentVisualConceptsHub';
 import { BrandIdentityModal } from '../components/BrandIdentityModal';
 import { LiveAutoPilotPulse } from '../components/LiveAutoPilotPulse';
+import { instagramStudioApi, type BrandDnaProfile } from "../lib/api";
+import { BrandDnaModal } from "../components/BrandDnaModal";
+import { InstagramCreativeLab } from "../components/InstagramCreativeLab";
+import { InstagramCarouselBuilder } from "../components/InstagramCarouselBuilder";
 import './studio-integration.css';
 import './studio-theme.css';
 
@@ -149,17 +153,38 @@ export default function AIStudio() {
   } | null>(null);
   const [generatedEvidence, setGeneratedEvidence] = useState<any[]>([]);
 
-  // Studio Mode: 'topic' | 'pdf'
+  // Studio Mode: 'topic' | 'pdf' | 'automation' | 'instagram'
   const [studioParams, setStudioParams] = useSearchParams();
-  const activeTab = studioParams.get('tab') === 'automation' ? 'automation' : studioParams.get('tab') === 'pdf' ? 'pdf' : 'topic';
+  const currentTabParam = studioParams.get('tab');
+  const activeTab: 'topic' | 'pdf' | 'automation' | 'instagram' =
+    currentTabParam === 'automation'
+      ? 'automation'
+      : currentTabParam === 'pdf'
+      ? 'pdf'
+      : currentTabParam === 'instagram'
+      ? 'instagram'
+      : 'topic';
   const storedAutoPosts = useQuery({
     queryKey: ["studio-autopilot-posts", s.workspace.id],
     queryFn: () => request<{ plans: any[]; settings?: any; workspace?: any }>("/knowledge-automation"),
-    enabled: !demo && activeTab === "pdf",
+    enabled: !demo && (activeTab === "pdf" || activeTab === "topic"),
     refetchInterval: 15000,
     refetchOnWindowFocus: false,
   });
-  const setActiveTab = (tab: 'topic' | 'pdf' | 'automation') => setStudioParams({tab});
+  const setActiveTab = (tab: 'topic' | 'pdf' | 'automation' | 'instagram') => setStudioParams({tab});
+  const [instagramSubTab, setInstagramSubTab] = useState<'variations' | 'carousel'>('variations');
+  const [carouselTopic, setCarouselTopic] = useState<string>('');
+  const [showBrandDnaModal, setShowBrandDnaModal] = useState<boolean>(false);
+  const [workspaceBrandDna, setWorkspaceBrandDna] = useState<BrandDnaProfile | null>(null);
+
+  useEffect(() => {
+    instagramStudioApi
+      .getBrandDna()
+      .then((res) => {
+        if (res) setWorkspaceBrandDna(res);
+      })
+      .catch((err) => console.warn("[AIStudio] Brand DNA load error:", err));
+  }, []);
 
   const isAutoPilotActive = Boolean(storedAutoPosts.data?.settings?.enabled);
   const dynamicPostingSlot = formatPostingTimeSlots(
@@ -339,8 +364,9 @@ export default function AIStudio() {
 
   // Auto-sync initial active plan into the right-hand preview panel so user sees real AI output
   const initialPlanSyncedRef = useRef(false);
+  useEffect(() => { initialPlanSyncedRef.current = false; }, [s.workspace.id]);
   useEffect(() => {
-    if (activeTab === "pdf" && !initialPlanSyncedRef.current && storedAutoPosts.data?.plans?.length) {
+    if ((activeTab === "pdf" || activeTab === "topic") && !initialPlanSyncedRef.current && storedAutoPosts.data?.plans?.length) {
       const firstWithContent = storedAutoPosts.data.plans.find((p: any) => p.content_id) || storedAutoPosts.data.plans[0];
       if (firstWithContent) {
         initialPlanSyncedRef.current = true;
@@ -576,6 +602,7 @@ export default function AIStudio() {
               url: imgRes.url,
               filename: `${res.headline || generatedTitle}.png`,
             });
+            try{const copy=await request<{options:Array<{caption:string}>}>('/ai/image-captions','POST',{assetId:imgRes.assetId,platform:activePreviewPlatform,prompt:res.prompt});if(copy.options[0] && currentVisualJobIdRef.current===jobId)setGeneratedVariants(prev=>({...prev,[activePreviewPlatform]:copy.options[0].caption}));}catch{toast.info('Image retained. Generate captions from the image editor.');}
             toast.success("✨ Dynamic prompt & fresh visual image generated!");
             return;
           }
@@ -981,6 +1008,7 @@ export default function AIStudio() {
       }));
 
       const res = (await request("/batch/ai-generation", "POST", {
+        confirm: true,
         items: itemsPayload,
       })) as { batchId: string };
 
@@ -1210,10 +1238,139 @@ export default function AIStudio() {
             10 Days
           </span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("instagram")}
+          className={activeTab === 'instagram' ? 'active' : ''}
+          aria-pressed={activeTab === 'instagram'}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "7px",
+            padding: "7px 15px",
+            borderRadius: "7px",
+            border: activeTab === "instagram" ? "1px solid var(--studio-neutral-border)" : "1px solid transparent",
+            background: activeTab === "instagram" ? "var(--studio-neutral-soft)" : "transparent",
+            color: activeTab === "instagram" ? "var(--ink)" : "var(--color-text-muted, var(--muted))",
+            fontWeight: activeTab === "instagram" ? 600 : 500,
+            fontSize: "0.82rem",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            transition: "all 0.15s ease",
+            boxShadow: activeTab === "instagram" ? "0 1px 3px rgba(0, 0, 0, 0.3)" : "none",
+          }}
+        >
+          <Sparkles size={14} style={{ color: "#f97316", opacity: activeTab === "instagram" ? 1 : 0.7 }} />
+          Instagram Studio
+          <span
+            style={{
+              background: activeTab === "instagram" ? "rgba(249, 115, 22, 0.25)" : "var(--studio-neutral-soft)",
+              color: activeTab === "instagram" ? "#f97316" : "var(--color-text-muted, var(--muted))",
+              border: activeTab === "instagram" ? "1px solid rgba(249, 115, 22, 0.4)" : "1px solid var(--studio-neutral-soft)",
+              fontSize: "0.65rem",
+              padding: "1px 6px",
+              borderRadius: "4px",
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.4px",
+            }}
+          >
+            AI Studio
+          </span>
+        </button>
       </div>
 
       {activeTab === 'automation' && <KnowledgeAutomation embedded />}
-      <div className="composer-grid studio-creation-grid" style={{ display: activeTab === 'automation' ? 'none' : "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 420px)", gap: "24px" }}>
+      {activeTab === 'instagram' && (
+        <div style={{ marginTop: "16px" }}>
+          {/* Sub-tab Navigation: Creative Variation Lab vs Carousel Builder */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "4px",
+              borderRadius: "12px",
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              width: "fit-content",
+              marginBottom: "20px",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setInstagramSubTab("variations")}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "8px",
+                fontSize: "0.78rem",
+                fontWeight: 600,
+                border: "none",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                background: instagramSubTab === "variations" ? "#f97316" : "transparent",
+                color: instagramSubTab === "variations" ? "#ffffff" : "var(--muted)",
+                boxShadow: instagramSubTab === "variations" ? "0 2px 8px rgba(249, 115, 22, 0.3)" : "none",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <Sparkles size={13} />
+              <span>Creative Variation Lab (3 Concepts)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setInstagramSubTab("carousel")}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "8px",
+                fontSize: "0.78rem",
+                fontWeight: 600,
+                border: "none",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                background: instagramSubTab === "carousel" ? "#f97316" : "transparent",
+                color: instagramSubTab === "carousel" ? "#ffffff" : "var(--muted)",
+                boxShadow: instagramSubTab === "carousel" ? "0 2px 8px rgba(249, 115, 22, 0.3)" : "none",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <Layers size={13} />
+              <span>AI Carousel Builder (5-10 Slides)</span>
+            </button>
+          </div>
+
+          {instagramSubTab === "variations" ? (
+            <InstagramCreativeLab
+              brandDna={workspaceBrandDna}
+              onOpenBrandModal={() => setShowBrandDnaModal(true)}
+              onBuildCarousel={(conceptTopic, variation) => {
+                setCarouselTopic(conceptTopic || variation?.headline || "");
+                setInstagramSubTab("carousel");
+              }}
+            />
+          ) : (
+            <InstagramCarouselBuilder
+              initialTopic={carouselTopic}
+              brandDna={workspaceBrandDna}
+              onOpenBrandModal={() => setShowBrandDnaModal(true)}
+            />
+          )}
+
+          {/* Brand DNA Modal */}
+          <BrandDnaModal
+            open={showBrandDnaModal}
+            onClose={() => setShowBrandDnaModal(false)}
+            onBrandUpdated={(savedDna: BrandDnaProfile) => setWorkspaceBrandDna(savedDna)}
+          />
+        </div>
+      )}
+
+      <div className="composer-grid studio-creation-grid" style={{ display: activeTab === 'automation' || activeTab === 'instagram' ? 'none' : "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 420px)", gap: "24px" }}>
         {/* Main Creation Column */}
         <section style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           {activeTab === "topic" ? (
@@ -1221,8 +1378,30 @@ export default function AIStudio() {
             <div className="panel" style={{ padding: "24px" }}>
               <h2 style={{ fontSize: "1.15rem", fontWeight: 600, marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
                 <Sparkles size={18} style={{ color: "#6366f1" }} />
-                Describe Your Content Idea
+                Automatic captions & hashtags
               </h2>
+              <p className="muted" style={{ marginBottom: "16px" }}>
+                Upload a PDF in Business knowledge. The system extracts cited facts, creates an image,
+                generates platform captions and hashtags, then schedules posts on connected channels.
+                The latest completed result appears in the preview. Automation continues when this page is closed.
+              </p>
+              {storedAutoPosts.isError && <p role="alert">Unable to load automation results. Please refresh.</p>}
+              <p className="muted" style={{ marginBottom: "16px" }}>
+                Automation: {isAutoPilotActive ? "Active" : "Not active"}. Manage it in Business knowledge.
+                You can also enter a separate content idea below.
+              </p>
+              {!!storedAutoPosts.data?.plans?.length && <label>
+                Automatic post results
+                <select defaultValue="" onChange={event => {
+                  const plan = storedAutoPosts.data?.plans.find(item => item.id === event.target.value);
+                  if (plan) loadPlanIntoStudio(plan);
+                }}>
+                  <option value="" disabled>Select a generated post to preview</option>
+                  {storedAutoPosts.data.plans.map(plan => <option key={plan.id} value={plan.id}>
+                    {plan.title} — {plan.content_status}{plan.scheduled_at ? ` · ${new Date(plan.scheduled_at).toLocaleString()}` : ""}
+                  </option>)}
+                </select>
+              </label>}
               <div className="composer-fields" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                 <label>
                   Topic or Key Idea
@@ -2439,6 +2618,7 @@ export default function AIStudio() {
                   </div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
+                    {attachedVisual?.url && <img src={attachedVisual.url} alt="Generated post visual" style={{ width: "100%", borderRadius: "12px", objectFit: "contain" }} />}
                     <textarea
                       rows={8}
                       value={generatedVariants[activePreviewPlatform] || ""}
@@ -2477,6 +2657,7 @@ export default function AIStudio() {
         }}
         onAttach={async (result) => {
           setAttachedVisual(result);
+          if(result.caption)setGeneratedVariants(prev=>({...prev,[activePreviewPlatform]:result.caption}));
           if (activeScriptIndex !== null) {
             setPosterScripts((prev) =>
               prev.map((s, i) =>

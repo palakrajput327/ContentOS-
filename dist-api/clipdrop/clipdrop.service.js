@@ -4,7 +4,8 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
-import { Injectable, BadRequestException, ServiceUnavailableException, NotFoundException } from "@nestjs/common";
+import { assertWorkspaceActive } from "../billing/entitlement.service.js";
+import { Injectable, ConflictException, BadRequestException, ServiceUnavailableException, NotFoundException } from "@nestjs/common";
 import { randomUUID, createHash } from "node:crypto";
 import * as path from "node:path";
 import { pool, transaction, audit } from "../db.js";
@@ -141,6 +142,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
      * saves as media asset, and links to content draft.
      */
     async generateImage(opts) {
+        await assertWorkspaceActive(opts.workspaceId, "AI image generation");
         const aspectRatio = opts.aspectRatio || "1:1";
         const requestedEngine = process.env.IMAGE_PROVIDER === "openai" ? "openai" : opts.engine || "flux";
         // 1. Intelligent Prompt Optimization & Entity Extraction (ChatGPT / Gemini style)
@@ -497,6 +499,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
      * Background Removal Endpoint (Clipdrop)
      */
     async removeBackground(opts) {
+        await assertWorkspaceActive(opts.workspaceId, "AI image processing");
         const apiKey = this.getApiKey();
         if (!apiKey) {
             throw new BadRequestException("Clipdrop API key is required for background removal.");
@@ -564,10 +567,15 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
      * Saves post with attached visual asset and sets post to NEEDS_REVIEW or DRAFT
      */
     async attachAndSave(opts) {
+        await assertWorkspaceActive(opts.workspaceId, "saving AI content");
         const contentId = opts.contentId || randomUUID();
         const status = opts.status || "NEEDS_REVIEW";
         return transaction(async (db) => {
             const existing = await db.query("SELECT * FROM content WHERE id = $1 AND workspace_id = $2 FOR UPDATE", [contentId, opts.workspaceId]);
+            if (!(await db.query("SELECT id FROM media_assets WHERE id=$1 AND workspace_id=$2 AND status='COMPLETED' AND deleted_at IS NULL", [opts.assetId, opts.workspaceId])).rowCount)
+                throw new NotFoundException('Image not found in workspace.');
+            if (existing.rows[0] && !['DRAFT', 'NEEDS_REVIEW', 'APPROVED'].includes(existing.rows[0].status))
+                throw new ConflictException('Cancel the schedule before changing its image.');
             const variants = {};
             for (const p of opts.platforms) {
                 variants[p] = {
@@ -580,7 +588,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
             let postRow;
             if (existing.rowCount) {
                 postRow = (await db.query(`UPDATE content 
-             SET title = $3, body = $4, variants = $5, platforms = $6, status = $7, updated_by = $8, updated_at = NOW()
+             SET title = $3, body = $4, variants = $5, platforms = $6, status = $7, approved_by=NULL,version=version+1, updated_by = $8, updated_at = NOW()
              WHERE id = $1 AND workspace_id = $2
              RETURNING *`, [
                     contentId,
@@ -627,6 +635,8 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
             if (!res.rowCount)
                 return;
             const post = res.rows[0];
+            if (!["DRAFT", "NEEDS_REVIEW", "APPROVED"].includes(post.status))
+                throw new ConflictException("Cancel the schedule before changing its image.");
             const variants = typeof post.variants === "string" ? JSON.parse(post.variants) : (post.variants || {});
             const platforms = post.platforms || ["LinkedIn"];
             const targetPlatforms = targetPlatform ? [targetPlatform] : platforms;
@@ -640,7 +650,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
                 }
             }
             await db.query(`UPDATE content 
-         SET variants = $3, status = 'NEEDS_REVIEW', updated_by = $4, updated_at = NOW() 
+         SET variants = $3, status = 'NEEDS_REVIEW', approved_by=NULL,version=version+1, updated_by = $4, updated_at = NOW()
          WHERE id = $1 AND workspace_id = $2`, [contentId, workspaceId, JSON.stringify(variants), userId]);
         });
     }

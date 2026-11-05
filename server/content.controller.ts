@@ -1,3 +1,4 @@
+import { requiresPublicationApproval } from "./publishing-policy.js";
 import {
   Get,
   Body,
@@ -48,6 +49,7 @@ import { assertWorkspaceActive } from "./billing/entitlement.service.js";
 
 export const publishSchema = z.object({
   socialAccountId: z.string().uuid("Valid social account ID required"),
+  manualPublish: z.boolean().optional(),
 });
 export const platformSchema = z.enum([
   "LinkedIn",
@@ -155,6 +157,68 @@ export class ContentController {
     ).rows;
     return { publications };
   }
+    @Post("bulk-delete/preview")
+  async getBulkDeletePreview(
+    @Req() r: AuthedRequest,
+    @Body()
+    body: {
+      scope?: "all" | "today" | "custom_range" | "selected_ids";
+      channel?: string;
+      startDate?: string;
+      endDate?: string;
+      postIds?: string[];
+      state?: string;
+      timezone?: string;
+    }
+  ) {
+    assertPermission(r.workspace.role, "schedule");
+    const { PostDeletionService } = await import("./posts/post-deletion.service.js");
+    return PostDeletionService.getDeletionPreview({
+      workspaceId: r.workspace.id,
+      scope: body.scope || "all",
+      channel: body.channel,
+      startDate: body.startDate,
+      endDate: body.endDate,
+      postIds: body.postIds,
+      state: body.state,
+      timezone: body.timezone,
+    });
+  }
+
+  @Post("bulk-delete/execute")
+  async executeBulkDelete(
+    @Req() r: AuthedRequest,
+    @Body()
+    body: {
+      scope?: "all" | "today" | "custom_range" | "selected_ids";
+      channel?: string;
+      startDate?: string;
+      endDate?: string;
+      postIds?: string[];
+      state?: string;
+      timezone?: string;
+      deleteFromPlatform?: boolean;
+      confirm: boolean;
+    }
+  ) {
+    assertPermission(r.workspace.role, "schedule");
+    const { PostDeletionService } = await import("./posts/post-deletion.service.js");
+    return PostDeletionService.executeBulkDeletion({
+      workspaceId: r.workspace.id,
+      userId: r.user.id,
+      role: r.workspace.role,
+      scope: body.scope || "all",
+      channel: body.channel,
+      startDate: body.startDate,
+      endDate: body.endDate,
+      postIds: body.postIds,
+      state: body.state,
+      timezone: body.timezone,
+      deleteFromPlatform: body.deleteFromPlatform ?? true,
+      confirm: body.confirm,
+    });
+  }
+
   @Post(":id/publish")
   async publishContent(
     @Req() r: AuthedRequest,
@@ -162,239 +226,9 @@ export class ContentController {
     @Body() input: unknown,
   ) {
     assertPermission(r.workspace.role, "schedule");
-    await assertWorkspaceActive(r.workspace.id, "publishing content");
     const v = publishSchema.parse(input);
-    const w = r.workspace.id;
-    const target = (
-      await pool.query(
-        "SELECT platform FROM social_accounts WHERE id=$1 AND workspace_id=$2",
-        [v.socialAccountId, w],
-      )
-    ).rows[0];
-    if (String(target?.platform).toLowerCase() === "youtube") {
-      const post = (await pool.query('SELECT * FROM content WHERE id=$1 AND workspace_id=$2',[contentId,w])).rows[0];
-      if (post && !post.youtube) {
-        const variants = typeof post.variants === 'string' ? JSON.parse(post.variants) : post.variants;
-        const key = Object.keys(variants || {}).find(k=>k.toLowerCase()==='youtube');
-        const variant = key ? variants[key] : null;
-        if (variant?.mediaType === 'image')
-          return {success:false,status:'skipped',platform:'youtube',error:'YouTube does not support image-only posts. Attach a video or Short to publish to YouTube.'};
-      }
-      return publishYouTubeNow(w, r.user.id, contentId, v.socialAccountId);
-    }
-
-    const outcome = await transaction(async (db) => {
-      // 1. Lock content row for update to prevent concurrent duplicate publishing
-      const contentRes = await db.query(
-        "SELECT * FROM content WHERE id = $1 AND workspace_id = $2 FOR UPDATE",
-        [contentId, w],
-      );
-
-      if (!contentRes.rowCount) {
-        throw new NotFoundException(
-          "Content item not found in this workspace.",
-        );
-      }
-
-      const content = contentRes.rows[0];
-      if (content.status === "PUBLISHING") {
-        throw new BadRequestException(
-          "This post is currently being published.",
-        );
-      }
-      // Check if already published to this specific social account
-      const alreadyPub = await db.query(
-        "SELECT 1 FROM scheduled_posts WHERE content_id = $1 AND account_id = $2 AND state IN ('PUBLISHED','UNCERTAIN')",
-        [contentId, v.socialAccountId],
-      );
-      if (alreadyPub.rowCount) {
-        throw new BadRequestException(
-          "This account's post is already published or needs verification before retrying.",
-        );
-      }
-
-      // 2. Lock and load social account belonging to same workspace
-      const accRes = await db.query(
-        "SELECT a.*, t.ciphertext FROM social_accounts a JOIN social_account_tokens t ON t.account_id = a.id WHERE a.id = $1 AND a.workspace_id = $2",
-        [v.socialAccountId, w],
-      );
-
-      if (!accRes.rowCount) {
-        throw new ForbiddenException(
-          "Selected social account does not belong to your active workspace.",
-        );
-      }
-
-      const acc = accRes.rows[0];
-      const botToken = decryptToken(acc.ciphertext, w);
-      const provider = SocialProviderRegistry.getProvider(
-        acc.platform as SocialProviderName,
-      );
-
-      // 3. Set content state to PUBLISHING
-      await db.query(
-        "UPDATE content SET status = 'PUBLISHING', updated_at = NOW(), updated_by = $1 WHERE id = $2 AND workspace_id = $3",
-        [r.user.id, contentId, w],
-      );
-
-      await audit(
-        db,
-        w,
-        r.user.id,
-        "publish_started",
-        "content",
-        contentId,
-        content.title || "Untitled Post",
-        null,
-        {
-          platform: acc.platform,
-          socialAccountId: acc.id,
-        },
-      );
-
-      // 4. Extract platform-specific variant caption & media URL
-      let textToPublish = content.body || "";
-      let mediaUrlToPublish: string | undefined = content.media_url || undefined;
-
-      if (content.variants) {
-        try {
-          const variants =
-            typeof content.variants === "string"
-              ? JSON.parse(content.variants)
-              : content.variants;
-          const platformKey = Object.keys(variants).find(
-            (k) => k.toLowerCase() === acc.platform.toLowerCase(),
-          );
-          const variant = platformKey ? variants[platformKey] : null;
-
-          if (variant) {
-            if (typeof variant === "string") {
-              textToPublish = variant;
-            } else if (typeof variant === "object") {
-              if (variant.caption) textToPublish = variant.caption;
-              if (variant.mediaUrl) mediaUrlToPublish = variant.mediaUrl;
-            }
-          }
-        } catch (e) {
-          // Fall back to default content.body
-        }
-      }
-
-      const metaPlatform = String(acc.platform).toLowerCase();
-      const platformName = Object.keys(PLATFORM_CAPABILITIES).find(p=>p.toLowerCase()===metaPlatform) as Platform;
-      const metaPlan = ['facebook','instagram','telegram','linkedin'].includes(metaPlatform)
-        ? await createPublishPlan(db,content,platformName,{isPublishing:true}) : null;
-      // 5. Invoke Provider
-      const result = await provider.publishText(
-        metaPlatform === "telegram"
-          ? { botToken, chatId: acc.provider_id }
-          : { token: botToken, author: acc.provider_id },
-        {
-          text: metaPlan?.caption ?? textToPublish,
-          destination: acc.provider_id,
-          mediaUrl: metaPlan?.mediaUrl ?? mediaUrlToPublish,
-          mediaType: metaPlan?.mediaType,
-          metadata: metaPlan?.metadata,
-        },
-      );
-
-      if (!result.success || !result.providerPostId || result.providerPostId === 'unknown') {
-        result.error ||= 'Provider did not confirm publication with a post ID. Check the account before retrying.';
-        if (result.error.includes('190') || result.error.includes('Access token expired') || result.error.includes('Reconnect Meta')) {
-          await db.query("UPDATE social_accounts SET state = 'TOKEN_EXPIRED', last_sync = NOW() WHERE id = $1", [acc.id]);
-        }
-        await db.query(
-          "UPDATE content SET status = $4, updated_at = NOW(), updated_by = $1 WHERE id = $2 AND workspace_id = $3",
-          [r.user.id, contentId, w, content.status === 'PUBLISHED' ? 'PUBLISHED' : 'FAILED'],
-        );
-
-        await audit(
-          db,
-          w,
-          r.user.id,
-          "publish_failed",
-          "content",
-          contentId,
-          content.title || "Untitled Post",
-          null,
-          {
-            platform: acc.platform,
-            error: result.error,
-          },
-        );
-
-        if (result.uncertain || !result.providerPostId && result.success) {
-          await db.query(`INSERT INTO scheduled_posts(id,workspace_id,content_id,account_id,content_version,execute_at,timezone,state) VALUES($1,$2,$3,$4,$5,NOW(),'UTC','UNCERTAIN') ON CONFLICT(content_id,account_id,content_version) DO UPDATE SET state='UNCERTAIN'`,[randomUUID(),w,contentId,acc.id,content.version]);
-        }
-        return {success:false,error:result.error,uncertain:result.uncertain};
-      }
-
-      // 5. Update content state to PUBLISHED
-      await db.query(
-        "UPDATE content SET status = 'PUBLISHED', published_by = $1, updated_at = NOW(), updated_by = $1 WHERE id = $2 AND workspace_id = $3",
-        [r.user.id, contentId, w],
-      );
-
-      // Record in scheduled_posts & published_posts
-      const schedId = randomUUID();
-      await db.query(
-        `INSERT INTO scheduled_posts(id, workspace_id, content_id, account_id, content_version, execute_at, timezone, state, provider_post_id)
-         VALUES($1, $2, $3, $4, $5, NOW(), 'UTC', 'PUBLISHED', $6)
-         ON CONFLICT (content_id, account_id, content_version) DO UPDATE SET state = 'PUBLISHED', provider_post_id = EXCLUDED.provider_post_id`,
-        [
-          schedId,
-          w,
-          contentId,
-          acc.id,
-          content.version,
-          result.providerPostId || "N/A",
-        ],
-      );
-
-      const actualSched = (
-        await db.query(
-          "SELECT id FROM scheduled_posts WHERE content_id = $1 AND account_id = $2 AND content_version = $3",
-          [contentId, acc.id, content.version],
-        )
-      ).rows[0];
-
-      const pubId = randomUUID();
-      await db.query(
-        "INSERT INTO published_posts(id, workspace_id, scheduled_post_id, provider_post_id, published_at) VALUES($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
-        [
-          pubId,
-          w,
-          actualSched.id,
-          result.providerPostId || "N/A",
-          result.publishedAt,
-        ],
-      );
-
-      await audit(
-        db,
-        w,
-        r.user.id,
-        "published_content",
-        "content",
-        contentId,
-        content.title || "Untitled Post",
-        null,
-        {
-          platform: acc.platform,
-          providerPostId: result.providerPostId,
-        },
-      );
-
-      return {
-        success: true,
-        contentId,
-        status: "PUBLISHED",
-        providerPostId: result.providerPostId,
-        publishedAt: result.publishedAt,
-      };
-    });
-    if (!outcome.success) throw new BadRequestException(`Publishing failed: ${outcome.error}${outcome.uncertain ? " Check the account before retrying; publication could not be confirmed." : ""}`);
-    return outcome;
+    const { publishContentNow } = await import("./publishing.js");
+    return publishContentNow(r.workspace.id, r.user.id, contentId, v.socialAccountId, v.manualPublish);
   }
 
   @Post("preview")
@@ -592,8 +426,8 @@ export class ContentController {
         }
       }
       if (action === "approve" || action === "reject") {
-        if (p.status !== "NEEDS_REVIEW")
-          throw new ConflictException("This post is not awaiting review.");
+        if (p.status !== "NEEDS_REVIEW" && !(action === "approve" && p.status === "DRAFT"))
+          throw new ConflictException("Only drafts and posts awaiting review can be approved.");
         status = action === "approve" ? "APPROVED" : "DRAFT";
         const commentText = (input as any)?.comment ? String((input as any).comment).trim() : "";
         await db.query(
@@ -631,14 +465,7 @@ export class ContentController {
           .parse(input);
         validateTimezone(v.timezone);
         const at = new Date(v.scheduledAt);
-        const ws = (
-          await db.query(
-            "SELECT require_approval FROM workspaces WHERE id=$1 FOR SHARE",
-            [r.workspace.id],
-          )
-        ).rows[0];
-        const knowledgeProposal = await db.query('SELECT 1 FROM knowledge_content_plans WHERE workspace_id=$1 AND content_id=$2 LIMIT 1',[r.workspace.id,id]);
-        validateSchedule(p.status, ws.require_approval || knowledgeProposal.rows.length > 0, at);
+        validateSchedule(p.status, await requiresPublicationApproval(db, r.workspace.id, id), at);
         await assertDailySlot(db, r.workspace.id, p, at);
         for (const platform of p.platforms as string[]) {
           if (!Object.keys(PLATFORM_CAPABILITIES).includes(platform))
