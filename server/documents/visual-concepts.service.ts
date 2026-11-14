@@ -548,19 +548,19 @@ Return JSON with "concepts" array.`;
     finalAssetId = branded.assetId;
     finalImageUrl = branded.url;
 
-    let generatedCaption:string|undefined;
-    try{const {generateImageCaptions}=await import('../ai.controller.js');const copy=await generateImageCaptions(opts.workspaceId,opts.userId,rawAssetId,'Instagram',promptToUse);generatedCaption=copy.options[0]?.caption;}catch(e){console.warn('[VisualConcepts] Image retained; caption generation can be retried');}
-    // Save both final (branded) poster and raw (pure AI artwork) to concept row
+    // Save both final (branded) poster and raw (pure AI artwork) to concept row without overwriting rich social caption
     await pool.query(
       `UPDATE document_visual_concepts
-       SET asset_id = $1, image_url = $2, raw_asset_id = $3, raw_image_url = $4, prompt = $5, caption=COALESCE($7,caption), updated_at = NOW()
+       SET asset_id = $1, image_url = $2, raw_asset_id = $3, raw_image_url = $4, prompt = $5, updated_at = NOW()
        WHERE id = $6`,
-      [finalAssetId, finalImageUrl, rawAssetId, rawImageUrl, promptToUse, opts.conceptId,generatedCaption||null]
+      [finalAssetId, finalImageUrl, rawAssetId, rawImageUrl, promptToUse, opts.conceptId]
     );
+
+    const savedCaption = (await pool.query('SELECT caption FROM document_visual_concepts WHERE id = $1', [opts.conceptId])).rows[0]?.caption;
 
     return {
       conceptId: opts.conceptId,
-      caption:generatedCaption,
+      caption: savedCaption,
       assetId: finalAssetId,
       imageUrl: finalImageUrl,
     };
@@ -640,7 +640,8 @@ Return JSON with "concepts" array.`;
 
     // Resolve high-converting structured caption with website, phone, highlights & hashtags
     let caption = (opts.caption && opts.caption.trim()) || (row.caption && row.caption.trim());
-    if (!caption || caption.includes("In modern enterprise governance, foundational clarity")) {
+    const isRich = caption && caption.includes("#") && (caption.includes("–") || caption.includes("-") || caption.includes("⚡") || caption.includes("📊") || caption.includes("🛡️") || caption.includes("💎") || caption.includes("📈"));
+    if (!caption || !isRich || caption.includes("In modern enterprise governance, foundational clarity")) {
       let contactInfo: any = {};
       try {
         const pagesRes = await pool.query(
@@ -659,9 +660,17 @@ Return JSON with "concepts" array.`;
         prompt: row.prompt,
       });
       pool.query("UPDATE document_visual_concepts SET caption = $1 WHERE id = $2", [caption, row.id]).catch(() => {});
+    } else if (opts.caption && opts.caption.trim()) {
+      pool.query("UPDATE document_visual_concepts SET caption = $1 WHERE id = $2", [opts.caption.trim(), row.id]).catch(() => {});
     }
 
-    // Build platform-specific caption variants
+    // Build platform-specific caption variants with canonical public media URL
+    const publicStorageBase = (process.env.STORAGE_PUBLIC_URL || process.env.PUBLIC_URL || "https://api.hidustansocialnetwork.in").replace(/\/+$/, "");
+    let canonicalImageUrl = row.image_url;
+    if (canonicalImageUrl && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(canonicalImageUrl)) {
+      canonicalImageUrl = canonicalImageUrl.replace(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i, publicStorageBase);
+    }
+
     const variants: Record<string, any> = {};
     for (const ch of channels) {
       const customVariant = opts.variants?.[ch]?.caption;
@@ -669,14 +678,31 @@ Return JSON with "concepts" array.`;
       variants[ch] = {
         caption: platformCaption,
         mediaAssetId: row.asset_id,
-        mediaUrl: row.image_url,
+        mediaUrl: canonicalImageUrl,
       };
     }
 
     const prepared = await transaction(async db => {
       const concept = (await db.query("SELECT content_id FROM document_visual_concepts WHERE id=$1 AND workspace_id=$2 FOR UPDATE",[opts.conceptId,opts.workspaceId])).rows[0];
       if (!concept) throw new Error("Visual concept not found.");
-      if (concept.content_id && (await db.query("SELECT id FROM content WHERE id=$1 AND workspace_id=$2",[concept.content_id,opts.workspaceId])).rowCount) return concept.content_id;
+      if (concept.content_id && (await db.query("SELECT id FROM content WHERE id=$1 AND workspace_id=$2",[concept.content_id,opts.workspaceId])).rowCount) {
+        await db.query(
+          `UPDATE content 
+           SET title = $1, body = $2, variants = $3, platforms = $4, image_asset_id = $5, updated_by = $6, updated_at = NOW() 
+           WHERE id = $7 AND workspace_id = $8`,
+          [
+            row.concept_title,
+            caption,
+            JSON.stringify(variants),
+            JSON.stringify(channels.map(ch=>Object.keys(PLATFORM_CAPABILITIES).find(p=>p.toLowerCase()===ch.toLowerCase())||ch)),
+            row.asset_id || null,
+            opts.userId,
+            concept.content_id,
+            opts.workspaceId
+          ]
+        );
+        return concept.content_id;
+      }
       const id=randomUUID();
       await db.query("INSERT INTO content(id,workspace_id,created_by,updated_by,title,body,variants,platforms,status,image_asset_id) VALUES($1,$2,$3,$3,$4,$5,$6,$7,'DRAFT',$8)",[id,opts.workspaceId,opts.userId,row.concept_title,caption,JSON.stringify(variants),JSON.stringify(channels.map(ch=>Object.keys(PLATFORM_CAPABILITIES).find(p=>p.toLowerCase()===ch.toLowerCase())||ch)),row.asset_id||null]);
       await db.query("INSERT INTO content_versions(id,workspace_id,content_id,version,snapshot,created_by) SELECT $1,workspace_id,id,version,to_jsonb(content),$2 FROM content WHERE id=$3",[randomUUID(),opts.userId,id]);
@@ -690,12 +716,13 @@ Return JSON with "concepts" array.`;
       if (!account) { results.push({platform:ch,success:false,error:"No healthy account"}); continue; }
       const done=(await pool.query("SELECT 1 FROM scheduled_posts WHERE workspace_id=$1 AND content_id=$2 AND account_id=$3 AND state='PUBLISHED'",[opts.workspaceId,prepared,account.id])).rowCount;
       if(done){results.push({platform:ch,success:true});continue;}
-      try { results.push({platform:ch,...await publishContentNow(opts.workspaceId,opts.userId,prepared,account.id)}); }
+      try { results.push({platform:ch,...await publishContentNow(opts.workspaceId,opts.userId,prepared,account.id,true)}); }
       catch(e:any){results.push({platform:ch,success:false,error:e.message});}
     }
     const publishedCount=results.filter(r=>r.success).length;
     const success=results.length>0 && publishedCount===results.length;
-    await pool.query("UPDATE document_visual_concepts SET status=CASE WHEN $1 THEN 'DISPATCHED' ELSE status END,dispatched_at=CASE WHEN $1 THEN now() ELSE dispatched_at END,target_channels=$2,post_result=$3::jsonb WHERE id=$4 AND workspace_id=$5",[success,JSON.stringify(channels),JSON.stringify(results),opts.conceptId,opts.workspaceId]);
+    const nextStatus=success?'DISPATCHED':publishedCount>0?'PARTIAL':'FAILED';
+    await pool.query("UPDATE document_visual_concepts SET status=$1,dispatched_at=CASE WHEN $2 THEN now() ELSE dispatched_at END,target_channels=$3,post_result=$4::jsonb WHERE id=$5 AND workspace_id=$6",[nextStatus,success,channels,JSON.stringify(results),opts.conceptId,opts.workspaceId]);
     return {success,conceptId:opts.conceptId,dispatchedAt:success?dispatchedAt:"",publishedCount,contentId:prepared,results};
   }
 

@@ -4,6 +4,7 @@ import { postgresQueue } from './queues.js';
 export async function relayScheduledPosts(db: DB = pool,limit = 200) {
   const records = (await db.query(`SELECT s.id,s.workspace_id,s.execute_at FROM scheduled_posts s
     WHERE s.state IN ('PENDING','ENQUEUED')
+    AND s.error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED'
     AND EXISTS (
       SELECT 1 FROM workspace_subscriptions ws
       WHERE ws.workspace_id = s.workspace_id

@@ -125,7 +125,7 @@ const maintenance = new Worker(
     // 5. Relay PENDING jobs into the BullMQ queue (outbox pattern).
     const jobs = (
       await pool.query(
-        "SELECT id,execute_at FROM scheduled_posts WHERE state='PENDING' ORDER BY execute_at LIMIT 200",
+        "SELECT id,execute_at FROM scheduled_posts WHERE state='PENDING' AND error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED' ORDER BY execute_at LIMIT 200",
       )
     ).rows;
     for (const item of jobs) {
@@ -146,7 +146,7 @@ const maintenance = new Worker(
     // 6. Re-add ENQUEUED jobs whose BullMQ entry was lost (Redis eviction recovery).
     const enqueued = (
       await pool.query(
-        "SELECT id,execute_at FROM scheduled_posts WHERE state='ENQUEUED' AND execute_at<now() ORDER BY execute_at LIMIT 200",
+        "SELECT id,execute_at FROM scheduled_posts WHERE state='ENQUEUED' AND execute_at<now() AND error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED' ORDER BY execute_at LIMIT 200",
       )
     ).rows;
     for (const item of enqueued)

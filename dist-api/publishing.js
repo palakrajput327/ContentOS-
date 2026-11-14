@@ -11,6 +11,7 @@ import { publishYouTubeRecord, } from "./youtube.service.js";
 import { createPublishPlan } from "./publish-planner.js";
 import { PLATFORM_CAPABILITIES } from "./platform-capabilities.js";
 import { queuePublishNotificationEmail } from "./mail.js";
+import { needsOverdueReview, OVERDUE_REVIEW } from './overdue-posts.js';
 export async function aggregate(db, contentId, wid, version) {
     const rows = (await db.query("SELECT state,processing_status FROM scheduled_posts WHERE content_id=$1 AND workspace_id=$2 AND content_version=$3", [contentId, wid, version])).rows;
     const states = rows.map((r) => r.state);
@@ -56,6 +57,10 @@ export async function claim(id, now = new Date()) {
             await audit(db, job.workspace_id, null, "publishing requires verification", "content", content.id, content.title);
             return null;
         }
+        if (needsOverdueReview(job, now)) {
+            await db.query('UPDATE scheduled_posts SET error_code=$2 WHERE id=$1', [id, OVERDUE_REVIEW]);
+            return null;
+        }
         try {
             await assertPublicationApproved(db, raw.workspace_id, content);
         }
@@ -66,7 +71,7 @@ export async function claim(id, now = new Date()) {
             return null;
         }
         if (new Date(job.execute_at).getTime() > now.getTime())
-            throw new Error("Job arrived before execution time");
+            return null; // An old queue delivery may arrive after an explicit reschedule.
         const account = (await db.query("SELECT a.*,t.ciphertext,t.expires_at FROM social_accounts a LEFT JOIN social_account_tokens t ON t.account_id=a.id WHERE a.id=$1 AND a.workspace_id=$2 FOR SHARE OF a", [job.account_id, job.workspace_id])).rows[0];
         const isTelegramWithEnv = String(account?.platform).toLowerCase() === "telegram" && Boolean(process.env.TELEGRAM_BOT_TOKEN);
         if ((!account?.ciphertext && !isTelegramWithEnv) ||

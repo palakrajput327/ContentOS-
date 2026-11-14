@@ -1095,6 +1095,28 @@ export class SocialController {
     }
 
     return transaction(async (db) => {
+      // 1. Remove published_posts associated with scheduled posts of this account
+      await db.query(
+        `DELETE FROM published_posts 
+         WHERE scheduled_post_id IN (
+           SELECT id FROM scheduled_posts WHERE account_id = $1 AND workspace_id = $2
+         )`,
+        [id, w],
+      );
+
+      // 2. Remove scheduled_posts for this account
+      await db.query(
+        "DELETE FROM scheduled_posts WHERE account_id = $1 AND workspace_id = $2",
+        [id, w],
+      );
+
+      // 3. Remove tokens
+      await db.query(
+        "DELETE FROM social_account_tokens WHERE account_id = $1",
+        [id],
+      );
+
+      // 4. Remove social account record
       await db.query(
         "DELETE FROM social_accounts WHERE id = $1 AND workspace_id = $2",
         [id, w],

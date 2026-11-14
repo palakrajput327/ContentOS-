@@ -21,8 +21,21 @@ describe("ContentOS Bulk Post Deletion Integration & Regression Tests", () => {
       connectionString: process.env.DATABASE_URL,
     });
 
-    // 1. Fetch an existing workspace and user from database
-    const wsRes = await pool.query("SELECT id FROM workspaces LIMIT 1");
+    // 1. Fetch an existing workspace and user from database (preferring one under daily quota)
+    const wsRes = await pool.query(`
+      SELECT w.id FROM workspaces w
+      WHERE EXISTS (
+        SELECT 1 FROM workspace_members wm
+        JOIN users u ON u.id = wm.user_id
+        WHERE wm.workspace_id = w.id
+      )
+      AND (
+        SELECT COUNT(*) FROM scheduled_posts sp
+        WHERE sp.workspace_id = w.id AND sp.execute_at::date = CURRENT_DATE
+      ) < 5
+      ORDER BY w.created_at ASC
+      LIMIT 1
+    `);
     if (!wsRes.rowCount) {
       throw new Error("No workspace found in database for testing.");
     }
@@ -228,6 +241,154 @@ describe("ContentOS Bulk Post Deletion Integration & Regression Tests", () => {
       await pool.query("DELETE FROM content WHERE id = $1", [failContentId]);
     } finally {
       SocialPlatformDeleteService.deleteFromPlatform = originalDelete;
+    }
+  });
+
+  it("should preview overdue posts and soft-delete locally without calling platform APIs", async () => {
+    const overduePostId = randomUUID();
+    const overdueContentId = randomUUID();
+    let platformCalled = false;
+
+    const originalDelete = SocialPlatformDeleteService.deleteFromPlatform;
+    SocialPlatformDeleteService.deleteFromPlatform = async () => {
+      platformCalled = true;
+      return { deleted: true };
+    };
+
+    try {
+      await pool.query(
+        `INSERT INTO content (id, workspace_id, title, body, platforms, status, created_by, updated_by)
+         VALUES ($1, $2, 'Overdue Test Post', 'Overdue body', '["telegram"]'::jsonb, 'SCHEDULED', $3, $3)`,
+        [overdueContentId, testWorkspaceId, testUserId]
+      );
+      await pool.query(
+        `INSERT INTO scheduled_posts (id, workspace_id, content_id, account_id, content_version, execute_at, timezone, state)
+         VALUES ($1, $2, $3, $4, 1, NOW() - INTERVAL '2 days', 'Asia/Kolkata', 'ENQUEUED')`,
+        [overduePostId, testWorkspaceId, overdueContentId, testAccountId1]
+      );
+
+      const preview = await PostDeletionService.getDeletionPreview({
+        workspaceId: testWorkspaceId,
+        scope: "overdue",
+        accountId: testAccountId1,
+      });
+
+      assert.ok(preview.overdueCount >= 1, "overdueCount should include the overdue ENQUEUED post");
+      assert.ok(
+        preview.items.some((item) => item.id === overduePostId),
+        "overdue preview items should contain the overdue post"
+      );
+
+      const result = await PostDeletionService.executeBulkDeletion({
+        workspaceId: testWorkspaceId,
+        userId: testUserId,
+        role: "Owner",
+        scope: "overdue",
+        postIds: [overduePostId],
+        deleteMode: "soft_local",
+        confirm: true,
+      });
+
+      assert.equal(platformCalled, false, "soft_local must NOT invoke platform deletion API");
+      assert.equal(result.totalRequested, 1, "totalRequested should be 1");
+      assert.equal(result.deletedFromDatabase, 1, "soft_local should report 1 soft-deleted post");
+      assert.equal(result.failed, 0, "soft_local should have 0 failures");
+
+      const checkDb = await pool.query(
+        "SELECT id, state, error_code FROM scheduled_posts WHERE id = $1",
+        [overduePostId]
+      );
+      assert.equal(checkDb.rowCount, 1, "Database record MUST be preserved in soft_local mode");
+      assert.equal(checkDb.rows[0].state, "CANCELLED", "State should be CANCELLED");
+      assert.equal(checkDb.rows[0].error_code, "SOFT_DELETED_BY_USER", "error_code should record SOFT_DELETED_BY_USER");
+
+      const afterPreview = await PostDeletionService.getDeletionPreview({
+        workspaceId: testWorkspaceId,
+        scope: "overdue",
+        accountId: testAccountId1,
+      });
+      assert.ok(
+        !afterPreview.items.some((item) => item.id === overduePostId),
+        "Soft-deleted post should no longer appear in overdue preview"
+      );
+    } finally {
+      SocialPlatformDeleteService.deleteFromPlatform = originalDelete;
+      await pool.query("DELETE FROM scheduled_posts WHERE id = $1", [overduePostId]);
+      await pool.query("DELETE FROM content WHERE id = $1", [overdueContentId]);
+    }
+  });
+
+  it("should execute platform_only delete from account and transition content status to DRAFT", async () => {
+    const pubPostId = randomUUID();
+    const pubContentId = randomUUID();
+    let platformDeletedTargetId: string | null = null;
+
+    const originalDelete = SocialPlatformDeleteService.deleteFromPlatform;
+    SocialPlatformDeleteService.deleteFromPlatform = async (_platform, _acc, providerId) => {
+      platformDeletedTargetId = providerId;
+      return { success: true, platformDeleted: true };
+    };
+
+    try {
+      await pool.query(
+        `INSERT INTO content (id, workspace_id, title, body, platforms, status, created_by, updated_by)
+         VALUES ($1, $2, 'Published Account Delete Post', 'Published body', '["telegram"]'::jsonb, 'PUBLISHED', $3, $3)`,
+        [pubContentId, testWorkspaceId, testUserId]
+      );
+      await pool.query(
+        `INSERT INTO scheduled_posts (id, workspace_id, content_id, account_id, content_version, execute_at, timezone, state, provider_post_id)
+         VALUES ($1, $2, $3, $4, 1, NOW() - INTERVAL '1 day', 'Asia/Kolkata', 'PUBLISHED', 'fake-tg-msg-999')`,
+        [pubPostId, testWorkspaceId, pubContentId, testAccountId1]
+      );
+      await pool.query(
+        `INSERT INTO published_posts (id, workspace_id, scheduled_post_id, provider_post_id, published_at)
+         VALUES ($1, $2, $3, 'fake-tg-msg-999', NOW())`,
+        [randomUUID(), testWorkspaceId, pubPostId]
+      );
+
+      // Verify preview matches by content_id (as sent from Content Library selection)
+      const preview = await PostDeletionService.getDeletionPreview({
+        workspaceId: testWorkspaceId,
+        scope: "selected_ids",
+        postIds: [pubContentId],
+      });
+
+      assert.equal(preview.items.length, 1, "Preview should find matching post by contentId");
+      assert.equal(preview.items[0].id, pubPostId, "Preview item id should be scheduled_post_id");
+
+      // Execute Delete from Account ('platform_only')
+      const result = await PostDeletionService.executeBulkDeletion({
+        workspaceId: testWorkspaceId,
+        userId: testUserId,
+        role: "Owner",
+        scope: "selected_ids",
+        postIds: [pubContentId],
+        deleteMode: "platform_only",
+        confirm: true,
+      });
+
+      assert.equal(result.deletedFromPlatform, 1, "Should report 1 post deleted from platform");
+      assert.equal(platformDeletedTargetId, "fake-tg-msg-999", "Should call platform API with provider_post_id");
+
+      // Verify scheduled_post state is CANCELLED and provider_post_id is cleared
+      const checkPost = await pool.query(
+        "SELECT state, provider_post_id, error_code FROM scheduled_posts WHERE id = $1",
+        [pubPostId]
+      );
+      assert.equal(checkPost.rows[0].state, "CANCELLED");
+      assert.equal(checkPost.rows[0].provider_post_id, null);
+
+      // In Content Library, content status MUST now be DRAFT so it's removed from Published
+      const checkContent = await pool.query(
+        "SELECT status FROM content WHERE id = $1",
+        [pubContentId]
+      );
+      assert.equal(checkContent.rows[0].status, "DRAFT", "Content status should transition to DRAFT");
+    } finally {
+      SocialPlatformDeleteService.deleteFromPlatform = originalDelete;
+      await pool.query("DELETE FROM published_posts WHERE scheduled_post_id = $1", [pubPostId]);
+      await pool.query("DELETE FROM scheduled_posts WHERE id = $1", [pubPostId]);
+      await pool.query("DELETE FROM content WHERE id = $1", [pubContentId]);
     }
   });
 });

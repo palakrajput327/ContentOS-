@@ -132,6 +132,15 @@ process.on("SIGTERM", () => {
 
 if (!process.env.QUEUE_BACKEND) process.env.QUEUE_BACKEND = "postgres";
 
+try {
+  const { migrate } = await import("./dist-api/migrate.js");
+  console.log("[ContentOS] Running schema migrations check...");
+  await migrate();
+  console.log("[ContentOS] Schema migrations up to date.");
+} catch (migErr) {
+  console.warn("[ContentOS] Migration notice:", migErr?.message || migErr);
+}
+
 const { bootstrap } = await import("./dist-api/phase-main.js");
 
 bootstrap().catch((error) => {

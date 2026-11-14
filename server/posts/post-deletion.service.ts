@@ -4,14 +4,18 @@ import { SocialPlatformDeleteService, type PlatformDeleteResult } from "./social
 import { BadRequestException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 
+export type DeletionScope = "all" | "today" | "overdue" | "recent_24h" | "custom_range" | "selected_ids";
+export type DeletionMode = "full" | "soft_local" | "platform_only";
+
 export interface DeletionFilterOptions {
   workspaceId: string;
-  scope: "all" | "today" | "custom_range" | "selected_ids";
+  scope: DeletionScope;
   channel?: string; // "all", "linkedin", "telegram", "facebook", "instagram", "x", "youtube"
+  accountId?: string; // specific social_accounts.id
   startDate?: string; // ISO date string or YYYY-MM-DD
   endDate?: string; // ISO date string or YYYY-MM-DD
   postIds?: string[]; // Array of scheduled_posts.id or content.id
-  state?: string; // "ALL", "PUBLISHED", "SCHEDULED", "FAILED", "DRAFT", etc.
+  state?: string; // "ALL", "PUBLISHED", "ENQUEUED", "OVERDUE", "FAILED", "CANCELLED", etc.
   timezone?: string; // e.g. "Asia/Kolkata" or "UTC"
 }
 
@@ -19,6 +23,7 @@ export interface DeletionExecutionOptions extends DeletionFilterOptions {
   userId: string;
   role: string;
   deleteFromPlatform?: boolean; // default true
+  deleteMode?: DeletionMode; // "full" | "soft_local" | "platform_only"
   confirm: boolean; // must be true
 }
 
@@ -61,11 +66,35 @@ export class PostDeletionService {
       paramIndex++;
     }
 
+    // Account filter
+    if (opts.accountId && opts.accountId.toLowerCase() !== "all") {
+      conditions.push(`sp.account_id = $${paramIndex}`);
+      params.push(opts.accountId.trim());
+      paramIndex++;
+    }
+
     // State filter
     if (opts.state && opts.state.toUpperCase() !== "ALL") {
-      conditions.push(`UPPER(sp.state) = UPPER($${paramIndex})`);
-      params.push(opts.state.trim());
-      paramIndex++;
+      const upperState = opts.state.trim().toUpperCase();
+      if (upperState === "OVERDUE") {
+        conditions.push(`sp.state IN ('ENQUEUED', 'PENDING') AND sp.execute_at IS NOT NULL AND sp.execute_at <= NOW()`);
+      } else if (upperState === "FAILED") {
+        conditions.push(`UPPER(sp.state) IN ('FAILED', 'CANCELLED')`);
+      } else {
+        conditions.push(`UPPER(sp.state) = $${paramIndex}`);
+        params.push(upperState);
+        paramIndex++;
+      }
+    }
+
+    // Scope: overdue
+    if (opts.scope === "overdue") {
+      conditions.push(`sp.state IN ('ENQUEUED', 'PENDING') AND sp.execute_at IS NOT NULL AND sp.execute_at <= NOW()`);
+    }
+
+    // Scope: recent_24h
+    if (opts.scope === "recent_24h") {
+      conditions.push(`COALESCE(sp.execute_at, sp.created_at) >= NOW() - INTERVAL '24 hours'`);
     }
 
     // Scope: today
@@ -127,7 +156,7 @@ export class PostDeletionService {
               c.title,c.body,c.created_at AS post_created_at,'Local' AS platform
        FROM content c
        WHERE c.workspace_id=$1 AND c.id=ANY($2::uuid[])
-         AND c.status IN ('DRAFT','NEEDS_REVIEW','APPROVED','FAILED')
+         AND c.status IN ('DRAFT','NEEDS_REVIEW','APPROVED','FAILED','PUBLISHED','UNCERTAIN','CANCELLED')
          AND ($3::text IS NULL OR upper(c.status)=upper($3))
          AND ($4::text IS NULL OR EXISTS (
            SELECT 1 FROM jsonb_array_elements_text(c.platforms) AS platform(name)
@@ -154,14 +183,18 @@ export class PostDeletionService {
    */
   static async getDeletionPreview(opts: DeletionFilterOptions): Promise<{
     totalMatching: number;
+    overdueCount: number;
     items: PostPreviewItem[];
     breakdownByChannel: Record<string, number>;
     breakdownByStatus: Record<string, number>;
     canDeletePlatformCount: number;
+    accounts: Array<{ id: string; platform: string; name: string }>;
   }> {
     const { whereClause, params } = this.buildFilterConditions(opts);
 
-    const query = `
+    const [res, countRes, overdueRes, accountsRes] = await Promise.all([
+      pool.query(
+        `
       SELECT 
         sp.id as scheduled_post_id,
         sp.content_id,
@@ -180,16 +213,31 @@ export class PostDeletionService {
       WHERE ${whereClause}
       ORDER BY COALESCE(sp.execute_at, sp.created_at) DESC
       LIMIT 250
-    `;
-
-    const res = await pool.query(query, params);
+    `,
+        params
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS cnt FROM scheduled_posts sp JOIN social_accounts a ON a.id = sp.account_id WHERE ${whereClause}`,
+        params
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS cnt FROM scheduled_posts WHERE workspace_id = $1 AND state IN ('ENQUEUED', 'PENDING') AND execute_at IS NOT NULL AND execute_at <= NOW()`,
+        [opts.workspaceId]
+      ),
+      pool.query(
+        `SELECT id, platform, name FROM social_accounts WHERE workspace_id = $1 ORDER BY platform, name`,
+        [opts.workspaceId]
+      ),
+    ]);
 
     const items: PostPreviewItem[] = [];
     const breakdownByChannel: Record<string, number> = {};
     const breakdownByStatus: Record<string, number> = {};
     let canDeletePlatformCount = 0;
 
-    const rows = [...res.rows, ...await this.unscheduledSelection(opts)].slice(0, 250);
+    const unscheduled = await this.unscheduledSelection(opts);
+    const rows = [...res.rows, ...unscheduled].slice(0, 250);
+    const totalMatching = (countRes.rows[0]?.cnt ?? res.rows.length) + unscheduled.length;
     for (const r of rows) {
       const plat = (r.platform || "Unknown").toLowerCase();
       breakdownByChannel[plat] = (breakdownByChannel[plat] || 0) + 1;
@@ -223,11 +271,13 @@ export class PostDeletionService {
     }
 
     return {
-      totalMatching: rows.length,
+      totalMatching,
+      overdueCount: overdueRes.rows[0]?.cnt ?? 0,
       items,
       breakdownByChannel,
       breakdownByStatus,
       canDeletePlatformCount,
+      accounts: accountsRes.rows,
     };
   }
 
@@ -283,7 +333,29 @@ export class PostDeletionService {
     let failed = 0;
     let skipped = 0;
 
-    const shouldDeleteFromPlatform = opts.deleteFromPlatform !== false;
+    const deleteMode: DeletionMode = opts.deleteMode || "full";
+    const shouldDeleteFromPlatform =
+      deleteMode === "soft_local"
+        ? false
+        : deleteMode === "platform_only"
+          ? true
+          : opts.deleteFromPlatform !== false;
+
+    const cancelQueuedArtifacts = async (db: DB, scheduledPostId: string, contentId: string | null) => {
+      await db.query(
+        `UPDATE queue_jobs SET state = 'cancelled', updated_at = NOW()
+         WHERE workspace_id = $1 AND state IN ('waiting', 'active', 'delayed') AND payload->>'id' = $2`,
+        [opts.workspaceId, scheduledPostId]
+      ).catch(() => {});
+      if (contentId) {
+        await db.query(
+          `UPDATE document_visual_concepts
+           SET status = 'CANCELLED', scheduled_at = NULL, updated_at = NOW()
+           WHERE workspace_id = $1 AND content_id = $2`,
+          [opts.workspaceId, contentId]
+        ).catch(() => {});
+      }
+    };
 
 
     const unscheduled = await this.unscheduledSelection(opts);
@@ -311,7 +383,7 @@ export class PostDeletionService {
 
     for (const row of rows) {
       if (["PROCESSING", "UNCERTAIN"].includes(row.post_state) ||
-          (row.post_state === "PUBLISHED" && (!row.provider_post_id || !shouldDeleteFromPlatform))) {
+          (deleteMode !== "soft_local" && row.post_state === "PUBLISHED" && (!row.provider_post_id || !shouldDeleteFromPlatform))) {
         skipped++;
         logs.push({ id: row.scheduled_post_id, title: row.title, platform: row.platform, status: "SKIPPED",
           platformDeleted: false, message: "Resolve the publishing outcome or enable platform deletion first." });
@@ -322,7 +394,7 @@ export class PostDeletionService {
       let platformDeleted = false;
       let platformDeleteError: string | undefined;
 
-      // 1. External Social Platform Deletion (if published live)
+      // 1. External Social Platform Deletion (if published live & mode requires platform delete)
       if (shouldDeleteFromPlatform && isPublished && hasProviderId) {
         let token = "";
         try {
@@ -373,7 +445,7 @@ export class PostDeletionService {
         continue;
       }
 
-      // 3. Platform deletion succeeded or was not published: safe to delete locally!
+      // 3. Platform deletion succeeded or soft/local mode: apply chosen deletion mode locally
       try {
         await transaction(async db => {
           await db.query("SELECT id FROM content WHERE workspace_id=$1 AND id=$2 FOR UPDATE", [opts.workspaceId, row.content_id]);
@@ -382,13 +454,72 @@ export class PostDeletionService {
           if (!current || current.state !== row.post_state || current.provider_post_id !== row.provider_post_id) {
             throw new Error("Post changed after preview. Refresh the selection.");
           }
-          await db.query("DELETE FROM published_posts WHERE workspace_id=$1 AND scheduled_post_id=$2", [opts.workspaceId, row.scheduled_post_id]);
-          await db.query("DELETE FROM scheduled_posts WHERE workspace_id=$1 AND id=$2", [opts.workspaceId, row.scheduled_post_id]);
-          const remaining = await db.query("SELECT 1 FROM scheduled_posts WHERE workspace_id=$1 AND content_id=$2 LIMIT 1",
-            [opts.workspaceId, row.content_id]);
-          if (!remaining.rowCount) await this.deleteUnscheduledContent(db, opts.workspaceId, row.content_id);
+
+          await cancelQueuedArtifacts(db, row.scheduled_post_id, row.content_id);
+
+          if (deleteMode === "soft_local") {
+            await db.query(
+              "UPDATE publication_quota SET state = 'RELEASED', updated_at = NOW() WHERE scheduled_post_id = $1",
+              [row.scheduled_post_id]
+            ).catch(() => {});
+            await db.query(
+              `UPDATE scheduled_posts SET state = 'CANCELLED', error_code = 'SOFT_DELETED_BY_USER' WHERE workspace_id = $1 AND id = $2`,
+              [opts.workspaceId, row.scheduled_post_id]
+            );
+            if (row.content_id) {
+              const active = await db.query(
+                "SELECT 1 FROM scheduled_posts WHERE workspace_id=$1 AND content_id=$2 AND state NOT IN ('CANCELLED', 'FAILED') LIMIT 1",
+                [opts.workspaceId, row.content_id]
+              );
+              if (!active.rowCount) {
+                await db.query(
+                  "UPDATE content SET status = 'DRAFT', scheduled_at = NULL, updated_at = NOW() WHERE workspace_id = $1 AND id = $2 AND status != 'DRAFT'",
+                  [opts.workspaceId, row.content_id]
+                );
+              }
+            }
+          } else if (deleteMode === "platform_only") {
+            await db.query(
+              "UPDATE publication_quota SET state = 'RELEASED', updated_at = NOW() WHERE scheduled_post_id = $1",
+              [row.scheduled_post_id]
+            ).catch(() => {});
+            await db.query("DELETE FROM published_posts WHERE workspace_id=$1 AND scheduled_post_id=$2", [opts.workspaceId, row.scheduled_post_id]);
+            await db.query(
+              `UPDATE scheduled_posts SET state = 'CANCELLED', provider_post_id = NULL, error_code = 'DELETED_FROM_PLATFORM' WHERE workspace_id = $1 AND id = $2`,
+              [opts.workspaceId, row.scheduled_post_id]
+            );
+            if (row.content_id) {
+              const active = await db.query(
+                "SELECT 1 FROM scheduled_posts WHERE workspace_id=$1 AND content_id=$2 AND state NOT IN ('CANCELLED', 'FAILED') LIMIT 1",
+                [opts.workspaceId, row.content_id]
+              );
+              if (!active.rowCount) {
+                await db.query(
+                  "UPDATE content SET status = 'DRAFT', scheduled_at = NULL, updated_at = NOW() WHERE workspace_id = $1 AND id = $2 AND status != 'DRAFT'",
+                  [opts.workspaceId, row.content_id]
+                );
+              }
+            }
+          } else {
+            await db.query("DELETE FROM published_posts WHERE workspace_id=$1 AND scheduled_post_id=$2", [opts.workspaceId, row.scheduled_post_id]);
+            await db.query("DELETE FROM scheduled_posts WHERE workspace_id=$1 AND id=$2", [opts.workspaceId, row.scheduled_post_id]);
+            const remaining = await db.query("SELECT 1 FROM scheduled_posts WHERE workspace_id=$1 AND content_id=$2 LIMIT 1",
+              [opts.workspaceId, row.content_id]);
+            if (!remaining.rowCount) await this.deleteUnscheduledContent(db, opts.workspaceId, row.content_id);
+          }
         });
         deletedFromDatabase++;
+
+        const successMsg =
+          deleteMode === "soft_local"
+            ? "Soft-deleted from account schedule (history preserved; will not auto-post)."
+            : deleteMode === "platform_only"
+              ? (platformDeleted
+                  ? `Deleted live post from ${row.platform}; kept draft copy in ContentOS.`
+                  : "Cancelled from schedule; kept draft copy in ContentOS.")
+              : (platformDeleted
+                  ? `Successfully deleted from ${row.platform} and removed from local schedule.`
+                  : "Removed from local schedule and database.");
 
         logs.push({
           id: row.scheduled_post_id,
@@ -396,9 +527,7 @@ export class PostDeletionService {
           platform: row.platform,
           status: "DELETED",
           platformDeleted,
-          message: platformDeleted
-            ? `Successfully deleted from ${row.platform} and removed from local schedule.`
-            : `Removed from local schedule and database.`,
+          message: successMsg,
         });
       } catch (dbErr: any) {
         failed++;
@@ -413,14 +542,14 @@ export class PostDeletionService {
       }
     }
 
-    // 5. Synchronize document visual concepts: if any dispatched concept was deleted, mark back as PENDING
+    // 5. Synchronize document visual concepts: clear scheduled_at so deleted concepts never auto-repost
     try {
       await pool.query(
         `UPDATE document_visual_concepts
-         SET status = 'PENDING', dispatched_at = NULL, updated_at = NOW()
+         SET status = 'CANCELLED', scheduled_at = NULL, updated_at = NOW()
          WHERE workspace_id = $1 AND status = 'DISPATCHED' AND NOT EXISTS (
            SELECT 1 FROM content c
-           JOIN scheduled_posts sp ON sp.content_id = c.id
+           JOIN scheduled_posts sp ON sp.content_id = c.id AND sp.state != 'CANCELLED'
            WHERE c.title = document_visual_concepts.concept_title
          )`,
         [opts.workspaceId]
@@ -438,7 +567,9 @@ export class PostDeletionService {
           opts.userId,
           JSON.stringify({
             scope: opts.scope,
+            deleteMode,
             channel: opts.channel,
+            accountId: opts.accountId,
             totalRequested: rows.length + unscheduled.length,
             deletedFromPlatform,
             deletedFromDatabase,

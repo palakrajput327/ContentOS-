@@ -1,5 +1,6 @@
 import { assertWorkspaceActive } from "./billing/entitlement.service.js";
 import { loadEnvFile } from "node:process";
+import fs from "node:fs";
 
 try {
   loadEnvFile(".env");
@@ -386,10 +387,12 @@ export async function bootstrap() {
   const server = app.getHttpAdapter().getInstance();
   const root = fileURLToPath(new URL("../dist/", import.meta.url));
 
-  // Serve the built React/Vite frontend before Nest registers its 404 handler.
-  server.use(express.static(root));
+  // Serve the built React/Vite frontend before Nest registers its 404 handler (if dist exists).
+  if (fs.existsSync(root)) {
+    server.use(express.static(root));
+  }
 
-  // SPA fallback: all non-API GET requests return the frontend index.html.
+  // SPA fallback / API root healthcheck: all non-API GET requests return index.html or clean 200 OK HTML.
   server.use(
     (
       req: express.Request,
@@ -397,7 +400,16 @@ export async function bootstrap() {
       next: express.NextFunction,
     ) => {
       if (req.method === "GET" && !req.path.startsWith("/api/")) {
-        return res.sendFile(`${root}/index.html`);
+        const indexHtml = `${root}/index.html`;
+        if (fs.existsSync(indexHtml)) {
+          return res.sendFile(indexHtml);
+        }
+        return res
+          .status(200)
+          .type("html")
+          .send(
+            "<!doctype html><html><head><title>ContentOS API</title></head><body><h1>ContentOS API Running</h1><p>Status: OK (200)</p></body></html>",
+          );
       }
 
       next();
@@ -424,10 +436,14 @@ export async function bootstrap() {
 
   // Built-in Auto-Scheduler Loop: Checks every 30s for due posts and publishes automatically
   // Reuse the leased durable worker lane in API-only PostgreSQL deployments.
+  const autoPublisherDisabled = config.APP_ENV === 'test' || process.env.DISABLE_AUTO_PUBLISHER === 'true';
+  if (autoPublisherDisabled) {
+    console.log('[ContentOS] Auto-publisher is DISABLED (DISABLE_AUTO_PUBLISHER=true or test mode).');
+  }
   const backgroundStop = new AbortController();
   let backgroundRun: Promise<unknown> | undefined;
   const backgroundTimer = setInterval(() => {
-    if (config.APP_ENV === 'test' || backgroundRun) return;
+    if (autoPublisherDisabled || backgroundRun) return;
     backgroundRun = (async () => {
       const { queueBackend } = await import('./queue-backend.js');
       if (queueBackend() !== 'postgres') return;
@@ -442,7 +458,15 @@ export async function bootstrap() {
       .finally(() => { backgroundRun = undefined; });
   }, 5000);
   const autoPublishInterval = setInterval(async () => {
-    if(config.APP_ENV==='test')return;
+    if (autoPublisherDisabled) {
+      if (config.APP_ENV !== 'test') {
+        try {
+          const { deliverEmails } = await import("./mail.js");
+          await deliverEmails({ limit: 10 });
+        } catch {}
+      }
+      return;
+    }
     try {
       const { relayScheduledPosts } = await import("./cron-tasks.js");
       await relayScheduledPosts(pool);
@@ -450,6 +474,7 @@ export async function bootstrap() {
       const duePosts = (await pool.query(
         `SELECT id FROM scheduled_posts 
          WHERE state = 'ENQUEUED' AND execute_at <= NOW()
+         AND error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED'
          ORDER BY execute_at ASC LIMIT 10`
       )).rows;
 
@@ -475,6 +500,7 @@ export async function bootstrap() {
            LEFT JOIN documents d ON d.id = dvc.document_id
            WHERE dvc.scheduled_at IS NOT NULL 
              AND dvc.scheduled_at <= NOW()
+             AND dvc.scheduled_at >= NOW() - interval '15 minutes'
              AND (dvc.status IS NULL OR dvc.status = 'PENDING')
            ORDER BY dvc.scheduled_at ASC LIMIT 5`
         )).rows;
@@ -506,11 +532,12 @@ export async function bootstrap() {
 
   // Immediate check on startup for overdue posts
   const startupPublishTimer = setTimeout(async () => {
-    if(config.APP_ENV==='test')return;
+    if (autoPublisherDisabled) return;
     try {
       const duePosts = (await pool.query(
         `SELECT id FROM scheduled_posts 
          WHERE state = 'ENQUEUED' AND execute_at <= NOW()
+         AND error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED'
          ORDER BY execute_at ASC LIMIT 10`
       )).rows;
       for (const sp of duePosts) {
@@ -532,6 +559,7 @@ export async function bootstrap() {
            LEFT JOIN documents d ON d.id = dvc.document_id
            WHERE dvc.scheduled_at IS NOT NULL 
              AND dvc.scheduled_at <= NOW()
+             AND dvc.scheduled_at >= NOW() - interval '15 minutes'
              AND (dvc.status IS NULL OR dvc.status = 'PENDING')
            ORDER BY dvc.scheduled_at ASC LIMIT 5`
         )).rows;

@@ -52,26 +52,77 @@ export async function uploadBufferToPublicHost(
   mimeType: string,
   filename = "media.jpg",
 ): Promise<string> {
-  const form = new FormData();
-  form.append("reqtype", "fileupload");
-  form.append(
-    "fileToUpload",
-    new Blob([new Uint8Array(buffer)], { type: mimeType }),
-    filename,
-  );
-  const res = await fetch("https://catbox.moe/user/api.php", {
-    method: "POST", headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0" },
-    body: form,
-    signal: AbortSignal.timeout(30000),
-  });
-  if (!res.ok) {
-    throw new Error(`Public media host upload failed (status ${res.status})`);
+  // Provider 1: uguu.se (fast, public, directly accessible by Meta CDN)
+  try {
+    const form = new FormData();
+    form.append(
+      "files[]",
+      new Blob([new Uint8Array(buffer)], { type: mimeType }),
+      filename,
+    );
+    const res = await fetch("https://uguu.se/upload.php", {
+      method: "POST",
+      headers: { "User-Agent": "curl/8.4.0" },
+      body: form,
+      signal: AbortSignal.timeout(25000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const directUrl = data?.files?.[0]?.url;
+      if (directUrl && typeof directUrl === "string" && directUrl.startsWith("http")) {
+        return directUrl;
+      }
+    }
+  } catch (err: any) {
+    console.warn("[MetaPublish] Uguu upload failed, trying tmpfiles fallback:", err.message);
   }
-  const text = (await res.text()).trim();
-  if (!text.startsWith("http")) {
-    throw new Error(`Public media host returned invalid URL: ${text}`);
+
+  // Provider 2: tmpfiles.org
+  try {
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([new Uint8Array(buffer)], { type: mimeType }),
+      filename,
+    );
+    const res = await fetch("https://tmpfiles.org/api/v1/upload", {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(20000),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      const pageUrl = json?.data?.url;
+      if (pageUrl && typeof pageUrl === "string") {
+        return pageUrl.replace("tmpfiles.org/", "tmpfiles.org/dl/");
+      }
+    }
+  } catch (err: any) {
+    console.warn("[MetaPublish] Tmpfiles upload failed, trying catbox fallback:", err.message);
   }
-  return text;
+
+  // Provider 3: Catbox
+  try {
+    const form = new FormData();
+    form.append("reqtype", "fileupload");
+    form.append(
+      "fileToUpload",
+      new Blob([new Uint8Array(buffer)], { type: mimeType }),
+      filename,
+    );
+    const res = await fetch("https://catbox.moe/user/api.php", {
+      method: "POST",
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0" },
+      body: form,
+      signal: AbortSignal.timeout(15000),
+    });
+    if (res.ok) {
+      const text = (await res.text()).trim();
+      if (text.startsWith("http")) return text;
+    }
+  } catch {}
+
+  throw new Error("Public media host upload failed across all providers");
 }
 
 export async function ensurePublicMetaUrl(
@@ -82,6 +133,34 @@ export async function ensurePublicMetaUrl(
   if (!isLocalOrPrivateUrl(urlOrPath)) {
     return urlOrPath;
   }
+
+  // If this is a local storage download URL, resolve against public production API domain
+  if (urlOrPath.includes("/api/v1/storage/local/download")) {
+    const publicBase = (
+      process.env.STORAGE_PUBLIC_URL ||
+      process.env.PUBLIC_URL ||
+      "https://api.hidustansocialnetwork.in"
+    ).replace(/\/+$/, "");
+
+    if (!isLocalOrPrivateUrl(publicBase)) {
+      const candidateUrl = urlOrPath.replace(
+        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i,
+        publicBase
+      );
+      try {
+        const headRes = await fetch(candidateUrl, {
+          method: "HEAD",
+          signal: AbortSignal.timeout(6000),
+        });
+        if (headRes.ok) {
+          return candidateUrl;
+        }
+      } catch {
+        // Fall through to buffer upload
+      }
+    }
+  }
+
   try {
     const res = await fetch(urlOrPath, { signal: AbortSignal.timeout(30000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -300,10 +379,26 @@ export async function publishMeta(
     if (type === "video") {
       postParams = { file_url: url, description: post.text };
     } else if (type === "image") {
-      // Use verified public HTTPS URL for Facebook Page photo publishing.
-      // Meta Graph API fetches this directly and avoids HTTP 500 multipart payload errors.
-      const publicUrl = await ensurePublicMetaUrl(url, "image");
-      postParams = { url: publicUrl, caption: post.text };
+      try {
+        const publicUrl = await ensurePublicMetaUrl(url, "image");
+        postParams = { url: publicUrl, caption: post.text };
+      } catch (metaUrlErr) {
+        // Resilient fallback for Facebook photo: direct binary FormData upload
+        if (url) {
+          const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+          if (res.ok) {
+            const buf = Buffer.from(await res.arrayBuffer());
+            const formData = new FormData();
+            formData.append("caption", post.text);
+            formData.append("source", new Blob([new Uint8Array(buf)], { type: res.headers.get("content-type") || "image/jpeg" }), "photo.jpg");
+            postParams = formData;
+          } else {
+            throw metaUrlErr;
+          }
+        } else {
+          throw metaUrlErr;
+        }
+      }
     } else {
       postParams = { message: post.text };
     }

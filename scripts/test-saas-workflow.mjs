@@ -132,6 +132,77 @@ test('scheduled multi-platform reservations, expiry and downgrade are enforced a
   assert.equal((await executePublishRecord(job.id)).success,true);
 });
 
+test('overdue posts stay held across delivery and reconnect, with confirmed per-account review actions',async()=>{
+  await resetQuota();await pool.query('UPDATE workspace_subscriptions SET custom_daily_limit=10 WHERE workspace_id=$1',[wid]);
+  const {executePublishRecord}=await import('../dist-api/publishing.js');
+  const {needsOverdueReview}=await import('../dist-api/overdue-posts.js');
+  const now=new Date();
+  assert.equal(needsOverdueReview({state:'PENDING',execute_at:new Date(+now-900000)},now),false);
+  assert.equal(needsOverdueReview({state:'PENDING',execute_at:new Date(+now-900001)},now),true);
+  assert.equal(needsOverdueReview({state:'UNCERTAIN',execute_at:new Date(0)},now),false);
+  async function missed(title){
+    const id=await content(title);const r=await api(`/content/${id}/schedule`,'POST',{scheduledAt:new Date(Date.now()+3600000).toISOString(),timezone:'Asia/Kolkata'});assert.equal(r.status,201,JSON.stringify(r));
+    const job=(await pool.query('SELECT id FROM scheduled_posts WHERE content_id=$1',[id])).rows[0];
+    await pool.query("UPDATE scheduled_posts SET execute_at=now()-interval '2 days' WHERE id=$1",[job.id]);return {id,jobId:job.id};
+  }
+  const first=await missed('Overdue publish');const start=calls;
+  assert.equal((await executePublishRecord(first.jobId)).success,false);assert.equal(calls,start);
+  assert.equal((await pool.query('SELECT error_code FROM scheduled_posts WHERE id=$1',[first.jobId])).rows[0].error_code,'OVERDUE_REVIEW_REQUIRED');
+  assert.equal((await executePublishRecord(first.jobId)).success,false);assert.equal(calls,start,'duplicate delivery cannot publish held post');
+  let r=await api('/calendar/overdue');assert.equal(r.status,200);assert.ok(r.data.posts.some(p=>p.id===first.jobId));
+  const endpoint=`/calendar/overdue/${first.jobId}/resolve`;
+  assert.equal((await api(endpoint,'POST',{action:'publish'})).status,400);
+  await pool.query("UPDATE workspace_members SET role='Viewer' WHERE workspace_id=$1 AND user_id=$2",[wid,userId]);
+  assert.equal((await api(endpoint,'POST',{action:'discard',confirm:true})).status,403);
+  await pool.query("UPDATE workspace_members SET role='Owner' WHERE workspace_id=$1 AND user_id=$2",[wid,userId]);
+  assert.equal((await api(endpoint,'POST',{action:'publish',confirm:true},cookie,randomUUID())).status,403);
+  await pool.query("UPDATE social_accounts SET state='Disconnected' WHERE id=$1",[accountId]);
+  assert.equal((await api(endpoint,'POST',{action:'publish',confirm:true})).status,400);
+  assert.equal((await api('/calendar/overdue')).data.posts.find(p=>p.id===first.jobId).reconnect_required,true);
+  await pool.query("UPDATE social_accounts SET state='Connected' WHERE id=$1",[accountId]);
+  assert.equal((await executePublishRecord(first.jobId)).success,false,'reconnect does not release hold');
+  r=await api(endpoint,'POST',{action:'publish',confirm:true});assert.equal(r.status,201,JSON.stringify(r));
+  const {executeCronJob}=await import('../dist-api/cron-job.js');
+  const queued=(await pool.query("SELECT * FROM queue_jobs WHERE payload->>'id'=$1 AND dedupe_key LIKE '%review%'",[first.jobId])).rows[0];
+  assert.equal((await executeCronJob(queued)).outcome,'completed');assert.equal(calls,start+1);
+  await executePublishRecord(first.jobId);assert.equal(calls,start+1,'old and new queue deliveries publish once');
+  assert.equal((await api(endpoint,'POST',{action:'discard',confirm:true})).status,409);
+  const second=await missed('Overdue reschedule');
+  const resolve=`/calendar/overdue/${second.jobId}/resolve`;
+  assert.equal((await api(resolve,'POST',{action:'reschedule',scheduledAt:new Date(0).toISOString(),confirm:true})).status,400);
+  const future=new Date(Date.now()+2*86400000).toISOString();
+  r=await api(resolve,'POST',{action:'reschedule',scheduledAt:future,confirm:true});assert.equal(r.status,201,JSON.stringify(r));
+  const scheduled=(await pool.query('SELECT execute_at,error_code FROM scheduled_posts WHERE id=$1',[second.jobId])).rows[0];assert.equal(scheduled.execute_at.toISOString(),future);assert.equal(scheduled.error_code,null);
+  assert.ok(!(await api('/calendar/overdue')).data.posts.some(p=>p.id===second.jobId));
+  assert.equal((await executePublishRecord(second.jobId)).success,false);assert.equal(calls,start+1);
+  const third=await missed('Overdue discard');
+  r=await api(`/calendar/overdue/${third.jobId}/resolve`,'POST',{action:'discard',confirm:true});assert.equal(r.status,201,JSON.stringify(r));
+  assert.equal((await pool.query('SELECT status FROM content WHERE id=$1',[third.id])).rows[0].status,'DRAFT');
+  await executePublishRecord(third.jobId);assert.equal(calls,start+1);
+  assert.equal((await pool.query("SELECT count(*)::int n FROM queue_jobs WHERE queue='social-publishing' AND payload->>'id'=$1 AND dedupe_key LIKE '%review%'",[second.jobId])).rows[0].n,1);
+  const asset=randomUUID(),document=randomUUID(),concept=randomUUID();
+  await pool.query("INSERT INTO media_assets(id,workspace_id,type,bucket,object_key,mime_type,size_bytes,original_filename,status,created_by) VALUES($1,$2,'GENERATED_ASSET','fixture','fixture/overdue.jpg','image/jpeg',100,'overdue.jpg','COMPLETED',$3)",[asset,wid,userId]);
+  await pool.query("INSERT INTO documents(id,workspace_id,media_asset_id,original_filename,status,created_by) VALUES($1,$2,$3,'overdue.pdf','READY',$4)",[document,wid,asset,userId]);
+  await pool.query("INSERT INTO document_visual_concepts(id,document_id,workspace_id,concept_title,prompt,scheduled_at) VALUES($1,$2,$3,'Missed visual','Fixture',now()-interval '2 days')",[concept,document,wid]);
+  assert.ok((await api('/calendar/overdue')).data.posts.some(p=>p.id===concept && p.source==='concept'));
+  const ce=`/calendar/overdue/${concept}/resolve`;
+  r=await api(ce,'POST',{action:'reschedule',source:'concept',confirm:true,scheduledAt:future});assert.equal(r.status,201,JSON.stringify(r));
+  assert.ok(!(await api('/calendar/overdue')).data.posts.some(p=>p.id===concept));
+  await pool.query("UPDATE document_visual_concepts SET scheduled_at=now()-interval '2 days' WHERE id=$1",[concept]);
+  assert.equal((await api(ce,'POST',{action:'discard',source:'concept',confirm:true})).status,201);
+  assert.equal((await pool.query('SELECT scheduled_at FROM document_visual_concepts WHERE id=$1',[concept])).rows[0].scheduled_at,null);
+  const uncertain=await missed('Uncertain is not retryable');
+  await pool.query("UPDATE scheduled_posts SET state='UNCERTAIN' WHERE id=$1",[uncertain.jobId]);
+  assert.equal((await api(`/calendar/overdue/${uncertain.jobId}/resolve`,'POST',{action:'publish',confirm:true})).status,409);
+  assert.ok(!(await api('/calendar/overdue')).data.posts.some(p=>p.id===uncertain.jobId));
+  const partial=await missed('Keep successful sibling');const siblingAccount=randomUUID();
+  await pool.query("INSERT INTO social_accounts(id,workspace_id,platform,provider_id,name,state) VALUES($1,$2,'facebook','sibling','Sibling','Disconnected')",[siblingAccount,wid]);
+  await pool.query("INSERT INTO scheduled_posts(id,workspace_id,content_id,account_id,content_version,execute_at,timezone,state,provider_post_id) SELECT $2,workspace_id,content_id,$3,content_version,now(),timezone,'PUBLISHED','fixture-sibling' FROM scheduled_posts WHERE id=$1",[partial.jobId,randomUUID(),siblingAccount]);
+  await pool.query("UPDATE content SET status='PUBLISHING' WHERE id=$1",[partial.id]);
+  r=await api(`/calendar/overdue/${partial.jobId}/resolve`,'POST',{action:'discard',confirm:true});assert.equal(r.status,201,JSON.stringify(r));
+  assert.equal((await pool.query('SELECT status FROM content WHERE id=$1',[partial.id])).rows[0].status,'PUBLISHED');
+});
+
 test('batch endpoints require membership and explicit confirmation, then process actual SQL',async()=>{
   await resetQuota();await pool.query('UPDATE workspace_subscriptions SET custom_daily_limit=10 WHERE workspace_id=$1',[wid]);
   assert.equal((await api('/batch/bulk-save','POST',{items:[{title:'Batch',body:'Body',platforms:['Telegram']}]})).status,400);

@@ -26,6 +26,7 @@ import { request } from "../lib/api";
 import { toast } from "sonner";
 import { PostingSlotsModal } from "../components/PostingSlotsModal";
 import { BatchRescheduleModal } from "../components/BatchRescheduleModal";
+import { OverduePostsReview } from '../components/OverduePostsReview';
 import { useSession } from "../lib/session";
 import {
   COMPREHENSIVE_FESTIVALS,
@@ -226,6 +227,7 @@ export default function Calendar() {
 
   return (
     <div style={{ paddingBottom: "40px" }}>
+      <OverduePostsReview workspaceId={s.workspace.id} timezone={tz} canSchedule={canSchedule} demo={demo} />
       {/* Page Heading & Main Actions */}
       <div className="page-heading">
         <div>

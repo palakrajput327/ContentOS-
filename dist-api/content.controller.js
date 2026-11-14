@@ -106,6 +106,7 @@ let ContentController = class ContentController {
             workspaceId: r.workspace.id,
             scope: body.scope || "all",
             channel: body.channel,
+            accountId: body.accountId,
             startDate: body.startDate,
             endDate: body.endDate,
             postIds: body.postIds,
@@ -122,12 +123,14 @@ let ContentController = class ContentController {
             role: r.workspace.role,
             scope: body.scope || "all",
             channel: body.channel,
+            accountId: body.accountId,
             startDate: body.startDate,
             endDate: body.endDate,
             postIds: body.postIds,
             state: body.state,
             timezone: body.timezone,
             deleteFromPlatform: body.deleteFromPlatform ?? true,
+            deleteMode: body.deleteMode,
             confirm: body.confirm,
         });
     }
@@ -144,7 +147,6 @@ let ContentController = class ContentController {
     }
     async create(r, input) {
         assertPermission(r.workspace.role, "edit");
-        await assertWorkspaceActive(r.workspace.id, "creating posts");
         const v = inputSchema.parse(input);
         if (v.platforms.includes("YouTube") && !v.youtube) {
             const rawYt = v.variants?.YouTube || v.variants?.youtube;

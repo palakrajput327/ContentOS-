@@ -162,8 +162,9 @@ export class ContentController {
     @Req() r: AuthedRequest,
     @Body()
     body: {
-      scope?: "all" | "today" | "custom_range" | "selected_ids";
+      scope?: "all" | "today" | "overdue" | "recent_24h" | "custom_range" | "selected_ids";
       channel?: string;
+      accountId?: string;
       startDate?: string;
       endDate?: string;
       postIds?: string[];
@@ -177,6 +178,7 @@ export class ContentController {
       workspaceId: r.workspace.id,
       scope: body.scope || "all",
       channel: body.channel,
+      accountId: body.accountId,
       startDate: body.startDate,
       endDate: body.endDate,
       postIds: body.postIds,
@@ -190,14 +192,16 @@ export class ContentController {
     @Req() r: AuthedRequest,
     @Body()
     body: {
-      scope?: "all" | "today" | "custom_range" | "selected_ids";
+      scope?: "all" | "today" | "overdue" | "recent_24h" | "custom_range" | "selected_ids";
       channel?: string;
+      accountId?: string;
       startDate?: string;
       endDate?: string;
       postIds?: string[];
       state?: string;
       timezone?: string;
       deleteFromPlatform?: boolean;
+      deleteMode?: "full" | "soft_local" | "platform_only";
       confirm: boolean;
     }
   ) {
@@ -209,12 +213,14 @@ export class ContentController {
       role: r.workspace.role,
       scope: body.scope || "all",
       channel: body.channel,
+      accountId: body.accountId,
       startDate: body.startDate,
       endDate: body.endDate,
       postIds: body.postIds,
       state: body.state,
       timezone: body.timezone,
       deleteFromPlatform: body.deleteFromPlatform ?? true,
+      deleteMode: body.deleteMode,
       confirm: body.confirm,
     });
   }
@@ -249,7 +255,6 @@ export class ContentController {
 
   @Post() async create(@Req() r: AuthedRequest, @Body() input: unknown) {
     assertPermission(r.workspace.role, "edit");
-    await assertWorkspaceActive(r.workspace.id, "creating posts");
     const v = inputSchema.parse(input);
     if (v.platforms.includes("YouTube") && !v.youtube) {
       const rawYt = (v.variants as any)?.YouTube || (v.variants as any)?.youtube;

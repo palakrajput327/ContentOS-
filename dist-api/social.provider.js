@@ -4,6 +4,7 @@ import { uploadYouTubeVideo } from "./youtube.api.js";
 import { BadRequestException } from "@nestjs/common";
 import { getStorageProvider } from "./storage/storage.factory.js";
 import * as path from "node:path";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 async function getMediaBuffer(imageUrl) {
     if (imageUrl.includes("/storage/local/download") || imageUrl.startsWith("/")) {
         try {
@@ -58,6 +59,39 @@ async function getMediaBuffer(imageUrl) {
     catch (err) {
         console.error("[Media Resolver] Remote attachment could not be read.");
         return null;
+    }
+}
+export async function optimizeSocialImage(mediaInfo, maxBytes = 4.5 * 1024 * 1024, maxDimension = 2048) {
+    if (!mediaInfo.mimeType.startsWith("image/"))
+        return mediaInfo;
+    try {
+        const img = await loadImage(mediaInfo.buffer);
+        let { width, height } = img;
+        const exceedsDimension = width > maxDimension || height > maxDimension;
+        const exceedsSize = mediaInfo.buffer.length > maxBytes;
+        if (!exceedsDimension && !exceedsSize && ["image/jpeg", "image/png", "image/webp"].includes(mediaInfo.mimeType)) {
+            return mediaInfo;
+        }
+        if (exceedsDimension) {
+            if (width > height) {
+                height = Math.round((height * maxDimension) / width);
+                width = maxDimension;
+            }
+            else {
+                width = Math.round((width * maxDimension) / height);
+                height = maxDimension;
+            }
+        }
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        const buffer = await canvas.encode("jpeg", 85);
+        console.log(`[Media Optimizer] Resized/compressed image from ${mediaInfo.buffer.length} bytes to ${buffer.length} bytes (${width}x${height})`);
+        return { buffer, mimeType: "image/jpeg" };
+    }
+    catch (err) {
+        console.warn("[Media Optimizer] Image optimization skipped, using original buffer:", err?.message || err);
+        return mediaInfo;
     }
 }
 export class TelegramProvider {
@@ -413,10 +447,11 @@ export class LinkedInProvider {
         video: false,
         document: false,
     };
-    async uploadLinkedInImage(token, author, mediaInfo) {
+    async uploadLinkedInImage(token, author, rawMediaInfo) {
         try {
             const apiVersion = process.env.LINKEDIN_API_VERSION || "202609";
-            console.log(`[LinkedIn Publish] Initializing image upload for author: ${author}, buffer size: ${mediaInfo.buffer.length} bytes`);
+            const mediaInfo = await optimizeSocialImage(rawMediaInfo, 4.5 * 1024 * 1024, 2048);
+            console.log(`[LinkedIn Publish] Initializing image upload for author: ${author}, buffer size: ${mediaInfo.buffer.length} bytes (original: ${rawMediaInfo.buffer.length} bytes)`);
             const initRes = await fetch("https://api.linkedin.com/rest/images?action=initializeUpload", {
                 method: "POST",
                 headers: {

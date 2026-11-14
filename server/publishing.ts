@@ -14,6 +14,7 @@ import {
 import { createPublishPlan } from "./publish-planner.js";
 import { PLATFORM_CAPABILITIES, type Platform } from "./platform-capabilities.js";
 import { queuePublishNotificationEmail } from "./mail.js";
+import { needsOverdueReview, OVERDUE_REVIEW } from './overdue-posts.js';
 
 export async function aggregate(
   db: DB,
@@ -102,13 +103,17 @@ export async function claim(id: string, now: Date = new Date()) {
       );
       return null;
     }
+    if (needsOverdueReview(job, now)) {
+      await db.query('UPDATE scheduled_posts SET error_code=$2 WHERE id=$1', [id, OVERDUE_REVIEW]);
+      return null;
+    }
     try{await assertPublicationApproved(db,raw.workspace_id,content);}catch(error){
       if(!(error instanceof ConflictException))throw error;
       await db.query("UPDATE scheduled_posts SET error_code='APPROVAL_REQUIRED' WHERE id=$1",[id]);
       return null;
     }
     if (new Date(job.execute_at).getTime() > now.getTime())
-      throw new Error("Job arrived before execution time");
+      return null; // An old queue delivery may arrive after an explicit reschedule.
     const account = (
       await db.query(
         "SELECT a.*,t.ciphertext,t.expires_at FROM social_accounts a LEFT JOIN social_account_tokens t ON t.account_id=a.id WHERE a.id=$1 AND a.workspace_id=$2 FOR SHARE OF a",

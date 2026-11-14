@@ -560,10 +560,10 @@ export function DocumentVisualConceptsHub({
   // Automated Dispatch: Triggers live dispatch when concept's slot time is reached
   useEffect(() => {
     if (!scheduledConcepts.length || dispatchingConceptId) return;
-    const dueConcept = scheduledConcepts.find((sc) => sc.isDue && sc.concept.status !== "DISPATCHED");
+    const dueConcept = scheduledConcepts.find((sc) => sc.isDue && (!sc.concept.status || sc.concept.status === "PENDING"));
     if (dueConcept) {
       console.log(`[VisualConceptsHub] Slot time reached for ${dueConcept.concept.id}. Triggering auto-dispatch...`);
-      handleDispatchPost(dueConcept.concept.id);
+      handleDispatchPost(dueConcept.concept.id, editedCaptions[dueConcept.concept.id] ?? getEffectiveConceptCaption(dueConcept.concept, documentName));
     }
   }, [scheduledConcepts, dispatchingConceptId]);
 
@@ -1799,7 +1799,7 @@ export function DocumentVisualConceptsHub({
 
                     <Button
                       variant="primary"
-                      onClick={() => handleDispatchPost(concept.id, editedCaptions[concept.id] ?? concept.caption)}
+                      onClick={() => handleDispatchPost(concept.id, editedCaptions[concept.id] ?? getEffectiveConceptCaption(concept, documentName))}
                       disabled={isDispatchingThis || isGeneratingThis}
                       style={{
                         flex: 1.2,

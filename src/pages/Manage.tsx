@@ -485,20 +485,24 @@ export function Channels() {
       >
         <Button
           variant="danger"
+          disabled={busy}
           onClick={async () => {
             try {
               if (demo)
                 throw new Error("Sample connections are fixed in the demo.");
+              setBusy(true);
               await request(`/social/accounts/${remove}`, "DELETE");
               setRemove(null);
               await query.invalidateQueries({ queryKey: ["workspace"] });
-              toast.success("Channel disconnected");
+              toast.success("Channel disconnected successfully");
             } catch (e) {
               toast.error((e as Error).message);
+            } finally {
+              setBusy(false);
             }
           }}
         >
-          Disconnect channel
+          {busy ? "Disconnecting…" : "Disconnect channel"}
         </Button>
       </Modal>
 

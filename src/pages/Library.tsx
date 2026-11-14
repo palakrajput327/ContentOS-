@@ -20,6 +20,7 @@ import {
   MessageSquare,
   Trash2,
   MoreHorizontal,
+  ShieldAlert,
 } from "lucide-react";
 import {
   Button,
@@ -32,8 +33,19 @@ import { data, request } from "../lib/api";
 import { dateLabel, type Snapshot, type Post } from "../lib/model";
 import { BatchProgressIndicator } from "../components/BatchProgressIndicator";
 import { ContentDiscussionPanel } from "../components/ContentDiscussionPanel";
-import { BulkDeletePostsModal } from "../components/BulkDeletePostsModal";
+import {
+  BulkDeletePostsModal,
+  type BulkDeleteMode,
+  type BulkDeleteScope,
+} from "../components/BulkDeletePostsModal";
 import { useSession } from '../lib/session';
+
+interface DeleteModalConfig {
+  ids: string[];
+  mode?: BulkDeleteMode;
+  scope?: BulkDeleteScope;
+  stateFilter?: string;
+}
 
 const noDeleteIds: string[] = [];
 
@@ -89,8 +101,19 @@ export default function Library({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [showBulkScheduleModal, setShowBulkScheduleModal] = useState(false);
-  const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
-  useEffect(() => { setSelectedIds([]); setDeleteIds(null); }, [s.workspace.id]);
+  const [deleteConfig, setDeleteConfig] = useState<DeleteModalConfig | null>(null);
+  useEffect(() => { setSelectedIds([]); setDeleteConfig(null); }, [s.workspace.id]);
+
+  function openDeleteModal(ids: string[] = [], mode?: BulkDeleteMode) {
+    const isPub = filter === "PUBLISHED";
+    const chosenMode = mode || (isPub ? "platform_only" : "full");
+    setDeleteConfig({
+      ids,
+      mode: chosenMode,
+      scope: ids.length > 0 ? "selected_ids" : "all",
+      stateFilter: isPub ? "PUBLISHED" : "ALL",
+    });
+  }
   const [bulkScheduleDate, setBulkScheduleDate] = useState("");
   const [discussionPost, setDiscussionPost] = useState<Post | null>(null);
 
@@ -205,12 +228,13 @@ export default function Library({
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           {canSchedule && (
             <Button
-              variant="secondary"
-              onClick={() => setDeleteIds([])}
+              variant={filter === "PUBLISHED" ? "danger" : "secondary"}
+              onClick={() => openDeleteModal([], filter === "PUBLISHED" ? "platform_only" : "full")}
               style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              title={filter === "PUBLISHED" ? "Delete published posts from connected social accounts" : "Bulk delete posts"}
             >
-              <Trash2 size={15} style={{ color: "var(--danger, #ef4444)" }} />
-              Bulk Delete
+              <Trash2 size={15} style={{ color: filter === "PUBLISHED" ? "#ffffff" : "var(--danger, #ef4444)" }} />
+              {filter === "PUBLISHED" ? "Delete from Account" : "Bulk Delete"}
             </Button>
           )}
           {canEdit && (
@@ -320,15 +344,49 @@ export default function Library({
               )}
               {canSchedule && (
                 <>
-                  <Button variant="secondary" onClick={() => setShowBulkScheduleModal(true)} disabled={busy} style={{ fontSize: "0.82rem", padding: "6px 12px" }}>
-                    <CalendarDays size={13} /> Schedule
-                  </Button>
-                  <Button variant="primary" onClick={() => handleBulkAction("bulk-publish")} disabled={busy} style={{ fontSize: "0.82rem", padding: "6px 12px" }}>
-                    <Send size={13} /> Publish Now
-                  </Button>
-                  <Button variant="danger" onClick={() => setDeleteIds([...selectedIds])} disabled={busy} style={{ fontSize: "0.82rem", padding: "6px 12px", display: "flex", alignItems: "center", gap: "5px" }}>
-                    <Trash2 size={13} /> Delete ({selectedIds.length})
-                  </Button>
+                  {filter === "PUBLISHED" || posts.some((p) => selectedIds.includes(p.id) && p.status === "PUBLISHED") ? (
+                    <>
+                      <Button
+                        variant="danger"
+                        onClick={() => openDeleteModal([...selectedIds], "platform_only")}
+                        disabled={busy}
+                        style={{ fontSize: "0.82rem", padding: "6px 12px", display: "flex", alignItems: "center", gap: "5px" }}
+                        title="Delete selected posts from connected live social accounts"
+                      >
+                        <Trash2 size={13} /> Delete from Account ({selectedIds.length})
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => openDeleteModal([...selectedIds], "soft_local")}
+                        disabled={busy}
+                        style={{ fontSize: "0.82rem", padding: "6px 12px", display: "flex", alignItems: "center", gap: "5px" }}
+                        title="Soft delete from account schedule/backlog without deleting live social posts"
+                      >
+                        <ShieldAlert size={13} /> Soft Delete
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => openDeleteModal([...selectedIds], "full")}
+                        disabled={busy}
+                        style={{ fontSize: "0.82rem", padding: "6px 12px", display: "flex", alignItems: "center", gap: "5px", color: "var(--danger)" }}
+                        title="Full delete from both connected accounts and library"
+                      >
+                        <Trash2 size={13} /> Full Delete
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button variant="secondary" onClick={() => setShowBulkScheduleModal(true)} disabled={busy} style={{ fontSize: "0.82rem", padding: "6px 12px" }}>
+                        <CalendarDays size={13} /> Schedule
+                      </Button>
+                      <Button variant="primary" onClick={() => handleBulkAction("bulk-publish")} disabled={busy} style={{ fontSize: "0.82rem", padding: "6px 12px" }}>
+                        <Send size={13} /> Publish Now
+                      </Button>
+                      <Button variant="danger" onClick={() => openDeleteModal([...selectedIds], "full")} disabled={busy} style={{ fontSize: "0.82rem", padding: "6px 12px", display: "flex", alignItems: "center", gap: "5px" }}>
+                        <Trash2 size={13} /> Delete ({selectedIds.length})
+                      </Button>
+                    </>
+                  )}
                 </>
               )}
               <Button variant="ghost" onClick={() => setSelectedIds([])} style={{ fontSize: "0.82rem", color: "var(--color-text-muted)", padding: "6px 10px" }}>
@@ -393,30 +451,64 @@ export default function Library({
 
             {canSchedule && (
               <>
-                <Button
-                  variant="secondary"
-                  onClick={() => setShowBulkScheduleModal(true)}
-                  disabled={busy}
-                  style={{ fontSize: "0.85rem" }}
-                >
-                  <CalendarDays size={14} /> Bulk Schedule
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={() => handleBulkAction("bulk-publish")}
-                  disabled={busy}
-                  style={{ fontSize: "0.85rem" }}
-                >
-                  <Send size={14} /> Bulk Publish Now
-                </Button>
-                <Button
-                  variant="danger"
-                  onClick={() => setDeleteIds([...selectedIds])}
-                  disabled={busy}
-                  style={{ fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "6px" }}
-                >
-                  <Trash2 size={14} /> Delete Selected ({selectedIds.length})
-                </Button>
+                {filter === "PUBLISHED" || posts.some((p) => selectedIds.includes(p.id) && p.status === "PUBLISHED") ? (
+                  <>
+                    <Button
+                      variant="danger"
+                      onClick={() => openDeleteModal([...selectedIds], "platform_only")}
+                      disabled={busy}
+                      style={{ fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "6px" }}
+                      title="Delete selected posts from connected live social accounts"
+                    >
+                      <Trash2 size={14} /> Delete from Account ({selectedIds.length})
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => openDeleteModal([...selectedIds], "soft_local")}
+                      disabled={busy}
+                      style={{ fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "6px" }}
+                      title="Soft delete from account backlog without deleting live social posts"
+                    >
+                      <ShieldAlert size={14} /> Soft Delete
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => openDeleteModal([...selectedIds], "full")}
+                      disabled={busy}
+                      style={{ fontSize: "0.85rem", color: "var(--danger)" }}
+                      title="Full delete from both connected accounts and library"
+                    >
+                      Full Delete
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setShowBulkScheduleModal(true)}
+                      disabled={busy}
+                      style={{ fontSize: "0.85rem" }}
+                    >
+                      <CalendarDays size={14} /> Bulk Schedule
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={() => handleBulkAction("bulk-publish")}
+                      disabled={busy}
+                      style={{ fontSize: "0.85rem" }}
+                    >
+                      <Send size={14} /> Bulk Publish Now
+                    </Button>
+                    <Button
+                      variant="danger"
+                      onClick={() => openDeleteModal([...selectedIds], "full")}
+                      disabled={busy}
+                      style={{ fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "6px" }}
+                    >
+                      <Trash2 size={14} /> Delete Selected ({selectedIds.length})
+                    </Button>
+                  </>
+                )}
               </>
             )}
 
@@ -476,9 +568,36 @@ export default function Library({
                           <button type="button" disabled={busy} onClick={() => action(p, "approve")}><Check size={15} /> Approve</button>
                         )}
                         {canSchedule && !["PUBLISHING", "UNCERTAIN"].includes(p.status) && (
-                          <button type="button" className="library-delete-action" onClick={() => setDeleteIds([p.id])}>
-                            <Trash2 size={15} /> Delete post
-                          </button>
+                          p.status === "PUBLISHED" ? (
+                            <>
+                              <button
+                                type="button"
+                                className="library-delete-action"
+                                onClick={() => openDeleteModal([p.id], "platform_only")}
+                                style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--danger)" }}
+                              >
+                                <Trash2 size={15} /> Delete from Account
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openDeleteModal([p.id], "soft_local")}
+                                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                              >
+                                <ShieldAlert size={15} /> Soft Delete from Account
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openDeleteModal([p.id], "full")}
+                                style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)" }}
+                              >
+                                <Trash2 size={15} /> Full Delete
+                              </button>
+                            </>
+                          ) : (
+                            <button type="button" className="library-delete-action" onClick={() => openDeleteModal([p.id], "full")}>
+                              <Trash2 size={15} /> Delete post
+                            </button>
+                          )
                         )}
                       </div>
                     </details>
@@ -514,6 +633,16 @@ export default function Library({
                     >
                       Live Post <ExternalLink size={13} style={{ marginLeft: 4 }} />
                     </a>
+                  </Button>
+                )}
+                {p.status === "PUBLISHED" && canSchedule && (
+                  <Button
+                    variant="danger"
+                    onClick={() => openDeleteModal([p.id], "platform_only")}
+                    title="Delete post from connected social account"
+                    style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "0.82rem" }}
+                  >
+                    <Trash2 size={13} /> Delete from Account
                   </Button>
                 )}
                 <Button
@@ -705,11 +834,15 @@ export default function Library({
 
       {/* Bulk Post Deletion Modal */}
       <BulkDeletePostsModal
-        open={deleteIds !== null}
-        onClose={() => setDeleteIds(null)}
-        preselectedPostIds={deleteIds ?? noDeleteIds}
+        open={deleteConfig !== null}
+        onClose={() => setDeleteConfig(null)}
+        preselectedPostIds={deleteConfig?.ids ?? noDeleteIds}
+        initialScope={deleteConfig?.scope || (deleteConfig?.ids?.length ? "selected_ids" : "all")}
+        initialDeleteMode={deleteConfig?.mode || (filter === "PUBLISHED" ? "platform_only" : "full")}
+        initialStateFilter={deleteConfig?.stateFilter || (filter === "PUBLISHED" ? "PUBLISHED" : "ALL")}
         onSuccess={() => {
           setSelectedIds([]);
+          setDeleteConfig(null);
           query.invalidateQueries({ queryKey: ["workspace"] });
           query.invalidateQueries({ queryKey: ["posts"] });
           query.invalidateQueries({ queryKey: ["calendar"] });

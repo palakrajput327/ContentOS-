@@ -16,13 +16,18 @@ import {
 import { ModalFrame, Button, PlatformIcon, StatusBadge } from "./ui";
 import { request } from "../lib/api";
 
+export type BulkDeleteScope = "all" | "today" | "overdue" | "recent_24h" | "custom_range" | "selected_ids";
+export type BulkDeleteMode = "full" | "soft_local" | "platform_only";
+
 export interface BulkDeletePostsModalProps {
   open: boolean;
   onClose: () => void;
   onSuccess?: () => void;
   preselectedPostIds?: string[];
-  initialScope?: "all" | "today" | "custom_range" | "selected_ids";
+  initialScope?: BulkDeleteScope;
   initialChannel?: string;
+  initialDeleteMode?: BulkDeleteMode;
+  initialStateFilter?: string;
 }
 
 interface PreviewItem {
@@ -50,10 +55,12 @@ interface DeletionLogItem {
 
 interface PreviewResponse {
   totalMatching: number;
+  overdueCount?: number;
   items: PreviewItem[];
   breakdownByChannel: Record<string, number>;
   breakdownByStatus: Record<string, number>;
   canDeletePlatformCount: number;
+  accounts?: Array<{ id: string; platform: string; name: string }>;
 }
 
 interface ExecutionResponse {
@@ -73,23 +80,27 @@ export function BulkDeletePostsModal({
   preselectedPostIds = [],
   initialScope = "all",
   initialChannel = "all",
+  initialDeleteMode = "full",
+  initialStateFilter = "ALL",
 }: BulkDeletePostsModalProps) {
   const isPreselected = preselectedPostIds.length > 0;
   const isSingle = preselectedPostIds.length === 1;
 
   // Form Filters State
-  const [scope, setScope] = useState<"all" | "today" | "custom_range" | "selected_ids">(
+  const [scope, setScope] = useState<BulkDeleteScope>(
     isPreselected ? "selected_ids" : initialScope
   );
   const [channel, setChannel] = useState<string>(initialChannel);
-  const [stateFilter, setStateFilter] = useState<string>("ALL");
+  const [accountId, setAccountId] = useState<string>("all");
+  const [stateFilter, setStateFilter] = useState<string>(initialStateFilter);
   const [startDate, setStartDate] = useState<string>(
     new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0]
   );
   const [endDate, setEndDate] = useState<string>(
     new Date().toISOString().split("T")[0]
   );
-  const [deleteFromPlatform, setDeleteFromPlatform] = useState<boolean>(true);
+  const [deleteMode, setDeleteMode] = useState<BulkDeleteMode>(initialDeleteMode);
+  const deleteFromPlatform = deleteMode !== "soft_local";
 
   // Selected sub-items within preview
   const [selectedInPreview, setSelectedInPreview] = useState<string[]>([]);
@@ -115,9 +126,12 @@ export function BulkDeletePostsModal({
         setConfirmed(false);
       }
       setChannel(initialChannel);
+      setAccountId("all");
+      setStateFilter(initialStateFilter);
+      setDeleteMode(initialDeleteMode);
       setExecutionResult(null);
     }
-  }, [open, preselectedPostIds, initialScope, initialChannel]);
+  }, [open, preselectedPostIds, initialScope, initialChannel, initialDeleteMode, initialStateFilter]);
 
   const previewRequest = useRef(0);
 
@@ -133,6 +147,7 @@ export function BulkDeletePostsModal({
       const payload: Record<string, any> = {
         scope,
         channel: channel.toLowerCase(),
+        accountId: accountId !== "all" ? accountId : undefined,
         state: stateFilter,
       };
 
@@ -158,7 +173,7 @@ export function BulkDeletePostsModal({
     } finally {
       if (requestId === previewRequest.current) setLoadingPreview(false);
     }
-  }, [open, scope, channel, stateFilter, startDate, endDate, preselectedPostIds]);
+  }, [open, scope, channel, accountId, stateFilter, startDate, endDate, preselectedPostIds]);
 
   useEffect(() => {
     if (open && !executionResult) {
@@ -190,31 +205,51 @@ export function BulkDeletePostsModal({
       return;
     }
 
+    const allPreviewSelected =
+      !isPreselected &&
+      previewData &&
+      previewData.items.length > 0 &&
+      selectedInPreview.length === previewData.items.length &&
+      previewData.totalMatching > previewData.items.length;
+
     const targetPostIds = selectedInPreview.length > 0
       ? selectedInPreview
       : (isPreselected ? preselectedPostIds : []);
 
-    if (targetPostIds.length === 0) {
+    if (!allPreviewSelected && targetPostIds.length === 0) {
       toast.error("No posts selected to delete.");
       return;
     }
 
     setExecuting(true);
     try {
-      const payload: Record<string, any> = {
-        scope: "selected_ids",
-        postIds: targetPostIds,
-        deleteFromPlatform,
-        confirm: true,
-      };
+      const payload: Record<string, any> = allPreviewSelected
+        ? {
+            scope,
+            channel: channel.toLowerCase(),
+            accountId: accountId !== "all" ? accountId : undefined,
+            state: stateFilter,
+            ...(scope === "custom_range" ? { startDate, endDate } : {}),
+            deleteFromPlatform,
+            deleteMode,
+            confirm: true,
+          }
+        : {
+            scope: "selected_ids",
+            postIds: targetPostIds,
+            deleteFromPlatform,
+            deleteMode,
+            confirm: true,
+          };
 
       const res = await request<ExecutionResponse>("/content/bulk-delete/execute", "POST", payload);
 
       if (res.failed === 0 && res.skipped === 0) {
+        const actionVerb = deleteMode === "soft_local" ? "soft-deleted from account" : "deleted";
         toast.success(
           isSingle
-            ? "Post deleted successfully!"
-            : `Successfully deleted ${res.deletedFromDatabase} post${res.deletedFromDatabase !== 1 ? "s" : ""}!`
+            ? `Post ${actionVerb} successfully!`
+            : `Successfully ${actionVerb} ${res.deletedFromDatabase} post${res.deletedFromDatabase !== 1 ? "s" : ""}!`
         );
         if (onSuccess) {
           onSuccess();
@@ -281,14 +316,22 @@ export function BulkDeletePostsModal({
           </div>
           <div>
             <h2 style={{ margin: "0 0 4px 0", fontSize: "1.2rem", fontWeight: 700, color: "var(--ink)" }}>
-              {isSingle ? "Delete Post" : isPreselected ? `Delete ${preselectedPostIds.length} Selected Posts` : "Bulk Post Deletion"}
+              {deleteMode === "platform_only"
+                ? (isSingle ? "Delete from Account" : isPreselected ? `Delete ${preselectedPostIds.length} Posts from Account` : "Delete Posts from Account")
+                : deleteMode === "soft_local"
+                  ? (isSingle ? "Soft Delete from Account" : isPreselected ? `Soft Delete ${preselectedPostIds.length} Posts from Account` : "Soft Delete Posts from Account")
+                  : (isSingle ? "Delete Post" : isPreselected ? `Delete ${preselectedPostIds.length} Selected Posts` : "Bulk Post Deletion")}
             </h2>
             <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-              {isSingle
-                ? "Permanently remove this post from your library."
-                : isPreselected
-                  ? `Permanently remove ${preselectedPostIds.length} selected posts from your library.`
-                  : "Safely delete multiple scheduled or published posts from your workspace and social channels."}
+              {deleteMode === "platform_only"
+                ? "Remove published posts from connected social accounts (e.g. LinkedIn, Facebook, Telegram) while preserving your draft copy."
+                : deleteMode === "soft_local"
+                  ? "Soft-delete posts from account: cancel schedule/overdue backlogs in ContentOS without modifying live platforms."
+                  : (isSingle
+                    ? "Permanently remove this post from your library."
+                    : isPreselected
+                      ? `Permanently remove ${preselectedPostIds.length} selected posts from your library.`
+                      : "Safely delete multiple scheduled or published posts from your workspace and social channels.")}
             </p>
           </div>
         </div>
@@ -445,37 +488,60 @@ export function BulkDeletePostsModal({
                   </div>
                 )}
 
-                {/* Only show social platform toggle if post was published to a live platform */}
-                {hasLivePlatform && (
-                  <div
+                {/* Flexible Deletion Mode */}
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px",
+                    padding: "12px 14px",
+                    borderRadius: "10px",
+                    background: "rgba(99, 102, 241, 0.08)",
+                    border: "1px solid rgba(99, 102, 241, 0.25)",
+                  }}
+                >
+                  <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--ink)" }}>
+                    DELETION MODE
+                  </label>
+                  <select
+                    value={deleteMode}
+                    onChange={(e) => setDeleteMode(e.target.value as BulkDeleteMode)}
                     style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: "10px",
-                      padding: "12px 14px",
-                      borderRadius: "10px",
-                      background: "rgba(99, 102, 241, 0.08)",
-                      border: "1px solid rgba(99, 102, 241, 0.25)",
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--border)",
+                      background: "var(--bg)",
+                      color: "var(--ink)",
+                      fontSize: "0.85rem",
                     }}
                   >
-                    <input
-                      type="checkbox"
-                      id="deleteFromPlatform"
-                      checked={deleteFromPlatform}
-                      onChange={(e) => setDeleteFromPlatform(e.target.checked)}
-                      style={{ marginTop: "3px", cursor: "pointer" }}
-                    />
-                    <label htmlFor="deleteFromPlatform" style={{ cursor: "pointer", fontSize: "0.85rem", color: "var(--ink)" }}>
-                      <strong>Also delete from live social channel ({singleItem?.platform})</strong>
-                      <span style={{ display: "block", fontSize: "0.78rem", color: "var(--muted)", marginTop: "2px" }}>
-                        Calls the external platform API to remove the published post.
-                      </span>
-                    </label>
-                  </div>
-                )}
+                    {hasLivePlatform ? (
+                      <>
+                        <option value="full">Full Delete (Live {singleItem?.platform} + Account Schedule)</option>
+                        <option value="soft_local">Soft Delete from Account (Keep Live Post & History)</option>
+                        <option value="platform_only">Delete Live {singleItem?.platform} Only (Keep ContentOS Draft)</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="full">Permanent Delete (Remove from Schedule & Library)</option>
+                        <option value="soft_local">Soft Delete from Account (Cancel Schedule & Keep History)</option>
+                      </>
+                    )}
+                  </select>
+                  <span style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
+                    {deleteMode === "soft_local"
+                      ? "Cancels queued/overdue posting and marks the account record cancelled without touching live social channels."
+                      : deleteMode === "platform_only"
+                        ? "Removes the live post from the social platform while keeping your copy as a draft in ContentOS."
+                        : "Removes the post from ContentOS and calls the social platform API if published."}
+                  </span>
+                </div>
 
                 <p style={{ margin: "2px 0 0 0", fontSize: "0.83rem", color: "var(--color-text-muted)" }}>
-                  Are you sure you want to delete this post? This action is permanent.
+                  {deleteMode === "soft_local"
+                    ? "Soft-deleted posts are cancelled from your active schedule and will never auto-post."
+                    : "Are you sure you want to delete this post? This action is permanent."}
                 </p>
 
                 {/* Single Delete Actions */}
@@ -490,7 +556,13 @@ export function BulkDeletePostsModal({
                     style={{ display: "flex", alignItems: "center", gap: "6px" }}
                   >
                     <Trash2 size={15} />
-                    {executing ? "Deleting Post..." : "Delete Post"}
+                    {executing
+                      ? (deleteMode === "platform_only" ? "Deleting from Account..." : deleteMode === "soft_local" ? "Soft Deleting..." : "Deleting...")
+                      : deleteMode === "platform_only"
+                        ? "Delete from Account"
+                        : deleteMode === "soft_local"
+                          ? "Soft Delete Post"
+                          : "Delete Post"}
                   </Button>
                 </div>
               </>
@@ -499,6 +571,51 @@ export function BulkDeletePostsModal({
         ) : (
           /* View 2B: Multi / Bulk Delete View */
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* Quick Overdue Backlog Alert */}
+            {!isPreselected && (previewData?.overdueCount ?? 0) > 0 && scope !== "overdue" && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  padding: "10px 14px",
+                  borderRadius: "10px",
+                  background: "rgba(245, 158, 11, 0.12)",
+                  border: "1px solid rgba(245, 158, 11, 0.35)",
+                  fontSize: "0.83rem",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--ink)" }}>
+                  <Clock size={16} style={{ color: "var(--warning, #f59e0b)", flexShrink: 0 }} />
+                  <span>
+                    <strong>{previewData?.overdueCount}</strong> overdue queued post{previewData?.overdueCount !== 1 ? "s" : ""} found in this workspace.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScope("overdue");
+                    setStateFilter("ALL");
+                    setDeleteMode("soft_local");
+                  }}
+                  style={{
+                    padding: "5px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid rgba(245, 158, 11, 0.5)",
+                    background: "var(--surface)",
+                    color: "var(--ink)",
+                    fontSize: "0.78rem",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Manage Overdue (Soft Delete)
+                </button>
+              </div>
+            )}
+
             {/* Filter Controls Grid (Only shown when not pre-selected) */}
             {!isPreselected && (
               <div
@@ -519,7 +636,7 @@ export function BulkDeletePostsModal({
                   </label>
                   <select
                     value={scope}
-                    onChange={(e) => setScope(e.target.value as any)}
+                    onChange={(e) => setScope(e.target.value as BulkDeleteScope)}
                     style={{
                       width: "100%",
                       padding: "8px 10px",
@@ -531,6 +648,8 @@ export function BulkDeletePostsModal({
                     }}
                   >
                     <option value="all">All Posts (Full Workspace)</option>
+                    <option value="overdue">Overdue Queued Posts (Stop Backlog)</option>
+                    <option value="recent_24h">Last 24 Hours (Recent Activity)</option>
                     <option value="today">Only Today&apos;s Posts</option>
                     <option value="custom_range">Custom Date Range</option>
                     {preselectedPostIds.length > 0 && (
@@ -548,7 +667,10 @@ export function BulkDeletePostsModal({
                   </label>
                   <select
                     value={channel}
-                    onChange={(e) => setChannel(e.target.value)}
+                    onChange={(e) => {
+                      setChannel(e.target.value);
+                      setAccountId("all");
+                    }}
                     style={{
                       width: "100%",
                       padding: "8px 10px",
@@ -568,6 +690,37 @@ export function BulkDeletePostsModal({
                     <option value="youtube">YouTube</option>
                   </select>
                 </div>
+
+                {/* Specific Connected Account Selector (when accounts exist) */}
+                {previewData?.accounts && previewData.accounts.length > 0 && (
+                  <div>
+                    <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 700, color: "var(--muted)", marginBottom: "6px" }}>
+                      CONNECTED ACCOUNT
+                    </label>
+                    <select
+                      value={accountId}
+                      onChange={(e) => setAccountId(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        borderRadius: "6px",
+                        border: "1px solid var(--border)",
+                        background: "var(--bg)",
+                        color: "var(--ink)",
+                        fontSize: "0.85rem",
+                      }}
+                    >
+                      <option value="all">All Connected Accounts</option>
+                      {previewData.accounts
+                        .filter((a) => channel === "all" || a.platform.toLowerCase() === channel.toLowerCase())
+                        .map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.platform}: {a.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* Custom Date Range Pickers (if custom_range) */}
                 {scope === "custom_range" && (
@@ -632,6 +785,7 @@ export function BulkDeletePostsModal({
                     }}
                   >
                     <option value="ALL">All Statuses (Published & Scheduled)</option>
+                    <option value="OVERDUE">Overdue Queued Only</option>
                     <option value="PUBLISHED">Published Only</option>
                     <option value="ENQUEUED">Scheduled / Enqueued Only</option>
                     <option value="FAILED">Failed / Cancelled Only</option>
@@ -666,31 +820,45 @@ export function BulkDeletePostsModal({
               </div>
             )}
 
-            {/* Social Platform Deletion Checkbox */}
+            {/* Flexible Deletion Mode Selector */}
             <div
               style={{
                 display: "flex",
-                alignItems: "flex-start",
-                gap: "10px",
+                flexDirection: "column",
+                gap: "8px",
                 padding: "12px 14px",
                 borderRadius: "10px",
-                background: "rgba(99, 102, 241, 0.08)",
-                border: "1px solid rgba(99, 102, 241, 0.25)",
+                background: deleteMode === "soft_local" ? "rgba(245, 158, 11, 0.08)" : "rgba(99, 102, 241, 0.08)",
+                border: deleteMode === "soft_local" ? "1px solid rgba(245, 158, 11, 0.3)" : "1px solid rgba(99, 102, 241, 0.25)",
               }}
             >
-              <input
-                type="checkbox"
-                id="deleteFromPlatform"
-                checked={deleteFromPlatform}
-                onChange={(e) => setDeleteFromPlatform(e.target.checked)}
-                style={{ marginTop: "3px", cursor: "pointer" }}
-              />
-              <label htmlFor="deleteFromPlatform" style={{ cursor: "pointer", fontSize: "0.85rem", color: "var(--ink)" }}>
-                <strong>Also delete published posts directly from live social platforms (LinkedIn, Telegram, etc.)</strong>
-                <span style={{ display: "block", fontSize: "0.78rem", color: "var(--muted)", marginTop: "2px" }}>
-                  ContentOS calls platform APIs to delete published posts. If social network access is denied, the record is kept safe.
-                </span>
+              <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--ink)" }}>
+                DELETION MODE
               </label>
+              <select
+                value={deleteMode}
+                onChange={(e) => setDeleteMode(e.target.value as BulkDeleteMode)}
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--border)",
+                  background: "var(--bg)",
+                  color: "var(--ink)",
+                  fontSize: "0.85rem",
+                }}
+              >
+                <option value="full">Full Delete — Delete from Live Social Platforms + Account Schedule</option>
+                <option value="soft_local">Soft Delete from Account — Cancel Overdue / Active Queue (Keep Live Posts & History)</option>
+                <option value="platform_only">Platform Only — Delete from Live Social Platforms (Keep ContentOS Copy)</option>
+              </select>
+              <span style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
+                {deleteMode === "soft_local"
+                  ? "Recommended for overdue backlogs: marks scheduled/queued posts as Cancelled in ContentOS and stops future auto-posting without touching live channels."
+                  : deleteMode === "platform_only"
+                    ? "Calls LinkedIn/Telegram/Meta APIs to delete live posts while keeping your copy in ContentOS as cancelled drafts."
+                    : "Calls platform APIs to delete published posts and removes local schedule records. If a platform API rejects deletion, the local record is preserved."}
+              </span>
             </div>
 
             {/* Preview Section */}
@@ -842,11 +1010,26 @@ export function BulkDeletePostsModal({
                       style={{ cursor: "pointer" }}
                     />
                     <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--danger, #ef4444)" }}>
-                      I confirm the permanent deletion of {selectedInPreview.length} selected post{selectedInPreview.length > 1 ? "s" : ""}.
+                      {(() => {
+                        const effectiveCount =
+                          !isPreselected &&
+                          previewData &&
+                          selectedInPreview.length === previewData.items.length &&
+                          previewData.totalMatching > previewData.items.length
+                            ? previewData.totalMatching
+                            : selectedInPreview.length;
+                        return deleteMode === "soft_local"
+                          ? `I confirm soft-deleting ${effectiveCount} post${effectiveCount !== 1 ? "s" : ""} from my account schedule.`
+                          : `I confirm deleting ${effectiveCount} post${effectiveCount !== 1 ? "s" : ""}.`;
+                      })()}
                     </span>
                   </label>
                   <p style={{ margin: "4px 0 0 24px", fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
-                    This action will delete posts from your ContentOS schedule and request deletion from connected social platforms where permitted.
+                    {deleteMode === "soft_local"
+                      ? "Soft delete cancels queued/overdue posts in ContentOS and stops future auto-posting while preserving live social posts and history."
+                      : deleteMode === "platform_only"
+                        ? "Removes live posts from connected social platforms while keeping your ContentOS drafts intact."
+                        : "This action will delete posts from your ContentOS schedule and request deletion from connected social platforms where permitted."}
                   </p>
                 </div>
               </div>
@@ -864,9 +1047,28 @@ export function BulkDeletePostsModal({
                 style={{ display: "flex", alignItems: "center", gap: "6px" }}
               >
                 <Trash2 size={15} />
-                {executing
-                  ? "Deleting..."
-                  : `Delete ${selectedInPreview.length} Post${selectedInPreview.length !== 1 ? "s" : ""}`}
+                {(() => {
+                  const effectiveCount =
+                    !isPreselected &&
+                    previewData &&
+                    selectedInPreview.length === previewData.items.length &&
+                    previewData.totalMatching > previewData.items.length
+                      ? previewData.totalMatching
+                      : selectedInPreview.length;
+                  if (executing) {
+                    return deleteMode === "platform_only"
+                      ? "Deleting from Account..."
+                      : deleteMode === "soft_local"
+                        ? "Soft Deleting..."
+                        : "Deleting...";
+                  }
+                  if (deleteMode === "platform_only") {
+                    return `Delete ${effectiveCount} from Account`;
+                  }
+                  return deleteMode === "soft_local"
+                    ? `Soft Delete ${effectiveCount} Post${effectiveCount !== 1 ? "s" : ""}`
+                    : `Delete ${effectiveCount} Post${effectiveCount !== 1 ? "s" : ""}`;
+                })()}
               </Button>
             </div>
           </div>
