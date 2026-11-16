@@ -761,27 +761,50 @@ Return JSON with "concepts" array.`;
         );
         return concept.content_id;
       }
-      const id=randomUUID();
-      await db.query("INSERT INTO content(id,workspace_id,created_by,updated_by,title,body,variants,platforms,status,image_asset_id) VALUES($1,$2,$3,$3,$4,$5,$6,$7,'DRAFT',$8)",[id,opts.workspaceId,opts.userId,row.concept_title,caption,JSON.stringify(variants),JSON.stringify(channels.map(ch=>Object.keys(PLATFORM_CAPABILITIES).find(p=>p.toLowerCase()===ch.toLowerCase())||ch)),row.asset_id||null]);
-      await db.query("INSERT INTO content_versions(id,workspace_id,content_id,version,snapshot,created_by) SELECT $1,workspace_id,id,version,to_jsonb(content),$2 FROM content WHERE id=$3",[randomUUID(),opts.userId,id]);
-      await db.query("UPDATE document_visual_concepts SET content_id=$1 WHERE id=$2 AND workspace_id=$3",[id,opts.conceptId,opts.workspaceId]);
+      const id = randomUUID();
+      const platformsJson = JSON.stringify(channels.map(ch=>Object.keys(PLATFORM_CAPABILITIES).find(p=>p.toLowerCase()===ch.toLowerCase())||ch));
+      const variantsJson = JSON.stringify(variants);
+      await db.query(
+        "INSERT INTO content(id,workspace_id,created_by,updated_by,title,body,variants,platforms,status,image_asset_id) VALUES($1,$2,$3,$3,$4,$5,$6,$7,'DRAFT',$8)",
+        [id, opts.workspaceId, opts.userId, row.concept_title, caption, variantsJson, platformsJson, row.asset_id || null]
+      );
+      const snapshot = { id, title: row.concept_title, body: caption, variants, platforms: channels, image_asset_id: row.asset_id };
+      await db.query(
+        "INSERT INTO content_versions(id,workspace_id,content_id,version,snapshot,created_by) VALUES($1,$2,$3,1,$4,$5)",
+        [randomUUID(), opts.workspaceId, id, JSON.stringify(snapshot), opts.userId]
+      );
+      await db.query("UPDATE document_visual_concepts SET content_id=$1 WHERE id=$2 AND workspace_id=$3", [id, opts.conceptId, opts.workspaceId]);
       return id;
     });
-    const results:any[]=[];
-    const {publishContentNow}=await import("../publishing.js");
+    const results: any[] = [];
+    const { publishContentNow } = await import("../publishing.js");
     for (const ch of channels) {
-      const account=connectedAccounts.find((a:any)=>a.platform.toLowerCase()===ch.toLowerCase());
-      if (!account) { results.push({platform:ch,success:false,error:"No healthy account"}); continue; }
-      const done=(await pool.query("SELECT 1 FROM scheduled_posts WHERE workspace_id=$1 AND content_id=$2 AND account_id=$3 AND state='PUBLISHED'",[opts.workspaceId,prepared,account.id])).rowCount;
-      if(done){results.push({platform:ch,success:true});continue;}
-      try { results.push({platform:ch,...await publishContentNow(opts.workspaceId,opts.userId,prepared,account.id,true)}); }
-      catch(e:any){results.push({platform:ch,success:false,error:e.message});}
+      const account = connectedAccounts.find((a: any) => a.platform.toLowerCase() === ch.toLowerCase());
+      if (!account) { results.push({ platform: ch, success: false, error: "No healthy account" }); continue; }
+      const done = (await pool.query("SELECT 1 FROM scheduled_posts WHERE workspace_id=$1 AND content_id=$2 AND account_id=$3 AND state='PUBLISHED'", [opts.workspaceId, prepared, account.id])).rowCount;
+      if (done) { results.push({ platform: ch, success: true }); continue; }
+      try { results.push({ platform: ch, ...await publishContentNow(opts.workspaceId, opts.userId, prepared, account.id, true) }); }
+      catch (e: any) { results.push({ platform: ch, success: false, error: e.message }); }
     }
-    const publishedCount=results.filter(r=>r.success).length;
-    const success=results.length>0 && publishedCount===results.length;
-    const nextStatus=success?'DISPATCHED':publishedCount>0?'PARTIAL':'FAILED';
-    await pool.query("UPDATE document_visual_concepts SET status=$1,dispatched_at=CASE WHEN $2 THEN now() ELSE dispatched_at END,target_channels=$3,post_result=$4::jsonb WHERE id=$5 AND workspace_id=$6",[nextStatus,success,channels,JSON.stringify(results),opts.conceptId,opts.workspaceId]);
-    return {success,conceptId:opts.conceptId,dispatchedAt:success?dispatchedAt:"",publishedCount,contentId:prepared,results};
+    const publishedCount = results.filter(r => r.success).length;
+    const success = results.length > 0 && publishedCount === results.length;
+    const nextStatus = success ? 'DISPATCHED' : publishedCount > 0 ? 'PARTIAL' : 'FAILED';
+    const channelsJson = JSON.stringify(channels);
+    const resultsJson = JSON.stringify(results);
+
+    try {
+      await pool.query(
+        "UPDATE document_visual_concepts SET status=$1, dispatched_at=CASE WHEN $2 THEN now() ELSE dispatched_at END, target_channels=$3::jsonb, post_result=$4::jsonb WHERE id=$5 AND workspace_id=$6",
+        [nextStatus, success, channelsJson, resultsJson, opts.conceptId, opts.workspaceId]
+      );
+    } catch (updateErr: any) {
+      console.warn("[VisualConcepts] Updating status with jsonb failed, falling back:", updateErr?.message);
+      await pool.query(
+        "UPDATE document_visual_concepts SET status=$1, dispatched_at=CASE WHEN $2 THEN now() ELSE dispatched_at END WHERE id=$3 AND workspace_id=$4",
+        [nextStatus, success, opts.conceptId, opts.workspaceId]
+      ).catch(() => {});
+    }
+    return { success, conceptId: opts.conceptId, dispatchedAt: success ? dispatchedAt : "", publishedCount, contentId: prepared, results };
   }
 
   /**
@@ -883,12 +906,23 @@ Return JSON with "concepts" array.`;
       const [sh, sm] = slot.time.split(':').map(Number);
       const targetUtcDate = parseDateInTz(y, mo, da, sh, sm, timezone || 'Asia/Kolkata');
 
-      await pool.query(
-        `UPDATE document_visual_concepts
-         SET scheduled_at = $1, target_channels = $2, status = 'PENDING', updated_at = NOW()
-         WHERE id = $3`,
-        [targetUtcDate.toISOString(), safeChannels, c.id]
-      );
+      const channelsJson = JSON.stringify(safeChannels);
+      try {
+        await pool.query(
+          `UPDATE document_visual_concepts
+           SET scheduled_at = $1, target_channels = $2::jsonb, status = 'PENDING', updated_at = NOW()
+           WHERE id = $3`,
+          [targetUtcDate.toISOString(), channelsJson, c.id]
+        );
+      } catch (syncErr: any) {
+        console.warn("[VisualConcepts] Syncing target_channels as jsonb failed, fallback to plain scheduled_at:", syncErr?.message);
+        await pool.query(
+          `UPDATE document_visual_concepts
+           SET scheduled_at = $1, status = 'PENDING', updated_at = NOW()
+           WHERE id = $2`,
+          [targetUtcDate.toISOString(), c.id]
+        ).catch(() => {});
+      }
       count++;
 
       slotIdx++;
