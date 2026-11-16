@@ -676,7 +676,7 @@ Return JSON with "concepts" array.`;
         let dayOffset = 0;
         let slotIdx = sortedSlots.findIndex((s) => {
             const [h, m] = s.time.split(':').map(Number);
-            return h > currentHour || (h === currentHour && m > currentMin);
+            return h > currentHour || (h === currentHour && m >= currentMin);
         });
         if (slotIdx === -1) {
             dayOffset = 1;

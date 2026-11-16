@@ -210,6 +210,42 @@ class CronController {
           processed.push({ id: sp.id, status: "failed", error: postErr.message });
         }
       }
+
+      // Auto-dispatch due visual concepts from Document Knowledge Base / AI Studio
+      try {
+        const dueConcepts = (await pool.query(
+          `SELECT dvc.id, dvc.document_id, dvc.workspace_id, dvc.target_channels, 
+                  COALESCE((SELECT m.user_id FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE m.workspace_id=dvc.workspace_id AND m.role='Owner' AND u.account_status='ACTIVE' LIMIT 1),d.created_by) as user_id
+           FROM document_visual_concepts dvc
+           LEFT JOIN documents d ON d.id = dvc.document_id
+           WHERE dvc.scheduled_at IS NOT NULL 
+             AND dvc.scheduled_at <= NOW()
+             AND (dvc.status IS NULL OR dvc.status = 'PENDING')
+           ORDER BY dvc.scheduled_at ASC LIMIT 5`
+        )).rows;
+
+        for (const concept of dueConcepts) {
+          try {
+            console.log(`[ContentOS CronTick] Auto-dispatching due visual concept ${concept.id}...`);
+            const { VisualConceptsService } = await import("./documents/visual-concepts.service.js");
+            const vcService = new VisualConceptsService();
+            await vcService.dispatchConcept({
+              documentId: concept.document_id,
+              conceptId: concept.id,
+              workspaceId: concept.workspace_id,
+              userId: concept.user_id,
+              channels: concept.target_channels || ["linkedin"],
+            });
+            processed.push({ id: concept.id, status: "concept_dispatched" });
+          } catch (conceptErr: any) {
+            console.warn(`[ContentOS CronTick] Concept dispatch failed for ${concept.id}:`, conceptErr?.message || conceptErr);
+            processed.push({ id: concept.id, status: "concept_failed", error: conceptErr?.message });
+          }
+        }
+      } catch (vcErr: any) {
+        console.warn("[ContentOS CronTick] Visual concepts tick check warning:", vcErr?.message || vcErr);
+      }
+
       return { ok: true, timestamp: new Date().toISOString(), processedCount: processed.length, processed };
     } catch (err: any) {
       return { ok: false, error: err?.message };
@@ -566,7 +602,7 @@ export async function bootstrap() {
            LEFT JOIN documents d ON d.id = dvc.document_id
            WHERE dvc.scheduled_at IS NOT NULL 
              AND dvc.scheduled_at <= NOW()
-             AND dvc.scheduled_at >= NOW() - interval '15 minutes'
+             AND dvc.scheduled_at >= NOW() - interval '24 hours'
              AND (dvc.status IS NULL OR dvc.status = 'PENDING')
            ORDER BY dvc.scheduled_at ASC LIMIT 5`
         )).rows;
@@ -625,7 +661,7 @@ export async function bootstrap() {
            LEFT JOIN documents d ON d.id = dvc.document_id
            WHERE dvc.scheduled_at IS NOT NULL 
              AND dvc.scheduled_at <= NOW()
-             AND dvc.scheduled_at >= NOW() - interval '15 minutes'
+             AND dvc.scheduled_at >= NOW() - interval '24 hours'
              AND (dvc.status IS NULL OR dvc.status = 'PENDING')
            ORDER BY dvc.scheduled_at ASC LIMIT 5`
         )).rows;

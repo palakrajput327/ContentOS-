@@ -497,6 +497,8 @@ export function DocumentVisualConceptsHub({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const dispatchedConceptIdsRef = useRef<Set<string>>(new Set());
+
   // Map each concept sequentially across user's daily time slots (max 3 per day)
   const scheduledConcepts = useMemo(() => {
     if (!concepts.length || !slots.length) return [];
@@ -505,12 +507,14 @@ export function DocumentVisualConceptsHub({
     const now = currentTime;
     const currentHour = now.getHours();
     const currentMin = now.getMinutes();
+    const currentTotalSec = currentHour * 3600 + currentMin * 60 + now.getSeconds();
 
     let dayOffset = 0;
-    // Find first slot today that hasn't passed yet
+    // Find first slot today that hasn't passed (with a 60s grace window so the active minute stays active)
     let slotIdx = sortedSlots.findIndex((s) => {
       const [h, m] = s.time.split(":").map(Number);
-      return h > currentHour || (h === currentHour && m > currentMin);
+      const slotSec = h * 3600 + m * 60;
+      return slotSec + 60 >= currentTotalSec;
     });
 
     if (slotIdx === -1) {
@@ -520,35 +524,60 @@ export function DocumentVisualConceptsHub({
     }
 
     return concepts.map((concept, i) => {
-      const slot = sortedSlots[slotIdx];
-      const targetDate = new Date(now);
-      targetDate.setDate(targetDate.getDate() + dayOffset);
-      const [sh, sm] = slot.time.split(":").map(Number);
-      targetDate.setHours(sh, sm, 0, 0);
+      let targetDate: Date;
+      let slotLabel: string;
+      let slotNumber: number;
+
+      // If concept already has a persisted scheduledAt from DB, prioritize its fixed timestamp!
+      if (concept.scheduledAt && !isNaN(new Date(concept.scheduledAt).getTime())) {
+        targetDate = new Date(concept.scheduledAt);
+        const assignedSlot = sortedSlots.find((s) => {
+          const [sh, sm] = s.time.split(":").map(Number);
+          return targetDate.getHours() === sh && targetDate.getMinutes() === sm;
+        });
+        slotLabel = assignedSlot?.label || `Slot #${(i % sortedSlots.length) + 1}`;
+        slotNumber = (i % sortedSlots.length) + 1;
+      } else {
+        const slot = sortedSlots[slotIdx];
+        targetDate = new Date(now);
+        targetDate.setDate(targetDate.getDate() + dayOffset);
+        const [sh, sm] = slot.time.split(":").map(Number);
+        targetDate.setHours(sh, sm, 0, 0);
+
+        slotLabel = slot.label;
+        slotNumber = (i % sortedSlots.length) + 1;
+
+        // Advance slot for next item
+        slotIdx++;
+        if (slotIdx >= sortedSlots.length) {
+          slotIdx = 0;
+          dayOffset++;
+        }
+      }
 
       const msDiff = targetDate.getTime() - now.getTime();
-      const isDue = msDiff <= 0;
+      // Due if target time has arrived (msDiff <= 0) and not older than 24 hours
+      const isDue = msDiff <= 0 && msDiff > -86400000;
 
       const totalSec = Math.max(0, Math.floor(msDiff / 1000));
       const hours = Math.floor(totalSec / 3600);
       const minutes = Math.floor((totalSec % 3600) / 60);
       const seconds = totalSec % 60;
-      const countdownStr = `${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
+      const countdownStr = isDue
+        ? "Publishing now..."
+        : `${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
 
-      const dayLabel = dayOffset === 0 ? "Today" : dayOffset === 1 ? "Tomorrow" : targetDate.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+      const isToday = targetDate.toDateString() === now.toDateString();
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const isTomorrow = targetDate.toDateString() === tomorrow.toDateString();
+      const dayLabel = isToday ? "Today" : isTomorrow ? "Tomorrow" : targetDate.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
       const formattedTime = targetDate.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-
-      // Advance slot for next item
-      slotIdx++;
-      if (slotIdx >= sortedSlots.length) {
-        slotIdx = 0;
-        dayOffset++;
-      }
 
       return {
         concept,
-        slotNumber: (i % sortedSlots.length) + 1,
-        slotLabel: slot.label,
+        slotNumber,
+        slotLabel,
         dayLabel,
         formattedTime,
         countdownStr,
@@ -561,10 +590,16 @@ export function DocumentVisualConceptsHub({
   // Automated Dispatch: Triggers live dispatch when concept's slot time is reached
   useEffect(() => {
     if (!scheduledConcepts.length || dispatchingConceptId) return;
-    const dueConcept = scheduledConcepts.find((sc) => sc.isDue && (!sc.concept.status || sc.concept.status === "PENDING"));
+    const dueConcept = scheduledConcepts.find(
+      (sc) => sc.isDue && (!sc.concept.status || sc.concept.status === "PENDING") && !dispatchedConceptIdsRef.current.has(sc.concept.id)
+    );
     if (dueConcept) {
+      dispatchedConceptIdsRef.current.add(dueConcept.concept.id);
       console.log(`[VisualConceptsHub] Slot time reached for ${dueConcept.concept.id}. Triggering auto-dispatch...`);
-      handleDispatchPost(dueConcept.concept.id, editedCaptions[dueConcept.concept.id] ?? getEffectiveConceptCaption(dueConcept.concept, documentName));
+      handleDispatchPost(
+        dueConcept.concept.id,
+        editedCaptions[dueConcept.concept.id] ?? getEffectiveConceptCaption(dueConcept.concept, documentName)
+      );
     }
   }, [scheduledConcepts, dispatchingConceptId]);
 
