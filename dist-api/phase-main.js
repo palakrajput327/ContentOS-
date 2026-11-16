@@ -183,6 +183,47 @@ __decorate([
 HealthController = __decorate([
     Controller("health")
 ], HealthController);
+let CronController = class CronController {
+    async cronTick() {
+        try {
+            const { relayScheduledPosts } = await import("./cron-tasks.js");
+            await relayScheduledPosts(pool);
+            const mailMod = await import("./mail.js");
+            await mailMod.deliverEmails({ limit: 10 });
+            const duePosts = (await pool.query(`SELECT id FROM scheduled_posts 
+         WHERE state IN ('PENDING', 'ENQUEUED') AND execute_at <= NOW()
+         AND error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED'
+         ORDER BY execute_at ASC LIMIT 15`)).rows;
+            const processed = [];
+            for (const sp of duePosts) {
+                const { executePublishRecord } = await import("./publishing.js");
+                try {
+                    console.log(`[ContentOS CronTick] Auto-publishing due post ${sp.id}...`);
+                    await executePublishRecord(sp.id, { attemptsMade: 0, maxAttempts: 3 });
+                    processed.push({ id: sp.id, status: "published" });
+                }
+                catch (postErr) {
+                    console.warn(`[ContentOS CronTick] Auto-publish failed for post ${sp.id}:`, postErr.message);
+                    processed.push({ id: sp.id, status: "failed", error: postErr.message });
+                }
+            }
+            return { ok: true, timestamp: new Date().toISOString(), processedCount: processed.length, processed };
+        }
+        catch (err) {
+            return { ok: false, error: err?.message };
+        }
+    }
+};
+__decorate([
+    Public(),
+    Get("cron/tick"),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], CronController.prototype, "cronTick", null);
+CronController = __decorate([
+    Controller()
+], CronController);
 import { SocialController } from "./social.controller.js";
 import { StorageController } from "./storage/storage.controller.js";
 import { DocumentsController } from "./documents/documents.controller.js";
@@ -228,6 +269,7 @@ PhaseModule = __decorate([
             CommentsController,
             ClipdropController,
             InstagramStudioController,
+            CronController,
         ],
         providers: [AdminGuard, { provide: APP_GUARD, useClass: PhaseGuard }, ClipdropService],
     })
@@ -449,8 +491,10 @@ export async function bootstrap() {
         try {
             const { relayScheduledPosts } = await import("./cron-tasks.js");
             await relayScheduledPosts(pool);
+            const mailMod = await import("./mail.js");
+            await mailMod.deliverEmails({ limit: 10 });
             const duePosts = (await pool.query(`SELECT id FROM scheduled_posts 
-         WHERE state = 'ENQUEUED' AND execute_at <= NOW()
+         WHERE state IN ('PENDING', 'ENQUEUED') AND execute_at <= NOW()
          AND error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED'
          ORDER BY execute_at ASC LIMIT 10`)).rows;
             for (const sp of duePosts) {
@@ -463,8 +507,6 @@ export async function bootstrap() {
                     console.warn(`[ContentOS] Auto-publish failed for post ${sp.id}:`, postErr.message);
                 }
             }
-            const { deliverEmails } = await import("./mail.js");
-            await deliverEmails({ limit: 10 });
             // Auto-dispatch due visual concepts from Document Knowledge Base / AI Studio
             try {
                 const dueConcepts = (await pool.query(`SELECT dvc.id, dvc.document_id, dvc.workspace_id, dvc.target_channels, 
@@ -508,7 +550,7 @@ export async function bootstrap() {
             return;
         try {
             const duePosts = (await pool.query(`SELECT id FROM scheduled_posts 
-         WHERE state = 'ENQUEUED' AND execute_at <= NOW()
+         WHERE state IN ('PENDING', 'ENQUEUED') AND execute_at <= NOW()
          AND error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED'
          ORDER BY execute_at ASC LIMIT 10`)).rows;
             for (const sp of duePosts) {

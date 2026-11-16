@@ -178,6 +178,44 @@ class HealthController {
     }
   }
 }
+
+@Controller()
+class CronController {
+  @Public()
+  @Get("cron/tick")
+  async cronTick() {
+    try {
+      const { relayScheduledPosts } = await import("./cron-tasks.js");
+      await relayScheduledPosts(pool);
+
+      const mailMod = await import("./mail.js");
+      await mailMod.deliverEmails({ limit: 10 });
+
+      const duePosts = (await pool.query(
+        `SELECT id FROM scheduled_posts 
+         WHERE state IN ('PENDING', 'ENQUEUED') AND execute_at <= NOW()
+         AND error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED'
+         ORDER BY execute_at ASC LIMIT 15`
+      )).rows;
+
+      const processed: Array<{ id: string; status: string; error?: string }> = [];
+      for (const sp of duePosts) {
+        const { executePublishRecord } = await import("./publishing.js");
+        try {
+          console.log(`[ContentOS CronTick] Auto-publishing due post ${sp.id}...`);
+          await executePublishRecord(sp.id, { attemptsMade: 0, maxAttempts: 3 });
+          processed.push({ id: sp.id, status: "published" });
+        } catch (postErr: any) {
+          console.warn(`[ContentOS CronTick] Auto-publish failed for post ${sp.id}:`, postErr.message);
+          processed.push({ id: sp.id, status: "failed", error: postErr.message });
+        }
+      }
+      return { ok: true, timestamp: new Date().toISOString(), processedCount: processed.length, processed };
+    } catch (err: any) {
+      return { ok: false, error: err?.message };
+    }
+  }
+}
 import { SocialController } from "./social.controller.js";
 import { StorageController } from "./storage/storage.controller.js";
 import { DocumentsController } from "./documents/documents.controller.js";
@@ -220,6 +258,7 @@ import { BillingController } from "./billing/billing.controller.js";
     CommentsController,
     ClipdropController,
     InstagramStudioController,
+    CronController,
   ],
   providers: [AdminGuard, { provide: APP_GUARD, useClass: PhaseGuard }, ClipdropService],
 })
@@ -471,9 +510,12 @@ export async function bootstrap() {
       const { relayScheduledPosts } = await import("./cron-tasks.js");
       await relayScheduledPosts(pool);
 
+      const mailMod = await import("./mail.js");
+      await mailMod.deliverEmails({ limit: 10 });
+
       const duePosts = (await pool.query(
         `SELECT id FROM scheduled_posts 
-         WHERE state = 'ENQUEUED' AND execute_at <= NOW()
+         WHERE state IN ('PENDING', 'ENQUEUED') AND execute_at <= NOW()
          AND error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED'
          ORDER BY execute_at ASC LIMIT 10`
       )).rows;
@@ -487,9 +529,6 @@ export async function bootstrap() {
           console.warn(`[ContentOS] Auto-publish failed for post ${sp.id}:`, (postErr as Error).message);
         }
       }
-
-      const { deliverEmails } = await import("./mail.js");
-      await deliverEmails({ limit: 10 });
 
       // Auto-dispatch due visual concepts from Document Knowledge Base / AI Studio
       try {
@@ -536,7 +575,7 @@ export async function bootstrap() {
     try {
       const duePosts = (await pool.query(
         `SELECT id FROM scheduled_posts 
-         WHERE state = 'ENQUEUED' AND execute_at <= NOW()
+         WHERE state IN ('PENDING', 'ENQUEUED') AND execute_at <= NOW()
          AND error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED'
          ORDER BY execute_at ASC LIMIT 10`
       )).rows;

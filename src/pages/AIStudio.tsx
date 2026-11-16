@@ -1944,10 +1944,19 @@ export default function AIStudio() {
                     });
                   }}
                   onScheduleUpdate={(info) => {
-                    setDynamicScheduleInfo({
-                      slotsText: info.slotsText,
-                      nextPostText: info.nextPostText,
-                      activeSlotsCount: info.activeSlotsCount,
+                    setDynamicScheduleInfo((prev) => {
+                      if (
+                        prev.slotsText === info.slotsText &&
+                        prev.nextPostText === info.nextPostText &&
+                        prev.activeSlotsCount === info.activeSlotsCount
+                      ) {
+                        return prev;
+                      }
+                      return {
+                        slotsText: info.slotsText,
+                        nextPostText: info.nextPostText,
+                        activeSlotsCount: info.activeSlotsCount,
+                      };
                     });
                   }}
                 />

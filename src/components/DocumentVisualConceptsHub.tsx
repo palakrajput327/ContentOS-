@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   Clock,
@@ -233,10 +233,11 @@ export function DocumentVisualConceptsHub({
   }, [connectedPlatformIds]);
 
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  const lastSyncedScheduleRef = useRef<string>("");
 
-  // Keep live time ticking every second for countdowns
+  // Keep live time ticking every 15s (lightweight) instead of 1s to prevent UI thread flooding
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    const timer = setInterval(() => setCurrentTime(new Date()), 15000);
     return () => clearInterval(timer);
   }, []);
 
@@ -597,6 +598,10 @@ export function DocumentVisualConceptsHub({
       } else {
         nextPostText = `Today at ${formatTime12(sortedSlots[0].time)}`;
       }
+
+      const syncKey = `${slotsText}|${nextPostText}|${sortedSlots.length}`;
+      if (lastSyncedScheduleRef.current === syncKey) return;
+      lastSyncedScheduleRef.current = syncKey;
 
       onScheduleUpdate({
         slotsText,

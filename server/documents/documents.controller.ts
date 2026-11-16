@@ -721,13 +721,18 @@ export class DocumentsController {
       const planContentIds = planRows.rows.map((p) => p.content_id).filter(Boolean) as string[];
       const planIds = planRows.rows.map((p) => p.id);
 
-      // Collect any content IDs linked directly to this document via content_sources
-      const csRows = await db.query(
-        "SELECT content_id FROM content_sources WHERE document_id = $1 AND workspace_id = $2",
-        [documentId, w],
-      );
+      // Collect any content IDs linked directly to this document's visual concepts
+      let vcContentIds: string[] = [];
+      try {
+        const vcQuery = await db.query(
+          "SELECT content_id FROM document_visual_concepts WHERE document_id = $1 AND content_id IS NOT NULL",
+          [documentId],
+        );
+        vcContentIds = vcQuery.rows.map((r: any) => r.content_id).filter(Boolean);
+      } catch {}
+
       const allContentIds = [
-        ...new Set([...planContentIds, ...csRows.rows.map((r: any) => r.content_id).filter(Boolean)]),
+        ...new Set([...planContentIds, ...vcContentIds]),
       ] as string[];
 
       // 3. Delete knowledge_content_plans FIRST because knowledge_content_plans.content_id has NO ACTION FK on content
@@ -774,10 +779,6 @@ export class DocumentsController {
         );
         await db.query(
           "DELETE FROM content_versions WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2",
-          [allContentIds, w],
-        );
-        await db.query(
-          "DELETE FROM content_sources WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2",
           [allContentIds, w],
         );
         await db.query(

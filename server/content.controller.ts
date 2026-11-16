@@ -46,6 +46,7 @@ import {
 import { createPublishPlan } from "./publish-planner.js";
 import { NotificationsService } from "./notifications/notifications.service.js";
 import { assertWorkspaceActive } from "./billing/entitlement.service.js";
+import { resolveNextAutopilotSlot } from "./autopilot-slot-resolver.js";
 
 export const publishSchema = z.object({
   socialAccountId: z.string().uuid("Valid social account ID required"),
@@ -377,6 +378,111 @@ export class ContentController {
       return serializePost({ ...p, creator: r.user.name });
     });
   }
+
+  @Post(":id/send-to-autopilot")
+  async sendToAutopilot(@Req() r: AuthedRequest, @Param("id") id: string) {
+    assertPermission(r.workspace.role, "schedule");
+    await assertWorkspaceActive(r.workspace.id, "autopilot scheduling");
+
+    return transaction(async (db) => {
+      const p = await locked(db, id, r.workspace.id);
+      if (p.status !== "DRAFT" && p.status !== "NEEDS_REVIEW" && p.status !== "APPROVED") {
+        throw new ConflictException("Only draft or unposted content can be sent to Autopilot.");
+      }
+
+      const platforms = (Array.isArray(p.platforms) ? p.platforms : JSON.parse(p.platforms || "[]")) as string[];
+      if (!platforms.length) {
+        throw new BadRequestException("At least one target platform must be selected.");
+      }
+
+      // 1. Resolve next available slot in workspace timezone without collision
+      const slot = await resolveNextAutopilotSlot(db, r.workspace.id, platforms, id);
+
+      // 2. Validate platform plans and connected accounts
+      const targetAccounts: Array<{ platform: string; accountId: string }> = [];
+      for (const platform of platforms) {
+        if (!Object.keys(PLATFORM_CAPABILITIES).includes(platform)) {
+          throw new BadRequestException(`${platform} publishing is not available.`);
+        }
+
+        await createPublishPlan(db, { ...p, workspace_id: p.workspace_id || r.workspace.id }, platform as Platform);
+
+        if (platform === "YouTube") {
+          const validYt = await resolveYouTubeInput(db, r.workspace.id, p);
+          await validateYouTubeInput(db, r.workspace.id, validYt, false);
+        }
+
+        const account = (
+          await db.query(
+            "SELECT a.id FROM social_accounts a JOIN social_account_tokens t ON t.account_id=a.id WHERE a.workspace_id=$1 AND lower(a.platform)=lower($2) AND lower(a.state)='connected' AND (t.expires_at IS NULL OR t.expires_at>now() OR (lower(a.platform)='youtube' AND t.refresh_ciphertext IS NOT NULL)) FOR SHARE OF a",
+            [r.workspace.id, platform],
+          )
+        ).rows[0];
+
+        if (!account) {
+          throw new BadRequestException(
+            `Please connect a valid ${platform} account in Channels before sending to Autopilot.`,
+          );
+        }
+        targetAccounts.push({ platform, accountId: account.id });
+      }
+
+      // 3. Mark approved so publication quota & execution triggers succeed seamlessly
+      await db.query(
+        "UPDATE content SET approved_by = COALESCE(approved_by, $3), status = 'APPROVED', updated_at = now() WHERE id = $1 AND workspace_id = $2",
+        [id, r.workspace.id, r.user.id],
+      );
+
+      // 4. Enqueue into scheduled_posts
+      for (const target of targetAccounts) {
+        await db.query(
+          "INSERT INTO scheduled_posts(id, workspace_id, content_id, account_id, content_version, execute_at, timezone) VALUES($1, $2, $3, $4, $5, $6, $7)",
+          [
+            randomUUID(),
+            r.workspace.id,
+            id,
+            target.accountId,
+            p.version + 1,
+            slot.executeAt,
+            slot.timezone,
+          ],
+        );
+      }
+
+      // 5. Update content record to SCHEDULED
+      await db.query(
+        "UPDATE content SET status = 'SCHEDULED', scheduled_at = $3, timezone = $4, scheduled_by = $5, version = version + 1, updated_at = now(), updated_by = $5 WHERE id = $1 AND workspace_id = $2",
+        [id, r.workspace.id, slot.executeAt, slot.timezone, r.user.id],
+      );
+
+      await audit(
+        db,
+        r.workspace.id,
+        r.user.id,
+        "AUTOPILOT_MANUAL_ENQUEUED",
+        "content",
+        id,
+        p.title,
+        { previousStatus: p.status, version: p.version },
+        {
+          status: "SCHEDULED",
+          version: p.version + 1,
+          scheduledAt: slot.executeAt.toISOString(),
+          formattedTime: slot.formattedLocal,
+          platforms,
+        },
+      );
+
+      return {
+        id,
+        status: "SCHEDULED",
+        scheduledAt: slot.executeAt.toISOString(),
+        formattedTime: slot.formattedLocal,
+        platforms,
+      };
+    });
+  }
+
   @Post(":id/:action") async transition(
     @Req() r: AuthedRequest,
     @Param("id") id: string,

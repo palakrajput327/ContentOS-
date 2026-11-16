@@ -651,6 +651,84 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
     }
   }
 
+  // Send Manual Post to Autopilot Queue
+  async function handleSendToAutopilot() {
+    try {
+      setError("");
+      if (!title.trim() || !body.trim() || !selected.length) {
+        throw new Error("Add a title, write your content, and select at least one target platform before sending to Autopilot.");
+      }
+      setBusy("autopilot");
+
+      const cleanVariants: Record<string, any> = {};
+      selected.forEach((p) => {
+        if (variants[p]) {
+          cleanVariants[p] = composedVariant(p);
+        } else {
+          cleanVariants[p] = {
+            title,
+            caption: body,
+            mediaType: postType,
+            mediaUrl: mediaUrl || undefined,
+            mediaAssetId: mediaAssetId || undefined,
+          };
+        }
+      });
+
+      // YouTube validation
+      let ytPayload = post?.youtube;
+      if (!ytPayload && selected.includes("YouTube")) {
+        const ytVar = cleanVariants["YouTube"];
+        const mAssetId = (typeof ytVar === "object" ? ytVar.mediaAssetId : null) || mediaAssetId;
+        if (!mAssetId) {
+          throw new Error("YouTube requires a video attachment. Please upload a video or Short first, or uncheck YouTube.");
+        }
+        const ytTitle = ((typeof ytVar === "object" ? ytVar.title : "") || title || "Untitled Video").replace(/[<>]/g, "").trim().slice(0, 100);
+        const ytDesc = ((typeof ytVar === "object" ? ytVar.caption : "") || body || "").trim().slice(0, 5000);
+        const ytKind = (typeof ytVar === "object" && ytVar.metadata?.youtubeKind === "Short") ? "Short" : "Video";
+        const ytVis = (typeof ytVar === "object" && ytVar.metadata?.visibility) || "public";
+        ytPayload = {
+          kind: ytKind,
+          assetId: mAssetId,
+          title: ytTitle || "Untitled Video",
+          description: ytDesc,
+          visibility: ytVis,
+        };
+      }
+
+      // 1. Save post draft
+      const saved = await data.save({
+        ...post,
+        title: title.trim(),
+        body: body.trim(),
+        platforms: selected,
+        variants: cleanVariants,
+        youtube: ytPayload || undefined,
+      });
+
+      // 2. Call send-to-autopilot endpoint
+      const result = await request<{
+        id: string;
+        status: string;
+        scheduledAt: string;
+        formattedTime: string;
+        platforms: string[];
+      }>(`/content/${saved.id}/send-to-autopilot`, "POST");
+
+      await query.invalidateQueries({ queryKey: ["workspace"] });
+      toast.success(
+        `⚡ Queued into Autopilot! Automatically scheduled for ${result.formattedTime || "next slot"} on ${selected.join(", ")}.`,
+        { duration: 6000 }
+      );
+      nav("/app/calendar");
+    } catch (e: any) {
+      setError(e.message || "Failed to send post to Autopilot");
+      toast.error(e.message || "Failed to send post to Autopilot");
+    } finally {
+      setBusy("");
+    }
+  }
+
   // Derive current focused variant object
   const focusedVariant = composedVariant(preview);
   const focusedCap = PLATFORM_CAPABILITIES[preview];
@@ -1231,6 +1309,21 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                 disabled={!!busy || !editable || !canPublish || !selected.length}
               >
                 <CalendarDays size={16} /> Schedule
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSendToAutopilot}
+                disabled={!!busy || !editable || !canPublish || !selected.length || !title.trim() || !body.trim()}
+                style={{
+                  background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                  color: "#ffffff",
+                  border: "1px solid #818cf8",
+                  fontWeight: 600,
+                  boxShadow: "0 2px 8px rgba(99, 102, 241, 0.35)",
+                }}
+              >
+                <Zap size={16} className={busy === 'autopilot' ? 'animate-spin' : ''} />
+                {busy === 'autopilot' ? 'Queuing to Autopilot…' : '⚡ Send to Autopilot'}
               </Button>
               <Button
                 variant="primary"

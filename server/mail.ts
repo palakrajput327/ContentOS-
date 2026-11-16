@@ -63,6 +63,9 @@ export async function queueTokenEmail(
       process.env.APP_ENV === 'test',
     ],
   );
+  void deliverEmails({ limit: 5 }).catch((err) => {
+    console.warn("[ContentOS Mail] Instant OTP dispatch attempt:", err?.message || err);
+  });
 }
 
 export async function queuePublishNotificationEmail(

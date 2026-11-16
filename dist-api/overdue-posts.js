@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { audit, transaction } from './db.js';
 import { publishingQueue } from './queues.js';
 import { assertDailySlot } from './calendar/daily-posting.js';
-export const OVERDUE_GRACE_MS = 15 * 60 * 1000;
+export const OVERDUE_GRACE_MS = 24 * 60 * 60 * 1000; // 24-hour grace window so hosting restarts or sleep cycles do not block posting
 export const OVERDUE_REVIEW = 'OVERDUE_REVIEW_REQUIRED';
 export function needsOverdueReview(job, now = new Date()) {
     return ['PENDING', 'ENQUEUED'].includes(job.state) &&
