@@ -696,10 +696,9 @@ Return JSON with "concepts" array.`;
     );
     const connectedAccounts = accountsRes.rows;
 
-    // Resolve high-converting structured caption with website, phone, highlights & hashtags
+    // Use the exact caption provided from the UI or existing database record
     let caption = (opts.caption && opts.caption.trim()) || (row.caption && row.caption.trim());
-    const isRich = caption && caption.includes("#") && (caption.includes("–") || caption.includes("-") || caption.includes("⚡") || caption.includes("📊") || caption.includes("🛡️") || caption.includes("💎") || caption.includes("📈"));
-    if (!caption || !isRich || caption.includes("In modern enterprise governance, foundational clarity")) {
+    if (!caption) {
       let contactInfo: any = {};
       try {
         const pagesRes = await pool.query(
@@ -787,8 +786,8 @@ Return JSON with "concepts" array.`;
       catch (e: any) { results.push({ platform: ch, success: false, error: e.message }); }
     }
     const publishedCount = results.filter(r => r.success).length;
-    const success = results.length > 0 && publishedCount === results.length;
-    const nextStatus = success ? 'DISPATCHED' : publishedCount > 0 ? 'PARTIAL' : 'FAILED';
+    const success = results.length > 0 && publishedCount > 0;
+    const nextStatus = publishedCount === results.length ? 'DISPATCHED' : publishedCount > 0 ? 'PARTIAL' : 'FAILED';
     const channelsJson = JSON.stringify(channels);
     const resultsJson = JSON.stringify(results);
 

@@ -428,11 +428,13 @@ export async function publishContentNow(wid: string, userId: string, contentId: 
     }
 
     await assertPublicationApproved(db,wid,content);
-    if (!["DRAFT","APPROVED","FAILED","PUBLISHED"].includes(content.status)) throw new ConflictException("Content is not available for direct publishing.");
+    if (!["DRAFT","APPROVED","FAILED","PUBLISHED","SCHEDULED","PUBLISHING"].includes(content.status)) throw new ConflictException("Content is not available for direct publishing.");
     const account = (await db.query("SELECT id FROM social_accounts WHERE id=$1 AND workspace_id=$2 AND lower(state)='connected'", [accountId,wid])).rows[0];
     if (!account) throw new NotFoundException("Connect a healthy account in this workspace.");
     const previous = (await db.query("SELECT * FROM scheduled_posts WHERE workspace_id=$1 AND content_id=$2 AND account_id=$3 AND content_version=$4 FOR UPDATE", [wid,contentId,accountId,content.version])).rows[0];
-    if (previous && previous.state !== "FAILED") throw new ConflictException("Publication already exists. Check its outcome before retrying.");
+    if (previous && previous.state === "PUBLISHED") {
+      return previous.id;
+    }
     const recordId = previous?.id || randomUUID();
     if (previous) await db.query("UPDATE scheduled_posts SET state='ENQUEUED',execute_at=now(),error_code=NULL WHERE id=$1", [recordId]);
     else await db.query("INSERT INTO scheduled_posts(id,workspace_id,content_id,account_id,content_version,execute_at,timezone,state) VALUES($1,$2,$3,$4,$5,now(),'UTC','ENQUEUED')", [recordId,wid,contentId,accountId,content.version]);
