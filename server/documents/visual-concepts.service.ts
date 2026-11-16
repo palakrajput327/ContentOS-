@@ -43,7 +43,12 @@ export class VisualConceptsService {
     allDispatched?: boolean;
   }> {
     // 0. Ensure caption column exists in database
-    await pool.query("ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS caption text").catch(() => {});
+    await pool.query(`
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS caption text;
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS content_id uuid;
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS raw_image_url text;
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS raw_asset_id uuid;
+    `).catch(() => {});
 
     // 1. Ensure concepts for this active document are generated if not yet in database
     const docConcepts = await pool.query(
@@ -55,16 +60,48 @@ export class VisualConceptsService {
     }
 
     // 2. Fetch all undispatched concepts across the workspace queue (accumulates across PDF uploads)
-    const existing = await pool.query(
-      `SELECT dvc.id, dvc.document_id, dvc.concept_title, dvc.source_page, dvc.source_excerpt, dvc.prompt, dvc.caption,
-              dvc.asset_id, dvc.image_url, dvc.raw_image_url, dvc.raw_asset_id, dvc.status, dvc.scheduled_at, dvc.dispatched_at, dvc.target_channels, dvc.created_at,
-              COALESCE(d.original_filename, 'Document') as document_name
-       FROM document_visual_concepts dvc
-       LEFT JOIN documents d ON d.id = dvc.document_id
-       WHERE dvc.workspace_id = $1 AND (dvc.status IS NULL OR dvc.status != 'DISPATCHED')
-       ORDER BY dvc.created_at ASC, dvc.source_page ASC`,
-      [workspaceId]
-    );
+    let existing;
+    try {
+      existing = await pool.query(
+        `SELECT dvc.id, dvc.document_id, dvc.concept_title, dvc.source_page, dvc.source_excerpt, dvc.prompt, dvc.caption,
+                dvc.asset_id, dvc.image_url, dvc.raw_image_url, dvc.raw_asset_id, dvc.status, dvc.scheduled_at, dvc.dispatched_at, dvc.target_channels, dvc.created_at,
+                COALESCE(d.original_filename, 'Document') as document_name
+         FROM document_visual_concepts dvc
+         LEFT JOIN documents d ON d.id = dvc.document_id
+         WHERE dvc.workspace_id = $1 AND (dvc.status IS NULL OR dvc.status != 'DISPATCHED')
+         ORDER BY dvc.created_at ASC, dvc.source_page ASC`,
+        [workspaceId]
+      );
+    } catch (colErr: any) {
+      if (colErr?.message?.includes('column "caption"')) {
+        await pool.query("ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS caption text").catch(() => {});
+        try {
+          existing = await pool.query(
+            `SELECT dvc.id, dvc.document_id, dvc.concept_title, dvc.source_page, dvc.source_excerpt, dvc.prompt, dvc.caption,
+                    dvc.asset_id, dvc.image_url, dvc.raw_image_url, dvc.raw_asset_id, dvc.status, dvc.scheduled_at, dvc.dispatched_at, dvc.target_channels, dvc.created_at,
+                    COALESCE(d.original_filename, 'Document') as document_name
+             FROM document_visual_concepts dvc
+             LEFT JOIN documents d ON d.id = dvc.document_id
+             WHERE dvc.workspace_id = $1 AND (dvc.status IS NULL OR dvc.status != 'DISPATCHED')
+             ORDER BY dvc.created_at ASC, dvc.source_page ASC`,
+            [workspaceId]
+          );
+        } catch {
+          existing = await pool.query(
+            `SELECT dvc.id, dvc.document_id, dvc.concept_title, dvc.source_page, dvc.source_excerpt, dvc.prompt, '' as caption,
+                    dvc.asset_id, dvc.image_url, dvc.raw_image_url, dvc.raw_asset_id, dvc.status, dvc.scheduled_at, dvc.dispatched_at, dvc.target_channels, dvc.created_at,
+                    COALESCE(d.original_filename, 'Document') as document_name
+             FROM document_visual_concepts dvc
+             LEFT JOIN documents d ON d.id = dvc.document_id
+             WHERE dvc.workspace_id = $1 AND (dvc.status IS NULL OR dvc.status != 'DISPATCHED')
+             ORDER BY dvc.created_at ASC, dvc.source_page ASC`,
+            [workspaceId]
+          );
+        }
+      } else {
+        throw colErr;
+      }
+    }
 
     const dispatchedRes = await pool.query(
       `SELECT COUNT(*)::int as count FROM document_visual_concepts
@@ -461,11 +498,32 @@ Return JSON with "concepts" array.`;
 
       if (!prompt || prompt.length < 15) continue;
 
-      await pool.query(
-        `INSERT INTO document_visual_concepts (id, document_id, workspace_id, concept_title, source_page, source_excerpt, prompt, caption)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [id, documentId, workspaceId, title, page, excerpt, prompt, caption]
-      );
+      try {
+        await pool.query(
+          `INSERT INTO document_visual_concepts (id, document_id, workspace_id, concept_title, source_page, source_excerpt, prompt, caption)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [id, documentId, workspaceId, title, page, excerpt, prompt, caption]
+        );
+      } catch (insertErr: any) {
+        if (insertErr?.message?.includes('column "caption"')) {
+          await pool.query("ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS caption text").catch(() => {});
+          try {
+            await pool.query(
+              `INSERT INTO document_visual_concepts (id, document_id, workspace_id, concept_title, source_page, source_excerpt, prompt, caption)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+              [id, documentId, workspaceId, title, page, excerpt, prompt, caption]
+            );
+          } catch {
+            await pool.query(
+              `INSERT INTO document_visual_concepts (id, document_id, workspace_id, concept_title, source_page, source_excerpt, prompt)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [id, documentId, workspaceId, title, page, excerpt, prompt]
+            );
+          }
+        } else {
+          throw insertErr;
+        }
+      }
 
       savedConcepts.push({
         id,

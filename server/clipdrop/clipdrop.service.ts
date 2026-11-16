@@ -334,6 +334,99 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
       return false;
     };
 
+    const tryTogetherFlux = async (): Promise<boolean> => {
+      const togetherKey = process.env.TOGETHER_API_KEY?.trim();
+      if (!togetherKey) return false;
+      try {
+        console.log("[Together AI] Generating FLUX.1 image...");
+        let width = 1024;
+        let height = 1024;
+        if (aspectRatio === "16:9") { width = 1024; height = 576; }
+        else if (aspectRatio === "9:16") { width = 576; height = 1024; }
+        else if (aspectRatio === "4:5") { width = 800; height = 1000; }
+
+        const res = await fetch("https://api.together.xyz/v1/images/generations", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${togetherKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "black-forest-labs/FLUX.1-schnell",
+            prompt: finalPrompt,
+            width,
+            height,
+            steps: 4,
+            response_format: "b64_json",
+          }),
+          signal: AbortSignal.timeout(30000),
+        });
+
+        if (res.ok) {
+          const data = (await res.json()) as any;
+          const b64 = data.data?.[0]?.b64_json;
+          if (b64) {
+            imageBuffer = Buffer.from(b64, "base64");
+            mimeType = "image/jpeg";
+            usedEngine = "flux";
+            console.log("[Together AI] FLUX.1 generation succeeded! Image size:", imageBuffer.byteLength);
+            return true;
+          }
+        } else {
+          console.warn("[Together AI] Returned status:", res.status, (await res.text().catch(() => "")).slice(0, 150));
+        }
+      } catch (err: any) {
+        console.warn("[Together AI] Error:", err?.message || err);
+      }
+      return false;
+    };
+
+    const tryFalFlux = async (): Promise<boolean> => {
+      const falKey = process.env.FAL_KEY?.trim() || process.env.FAL_API_KEY?.trim();
+      if (!falKey) return false;
+      try {
+        console.log("[Fal.ai] Generating FLUX image...");
+        let imageSize: any = "square_hd";
+        if (aspectRatio === "16:9") imageSize = "landscape_16_9";
+        else if (aspectRatio === "9:16") imageSize = "portrait_16_9";
+        else if (aspectRatio === "4:5") imageSize = "portrait_4_3";
+
+        const res = await fetch("https://fal.run/fal-ai/flux/schnell", {
+          method: "POST",
+          headers: {
+            "Authorization": `Key ${falKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            prompt: finalPrompt,
+            image_size: imageSize,
+            num_images: 1,
+            enable_safety_checker: false,
+          }),
+          signal: AbortSignal.timeout(30000),
+        });
+
+        if (res.ok) {
+          const data = (await res.json()) as any;
+          const imgUrl = data.images?.[0]?.url;
+          if (imgUrl) {
+            const imgRes = await fetch(imgUrl);
+            if (imgRes.ok) {
+              const arr = await imgRes.arrayBuffer();
+              imageBuffer = Buffer.from(new Uint8Array(arr));
+              mimeType = imgRes.headers.get("content-type") || "image/jpeg";
+              usedEngine = "flux";
+              console.log("[Fal.ai] FLUX generation succeeded! Image size:", imageBuffer.byteLength);
+              return true;
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn("[Fal.ai] Error:", err?.message || err);
+      }
+      return false;
+    };
+
     const tryHuggingFaceFlux = async (): Promise<boolean> => {
       const hfToken = process.env.HF_TOKEN?.trim() || process.env.HUGGINGFACE_API_KEY?.trim();
       if (!hfToken) return false;
@@ -504,12 +597,19 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
         if (!fluxOk) await tryHuggingFaceFlux();
       }
     } else {
-      // Primary: Fast SOTA FLUX.1 Engine (Pollinations FLUX)
-      const fluxOk = await tryFlux();
-      if (!fluxOk) {
+      // Primary SOTA FLUX.1 Engine with Instant Seamless Cascade:
+      // 1. Together AI FLUX.1 Schnell (if TOGETHER_API_KEY present - 1.2s)
+      // 2. Fal.ai FLUX (if FAL_KEY present - 0.9s)
+      // 3. Pollinations FLUX.1 (Built-in Free SOTA Diffusion)
+      // 4. HuggingFace FLUX.1
+      // 5. Clipdrop API
+      let ok = await tryTogetherFlux();
+      if (!ok) ok = await tryFalFlux();
+      if (!ok) ok = await tryFlux();
+      if (!ok) {
         console.warn("Primary FLUX engine unavailable, attempting HuggingFace fallback");
-        const hfOk = await tryHuggingFaceFlux();
-        if (!hfOk) {
+        ok = await tryHuggingFaceFlux();
+        if (!ok) {
           console.warn("Diffusion engines unavailable, trying Clipdrop fallback");
           await tryClipdrop();
         }

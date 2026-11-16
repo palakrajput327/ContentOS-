@@ -270,6 +270,33 @@ export async function bootstrap() {
   // Resilient DB connectivity check & auto-migration
   try {
     await pool.query("SELECT 1");
+
+    // Dynamic Self-Healing Schema Guard for Production Updates
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS document_visual_concepts (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        document_id uuid NOT NULL,
+        workspace_id uuid NOT NULL,
+        concept_title text NOT NULL,
+        source_page integer NOT NULL DEFAULT 1,
+        source_excerpt text NOT NULL DEFAULT '',
+        prompt text NOT NULL,
+        status text NOT NULL DEFAULT 'PENDING',
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS caption text;
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS content_id uuid;
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS raw_image_url text;
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS raw_asset_id uuid;
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS image_url text;
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS asset_id uuid;
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS scheduled_at timestamptz;
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS dispatched_at timestamptz;
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS target_channels jsonb DEFAULT '["linkedin"]'::jsonb;
+      ALTER TABLE document_visual_concepts ADD COLUMN IF NOT EXISTS post_result jsonb;
+      ALTER TABLE subscription_payments ADD COLUMN IF NOT EXISTS is_simulated boolean DEFAULT false;
+    `).catch((e) => console.warn("[DB Self-heal] Note:", e.message));
+
     if (queueBackend() === "postgres") {
       try {
         await pool.query("SELECT id FROM queue_jobs LIMIT 1");
