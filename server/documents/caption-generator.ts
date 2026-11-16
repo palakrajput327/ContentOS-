@@ -74,12 +74,25 @@ export function formatBrandName(rawName?: string, contextText?: string): string 
   if (ctx.includes("tradeorbit") || ctx.includes("trade orbit")) return "TradeOrbit";
   if (ctx.includes("regulus") || ctx.includes("regulus liquidity")) return "Regulus Liquidity";
   if (!rawName) return "TradeOrbit";
+
+  // Strict Privacy: Never expose personal user names or workspace titles
+  if (/('s|’s)?\s*workspace/i.test(rawName) || /workspace/i.test(rawName) || /^(my\s*brand|personal|default|admin|user)/i.test(rawName)) {
+    const domainMatch = ctx.match(/([a-zA-Z0-9-]{3,})\.(?:com|in|org|io|net|live|ai|tech|app)/i);
+    if (domainMatch && domainMatch[1] && !/google|adobe|microsoft|github/i.test(domainMatch[1])) {
+      const d = domainMatch[1];
+      return d.charAt(0).toUpperCase() + d.slice(1);
+    }
+    return "TradeOrbit";
+  }
+
   let name = rawName
     .replace(/\.pdf$/i, "")
     .replace(/[_-\s]*(Final|Draft|Version|v\d+|\d+_Page|Business_Plan|Pitch_Deck|Presentation|Deck|Whitepaper|Overview).*/i, "")
+    .replace(/('s|’s)?\s*workspace/gi, "")
     .replace(/[_-\s]+/g, " ")
     .trim();
-  if (!name || name.toLowerCase() === "document" || name.toLowerCase() === "brand") {
+
+  if (!name || name.toLowerCase() === "document" || name.toLowerCase() === "brand" || /workspace/i.test(name)) {
     return "TradeOrbit";
   }
   return name.charAt(0).toUpperCase() + name.slice(1);

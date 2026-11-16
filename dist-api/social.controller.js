@@ -715,6 +715,41 @@ let SocialController = class SocialController {
             valid: valResult.valid,
         };
     }
+    async testPost(r, id) {
+        assertPermission(r.workspace.role, "manage");
+        const w = r.workspace.id;
+        const accRes = await pool.query("SELECT a.id, a.platform, a.provider_id, a.name, t.ciphertext FROM social_accounts a JOIN social_account_tokens t ON t.account_id = a.id WHERE a.id = $1 AND a.workspace_id = $2", [id, w]);
+        if (!accRes.rowCount) {
+            throw new NotFoundException("Social account not found in this workspace.");
+        }
+        const acc = accRes.rows[0];
+        let token;
+        try {
+            token = decryptToken(acc.ciphertext, w);
+        }
+        catch {
+            token = decryptToken(acc.ciphertext, `${w}:${acc.id}`);
+        }
+        const platform = String(acc.platform).toLowerCase();
+        const provider = SocialProviderRegistry.getProvider(platform);
+        const testText = `✅ ContentOS Test Post\n\nYour ${acc.name} channel is successfully connected!\n\nTime: ${new Date().toUTCString()}`;
+        const config = platform === "telegram"
+            ? { botToken: token, chatId: acc.provider_id }
+            : { token, author: acc.provider_id };
+        const result = await provider.publishText(config, {
+            destination: acc.provider_id,
+            text: testText,
+        });
+        if (!result.success) {
+            throw new BadRequestException(result.error || "Test post failed. Check your bot token and channel permissions.");
+        }
+        await audit(pool, w, r.user.id, "test_post_sent", "social_account", id, acc.name, null, { platform, providerPostId: result.providerPostId });
+        return {
+            success: true,
+            providerPostId: result.providerPostId,
+            message: `Test message sent successfully to ${acc.name}!`,
+        };
+    }
     async disconnectAccount(r, id) {
         assertPermission(r.workspace.role, "manage");
         const w = r.workspace.id;
@@ -849,6 +884,15 @@ __decorate([
     __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", Promise)
 ], SocialController.prototype, "validateAccount", null);
+__decorate([
+    WorkspaceRequired(),
+    Post("social/accounts/:id/test-post"),
+    __param(0, Req()),
+    __param(1, Param("id")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], SocialController.prototype, "testPost", null);
 __decorate([
     WorkspaceRequired(),
     Delete("social/accounts/:id"),

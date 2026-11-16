@@ -17,7 +17,9 @@ export class BrandDnaService {
         // Attempt to seed from existing document_brand_identities or workspace name
         const docBrandRes = await pool.query(`SELECT * FROM document_brand_identities WHERE workspace_id = $1 ORDER BY updated_at DESC LIMIT 1`, [workspaceId]);
         const wsRes = await pool.query(`SELECT name FROM workspaces WHERE id = $1`, [workspaceId]);
-        const wsName = wsRes.rows[0]?.name || "My Brand";
+        const rawWsName = wsRes.rows[0]?.name || "";
+        const isPersonalWs = /('s|’s)?\s*workspace/i.test(rawWsName) || /workspace/i.test(rawWsName);
+        const wsName = isPersonalWs ? "Strategic Innovation" : (rawWsName || "Strategic Innovation");
         let companyName = wsName;
         let websiteDomain = "";
         let brandColors = ["#f97316", "#0f172a", "#38bdf8"]; // Graphite Orange primary palette
@@ -26,7 +28,8 @@ export class BrandDnaService {
         let sourceDocumentId = null;
         if (docBrandRes.rowCount && docBrandRes.rows[0]) {
             const b = docBrandRes.rows[0];
-            companyName = b.company_name || wsName;
+            const bComp = (b.company_name || "").trim();
+            companyName = (!bComp || /('s|’s)?\s*workspace/i.test(bComp) || /workspace/i.test(bComp)) ? wsName : bComp;
             websiteDomain = b.website_domain || "";
             if (Array.isArray(b.brand_colors) && b.brand_colors.length) {
                 brandColors = b.brand_colors;
