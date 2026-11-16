@@ -1,3 +1,4 @@
+import { extendSubscription } from "./billing/lifecycle.js";
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -321,14 +322,7 @@ export async function mutateAdminUser(
         if (change.status === "EXTEND") {
           if (!previous || !change.extensionDays || !change.extensionReason) throw new BadRequestException("An existing subscription, extension days and a reason are required.");
           if (!["ACTIVE", "TRIALING", "EXPIRED", "ADMIN_GRANTED"].includes(previous.status)) throw new BadRequestException("Activate the subscription before extending it.");
-          const trial = (await db.query("SELECT * FROM workspace_trials WHERE workspace_id=$1 FOR UPDATE", [workspaceId])).rows[0];
-          const isTrial = previous.status === "TRIALING";
-          const currentEnd = isTrial ? trial?.ends_at || previous.current_period_end : previous.current_period_end;
-          const nextEnd = new Date(Math.max(Date.now(), currentEnd ? new Date(currentEnd).getTime() : 0) + change.extensionDays * 86400000);
-          const nextStatus = previous.status === "EXPIRED" ? "ACTIVE" : previous.status;
-          await db.query("UPDATE workspace_subscriptions SET current_period_end=$2,status=$3,admin_override_note=$4,updated_at=now() WHERE id=$1", [previous.id,nextEnd,nextStatus,change.extensionReason]);
-          if (isTrial) await db.query("UPDATE workspace_trials SET ends_at=$2,status='EXTENDED',extension_count=extension_count+1,extension_reason=$3,updated_at=now() WHERE workspace_id=$1", [workspaceId,nextEnd,change.extensionReason]);
-          await db.query("INSERT INTO subscription_events(id,workspace_id,subscription_id,event_type,details) VALUES($1,$2,$3,'ADMIN_USER_SUBSCRIPTION_EXTENDED',$4)", [randomUUID(),workspaceId,previous.id,JSON.stringify({actor:actor.username,previous,days:change.extensionDays,reason:change.extensionReason,currentPeriodEnd:nextEnd})]);
+          await extendSubscription(db,previous,change.extensionDays,change.extensionReason);
         } else {
         const plan = (await db.query("SELECT id FROM subscription_plans WHERE code=$1", [change.planCode])).rows[0];
         if (!plan) throw new BadRequestException("Subscription plan not found.");
@@ -345,7 +339,7 @@ export async function mutateAdminUser(
           [randomUUID(),workspaceId,change.status === "INACTIVE" ? previous?.plan_id ?? plan.id : plan.id,change.status === "INACTIVE" ? previous?.billing_period ?? change.billingPeriod : change.billingPeriod,change.status === "ACTIVE" ? change.complimentary ? "ADMIN_GRANTED" : "ACTIVE" : "SUSPENDED",
            change.status === "ACTIVE" ? change.expiresAt : previous?.current_period_end ?? null,edit.note],
         )).rows[0];
-        if (change.status === "ACTIVE") await db.query("UPDATE workspace_subscriptions SET custom_daily_limit=$2 WHERE id=$1", [nextSubscription.id,change.customDailyLimit ?? null]);
+        if (change.status === "ACTIVE") await db.query("UPDATE workspace_subscriptions SET custom_daily_limit=$2,custom_limit_source=CASE WHEN $2::int IS NULL THEN 'PLAN' ELSE 'ADMIN' END WHERE id=$1", [nextSubscription.id,change.customDailyLimit ?? null]);
         nextSubscription.custom_daily_limit = change.status === "ACTIVE" ? change.customDailyLimit ?? null : previous?.custom_daily_limit ?? null;
         await db.query(
           `INSERT INTO subscription_events(id,workspace_id,subscription_id,event_type,details)

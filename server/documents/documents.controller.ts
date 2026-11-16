@@ -1,3 +1,4 @@
+import { assertWorkspaceActive } from "../billing/entitlement.service.js";
 import { queueBackend } from '../queue-backend.js';
 import {
   Body,
@@ -6,6 +7,8 @@ import {
   Get,
   Param,
   Post,
+  Put,
+  Patch,
   Req,
   Res,
   NotFoundException,
@@ -42,6 +45,7 @@ export class DocumentsController {
   @Post()
   async createDocument(@Req() r: AuthedRequest, @Body() input: unknown) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const v = createDocumentSchema.parse(input);
     const w = r.workspace.id;
 
@@ -85,6 +89,9 @@ export class DocumentsController {
         ],
       );
 
+      // An authorized upload starts the existing PDF pipeline; an explicit pause is preserved.
+      if(['Owner','Admin'].includes(r.workspace.role))await db.query(
+        "INSERT INTO knowledge_automation_settings(workspace_id,actor_id,enabled,autopilot_enabled,horizon_days,cooldown_days,platforms,poster_style) VALUES($1,$2,true,true,14,90,'[\"LinkedIn\",\"Instagram\",\"Facebook\",\"Telegram\",\"X\"]'::jsonb,'AI_POSTER') ON CONFLICT(workspace_id) DO NOTHING",[w,r.user.id]);
       await pdfProcessingQueue.add(
         "extract",
         {
@@ -114,7 +121,7 @@ export class DocumentsController {
     });
 
     // Proactively start PDF extraction immediately
-    import("../pdf-processing.js")
+    if (queueBackend() !== 'postgres') import("../pdf-processing.js")
       .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
       .catch((err) => console.warn(`[PDF Immediate Trigger] For ${documentId}:`, err?.message || err));
 
@@ -245,6 +252,7 @@ export class DocumentsController {
   @Post(":documentId/visual-concepts/regenerate")
   async regenerateVisualConcepts(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const { VisualConceptsService } = await import("./visual-concepts.service.js");
     const service = new VisualConceptsService();
     return service.regenerateConcepts(documentId, r.workspace.id);
@@ -259,6 +267,7 @@ export class DocumentsController {
     @Body() body: { prompt?: string; force?: boolean },
   ) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const { VisualConceptsService } = await import("./visual-concepts.service.js");
     const service = new VisualConceptsService();
     return service.generateConceptVisual({
@@ -277,7 +286,7 @@ export class DocumentsController {
     @Req() r: AuthedRequest,
     @Param("documentId") documentId: string,
     @Param("conceptId") conceptId: string,
-    @Body() body: { channels?: string[] },
+    @Body() body: { channels?: string[]; caption?: string; variants?: Record<string, any> },
   ) {
     assertPermission(r.workspace.role, "schedule");
     const { VisualConceptsService } = await import("./visual-concepts.service.js");
@@ -288,7 +297,129 @@ export class DocumentsController {
       workspaceId: r.workspace.id,
       userId: r.user.id,
       channels: body?.channels,
+      caption: body?.caption,
+      variants: body?.variants,
     });
+  }
+
+  @WorkspaceRequired()
+  @Patch(":documentId/visual-concepts/:conceptId/caption")
+  async updateVisualConceptCaption(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+    @Param("conceptId") conceptId: string,
+    @Body() body: { caption: string },
+  ) {
+    assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
+    const { VisualConceptsService } = await import("./visual-concepts.service.js");
+    const service = new VisualConceptsService();
+    return service.updateConceptCaption({
+      documentId,
+      conceptId,
+      workspaceId: r.workspace.id,
+      caption: body?.caption || "",
+    });
+  }
+
+  @WorkspaceRequired()
+  @Post(":documentId/visual-concepts/sync-schedule")
+  async syncVisualSchedule(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+    @Body() body: { slots: Array<{ time: string; label: string }>; channels?: string[] },
+  ) {
+    assertPermission(r.workspace.role, "schedule");
+    const { VisualConceptsService } = await import("./visual-concepts.service.js");
+    const service = new VisualConceptsService();
+    return service.syncSchedule({
+      documentId,
+      workspaceId: r.workspace.id,
+      userId: r.user.id,
+      slots: body.slots || [],
+      channels: body.channels || ["linkedin"],
+    });
+  }
+
+  @WorkspaceRequired()
+  @Get(":documentId/brand-identity")
+  async getBrandIdentity(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
+    const { BrandIdentityService } = await import("./brand-identity.service.js");
+    const service = new BrandIdentityService();
+    return service.getOrCreateBrandIdentity(documentId, r.workspace.id);
+  }
+
+  @WorkspaceRequired()
+  @Put(":documentId/brand-identity")
+  async updateBrandIdentity(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+    @Body() body: any,
+  ) {
+    assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
+    const { BrandIdentityService } = await import("./brand-identity.service.js");
+    const service = new BrandIdentityService();
+    const updated = await service.updateBrandIdentity(documentId, r.workspace.id, body || {});
+    if (body?.recomposeExisting) {
+      void service.recomposeAllDocumentPosters(documentId, r.workspace.id, r.user.id).catch((err) => {
+        console.warn("[BrandIdentity] Auto-recompose warning:", err);
+      });
+    }
+    return updated;
+  }
+
+  @WorkspaceRequired()
+  @Post(":documentId/brand-identity")
+  async saveBrandIdentityPost(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+    @Body() body: any,
+  ) {
+    return this.updateBrandIdentity(r, documentId, body);
+  }
+
+  @WorkspaceRequired()
+  @Post(":documentId/brand-identity/upload-logo")
+  async uploadBrandLogo(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+    @Body() body: { dataUrl: string; filename?: string },
+  ) {
+    assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
+    if (!body?.dataUrl || !body.dataUrl.includes(",")) {
+      throw new BadRequestException("Valid base64 dataUrl is required for logo upload.");
+    }
+    const [header, base64Data] = body.dataUrl.split(",");
+    const mimeMatch = header.match(/data:([^;]+);/);
+    const mimeType = mimeMatch ? mimeMatch[1] : "image/png";
+    const buffer = Buffer.from(base64Data, "base64");
+    const filename = body.filename || `logo_${Date.now()}.png`;
+
+    const { BrandIdentityService } = await import("./brand-identity.service.js");
+    const service = new BrandIdentityService();
+    return service.uploadLogo({
+      documentId,
+      workspaceId: r.workspace.id,
+      userId: r.user.id,
+      buffer,
+      mimeType,
+      filename,
+    });
+  }
+
+  @WorkspaceRequired()
+  @Post(":documentId/brand-identity/recompose")
+  async recomposePosters(
+    @Req() r: AuthedRequest,
+    @Param("documentId") documentId: string,
+  ) {
+    assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
+    const { BrandIdentityService } = await import("./brand-identity.service.js");
+    const service = new BrandIdentityService();
+    return service.recomposeAllDocumentPosters(documentId, r.workspace.id, r.user.id);
   }
 
   @WorkspaceRequired()
@@ -365,6 +496,7 @@ export class DocumentsController {
   @Post(":documentId/reprocess")
   async reprocessDocument(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const w = r.workspace.id;
 
     const docRes = await pool.query(
@@ -418,6 +550,7 @@ export class DocumentsController {
   @Post(":documentId/fast-track")
   async fastTrackDocument(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const w = r.workspace.id;
 
     const docRes = await pool.query(
@@ -540,6 +673,7 @@ export class DocumentsController {
   @Delete(":documentId")
   async deleteDocument(@Req() r: AuthedRequest, @Param("documentId") documentId: string) {
     assertPermission(r.workspace.role, "edit");
+    await assertWorkspaceActive(r.workspace.id, "document processing");
     const w = r.workspace.id;
 
     const docRes = await pool.query(
@@ -587,13 +721,18 @@ export class DocumentsController {
       const planContentIds = planRows.rows.map((p) => p.content_id).filter(Boolean) as string[];
       const planIds = planRows.rows.map((p) => p.id);
 
-      // Collect any content IDs linked directly to this document via content_sources
-      const csRows = await db.query(
-        "SELECT content_id FROM content_sources WHERE document_id = $1 AND workspace_id = $2",
-        [documentId, w],
-      );
+      // Collect any content IDs linked directly to this document's visual concepts
+      let vcContentIds: string[] = [];
+      try {
+        const vcQuery = await db.query(
+          "SELECT content_id FROM document_visual_concepts WHERE document_id = $1 AND content_id IS NOT NULL",
+          [documentId],
+        );
+        vcContentIds = vcQuery.rows.map((r: any) => r.content_id).filter(Boolean);
+      } catch {}
+
       const allContentIds = [
-        ...new Set([...planContentIds, ...csRows.rows.map((r: any) => r.content_id).filter(Boolean)]),
+        ...new Set([...planContentIds, ...vcContentIds]),
       ] as string[];
 
       // 3. Delete knowledge_content_plans FIRST because knowledge_content_plans.content_id has NO ACTION FK on content
@@ -640,10 +779,6 @@ export class DocumentsController {
         );
         await db.query(
           "DELETE FROM content_versions WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2",
-          [allContentIds, w],
-        );
-        await db.query(
-          "DELETE FROM content_sources WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2",
           [allContentIds, w],
         );
         await db.query(

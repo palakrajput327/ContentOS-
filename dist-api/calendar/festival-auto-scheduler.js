@@ -1,3 +1,4 @@
+import { getWorkspaceEntitlement } from "../billing/entitlement.service.js";
 import { pool, audit, transaction } from "../db.js";
 import { randomUUID } from "node:crypto";
 import { INDIAN_FESTIVALS, } from "./festival.data.js";
@@ -59,6 +60,10 @@ export class FestivalAutoSchedulerService {
      * Process festival detection and poster generation for a single workspace
      */
     static async processWorkspaceFestivals(db, ws, now, result) {
+        if ((await getWorkspaceEntitlement(ws.id, db)).isLocked) {
+            result.skippedWorkspaces++;
+            return;
+        }
         const timezone = ws.timezone || "Asia/Kolkata";
         const prepDays = Math.max(1, Math.min(30, Number(ws.festival_prep_days) || 2));
         const wsRegion = ws.festival_region || "ALL";

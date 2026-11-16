@@ -25,6 +25,7 @@ import { SocialController } from "./social.controller.js";
 import { AIController } from "./ai.controller.js";
 import { AnalyticsController } from "./analytics.controller.js";
 import { ClipdropController } from "./clipdrop/clipdrop.controller.js";
+import { InstagramStudioController } from "./creative/instagram-studio.controller.js";
 import { ClipdropService } from "./clipdrop/clipdrop.service.js";
 import { ProviderError } from "./providers/social.js";
 import { pool } from "./db.js";
@@ -86,6 +87,7 @@ class ErrorFilter implements ExceptionFilter {
     StorageController,
     AnalyticsController,
     ClipdropController,
+    InstagramStudioController,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }, ClipdropService],
 })

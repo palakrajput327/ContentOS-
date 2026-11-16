@@ -194,6 +194,8 @@ export class BatchService {
       ).rows[0];
 
       if (!batch) throw new NotFoundException("Batch job not found.");
+      const member=(await db.query("SELECT role FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",[workspaceId,userId])).rows[0];
+      assertPermission(member?.role,batch.type.includes("approve")||batch.type.includes("reject")?"approve":batch.type.includes("publish")||batch.type.includes("schedule")?"schedule":"edit");
 
       const failedItems = (
         await db.query(

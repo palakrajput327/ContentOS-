@@ -5,6 +5,7 @@ import type { YouTubeInput } from "./youtube.schema.js";
 import { BadRequestException } from "@nestjs/common";
 import { getStorageProvider } from "./storage/storage.factory.js";
 import * as path from "node:path";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 
 export type SocialProviderName =
   | "telegram"
@@ -38,6 +39,7 @@ export interface PublishTextRequest {
   text: string;
   destination: string;
   mediaUrl?: string;
+  mediaUrls?: string[];
   mediaType?: string;
   metadata?: Record<string, any>;
 }
@@ -127,6 +129,47 @@ async function getMediaBuffer(
   }
 }
 
+export async function optimizeSocialImage(
+  mediaInfo: { buffer: Buffer; mimeType: string },
+  maxBytes: number = 4.5 * 1024 * 1024,
+  maxDimension: number = 2048,
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  if (!mediaInfo.mimeType.startsWith("image/")) return mediaInfo;
+
+  try {
+    const img = await loadImage(mediaInfo.buffer);
+    let { width, height } = img;
+    const exceedsDimension = width > maxDimension || height > maxDimension;
+    const exceedsSize = mediaInfo.buffer.length > maxBytes;
+
+    if (!exceedsDimension && !exceedsSize && ["image/jpeg", "image/png", "image/webp"].includes(mediaInfo.mimeType)) {
+      return mediaInfo;
+    }
+
+    if (exceedsDimension) {
+      if (width > height) {
+        height = Math.round((height * maxDimension) / width);
+        width = maxDimension;
+      } else {
+        width = Math.round((width * maxDimension) / height);
+        height = maxDimension;
+      }
+    }
+
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, width, height);
+    const buffer = await canvas.encode("jpeg", 85);
+    console.log(
+      `[Media Optimizer] Resized/compressed image from ${mediaInfo.buffer.length} bytes to ${buffer.length} bytes (${width}x${height})`,
+    );
+    return { buffer, mimeType: "image/jpeg" };
+  } catch (err: any) {
+    console.warn("[Media Optimizer] Image optimization skipped, using original buffer:", err?.message || err);
+    return mediaInfo;
+  }
+}
+
 export class TelegramProvider implements SocialProvider {
   readonly provider: SocialProviderName = "telegram";
   readonly capabilities: SocialProviderCapabilities = {
@@ -141,7 +184,11 @@ export class TelegramProvider implements SocialProvider {
       throw new BadRequestException("Invalid Telegram configuration payload.");
     }
     const { botToken, chatId } = config as Record<string, any>;
-    if (!botToken || typeof botToken !== "string" || !botToken.trim()) {
+    const effectiveToken =
+      botToken && typeof botToken === "string" && botToken.trim() && botToken !== "undefined"
+        ? botToken.trim()
+        : (process.env.TELEGRAM_BOT_TOKEN || "").trim();
+    if (!effectiveToken) {
       throw new BadRequestException("Telegram bot token is required.");
     }
     if (!chatId || typeof chatId !== "string" || !chatId.trim()) {
@@ -149,7 +196,7 @@ export class TelegramProvider implements SocialProvider {
         "Telegram target chat/channel ID is required.",
       );
     }
-    return { botToken: botToken.trim(), chatId: chatId.trim() };
+    return { botToken: effectiveToken, chatId: chatId.trim() };
   }
 
   async validateConnection(
@@ -345,6 +392,34 @@ export class TelegramProvider implements SocialProvider {
           }
         }
 
+        // Fast Path: If mediaUrl is a public HTTP/HTTPS URL, pass URL directly to Telegram
+        if (!isVideo && request.mediaUrl && request.mediaUrl.startsWith("http") && !request.mediaUrl.includes("localhost") && !request.mediaUrl.includes("127.0.0.1")) {
+          try {
+            const fastRes = await fetch(
+              `https://api.telegram.org/bot${botToken}/sendPhoto`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: chatId,
+                  photo: request.mediaUrl,
+                  caption: request.text.slice(0, 1024),
+                }),
+              },
+            );
+            const fastData = await fastRes.json();
+            if (fastRes.ok && fastData.ok && fastData.result?.message_id) {
+              return {
+                success: true,
+                providerPostId: String(fastData.result.message_id),
+                publishedAt: new Date(fastData.result.date * 1000),
+              };
+            }
+          } catch (fastErr) {
+            console.warn("[Telegram Provider] Direct URL sendPhoto attempt skipped:", fastErr);
+          }
+        }
+
         const endpoint = isVideo ? 'sendVideo' : 'sendPhoto';
         const paramName = isVideo ? 'video' : 'photo';
         const filename = isVideo ? 'video.mp4' : 'photo.jpg';
@@ -442,7 +517,7 @@ export class TelegramProvider implements SocialProvider {
         };
       }
 
-      const res = await fetch(
+      let res = await fetch(
         `https://api.telegram.org/bot${botToken}/sendMessage`,
         {
           method: "POST",
@@ -450,7 +525,6 @@ export class TelegramProvider implements SocialProvider {
           body: JSON.stringify({
             chat_id: chatId,
             text: request.text,
-            parse_mode: "HTML",
           }),
         },
       );
@@ -504,12 +578,13 @@ export class LinkedInProvider implements SocialProvider {
   private async uploadLinkedInImage(
     token: string,
     author: string,
-    mediaInfo: { buffer: Buffer; mimeType: string },
+    rawMediaInfo: { buffer: Buffer; mimeType: string },
   ): Promise<string | null> {
     try {
       const apiVersion = process.env.LINKEDIN_API_VERSION || "202609";
+      const mediaInfo = await optimizeSocialImage(rawMediaInfo, 4.5 * 1024 * 1024, 2048);
       console.log(
-        `[LinkedIn Publish] Initializing image upload for author: ${author}, buffer size: ${mediaInfo.buffer.length} bytes`,
+        `[LinkedIn Publish] Initializing image upload for author: ${author}, buffer size: ${mediaInfo.buffer.length} bytes (original: ${rawMediaInfo.buffer.length} bytes)`,
       );
 
       const initRes = await fetch(

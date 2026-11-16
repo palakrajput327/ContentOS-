@@ -4,7 +4,8 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
-import { Injectable, BadRequestException, ServiceUnavailableException, NotFoundException } from "@nestjs/common";
+import { assertWorkspaceActive } from "../billing/entitlement.service.js";
+import { Injectable, ConflictException, BadRequestException, ServiceUnavailableException, NotFoundException } from "@nestjs/common";
 import { randomUUID, createHash } from "node:crypto";
 import * as path from "node:path";
 import { pool, transaction, audit } from "../db.js";
@@ -12,6 +13,7 @@ import { uploadManagedMedia } from "../storage/managed-media.js";
 import { getStorageProvider } from "../storage/storage.factory.js";
 import { getLLMProvider } from "../ai/llm.service.js";
 import { z } from "zod";
+import { generateOpenAIImage } from "../ai/openai-image.js";
 import { ImagePromptArchitect } from "../ai/prompt-architect.js";
 let ClipdropService = class ClipdropService {
     providerName = "clipdrop";
@@ -140,8 +142,9 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
      * saves as media asset, and links to content draft.
      */
     async generateImage(opts) {
+        await assertWorkspaceActive(opts.workspaceId, "AI image generation");
         const aspectRatio = opts.aspectRatio || "1:1";
-        const requestedEngine = opts.engine || "flux";
+        const requestedEngine = process.env.IMAGE_PROVIDER === "openai" ? "openai" : opts.engine || "flux";
         // 1. Intelligent Prompt Optimization & Entity Extraction (ChatGPT / Gemini style)
         const { visualPrompt, extractedHeadline, extractedCompany } = this.cleanAndOptimizePrompt(opts.prompt);
         const headline = opts.headline || extractedHeadline;
@@ -179,7 +182,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
         else
             finalPrompt += ", 1:1 square centered composition";
         // 2. Idempotency Check
-        const rawKey = opts.idempotencyKey || `${opts.workspaceId}:${finalPrompt}:${aspectRatio}:${enableOverlay ? headline || "" : "raw"}:${opts.contentId || ""}`;
+        const rawKey = `${requestedEngine}:${process.env.OPENAI_IMAGE_MODEL || ""}:${opts.idempotencyKey || `${opts.workspaceId}:${finalPrompt}:${aspectRatio}:${enableOverlay ? headline || "" : "raw"}:${opts.contentId || ""}`}`;
         const keyHash = createHash("sha256").update(rawKey).digest("hex");
         const existingAssetRes = await pool.query(`SELECT * FROM media_assets 
        WHERE workspace_id = $1 
@@ -280,7 +283,8 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
             }
             try {
                 console.log("[Hugging Face] Generating image via FLUX.1-schnell...");
-                const res = await fetch("https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell", {
+                const hfUrl = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell";
+                const res = await fetch(hfUrl, {
                     method: "POST",
                     headers: {
                         "Authorization": `Bearer ${hfToken}`,
@@ -290,7 +294,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
                         inputs: finalPrompt,
                         parameters: { width, height }
                     }),
-                    signal: AbortSignal.timeout(5000),
+                    signal: AbortSignal.timeout(35000),
                 });
                 if (res.ok) {
                     const arr = await res.arrayBuffer();
@@ -378,7 +382,39 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
                     else {
                         const errText = await res.text().catch(() => "");
                         console.warn(`FLUX generation attempt ${attempt + 1} (${model}) status ${res.status}:`, errText.slice(0, 100));
-                        if (res.status === 402 || res.status === 503) {
+                        // If authenticated key has insufficient balance / rejected (401/402), immediately try open public endpoint
+                        if (res.status === 401 || res.status === 402) {
+                            console.warn("[Pollinations FLUX] Authenticated key exhausted (HTTP " + res.status + "). Falling back to open FLUX endpoint...");
+                            try {
+                                const openUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(safePrompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=flux`;
+                                const openRes = await fetch(openUrl, { signal: AbortSignal.timeout(50000) });
+                                if (openRes.ok) {
+                                    const arr = await openRes.arrayBuffer();
+                                    const rawBuffer = Buffer.from(new Uint8Array(arr));
+                                    try {
+                                        const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+                                        const img = await loadImage(rawBuffer);
+                                        const cropH = Math.max(img.height - 36, 100);
+                                        const canvas = createCanvas(img.width, cropH);
+                                        const ctx = canvas.getContext("2d");
+                                        ctx.drawImage(img, 0, 0);
+                                        imageBuffer = canvas.toBuffer("image/jpeg");
+                                        mimeType = "image/jpeg";
+                                    }
+                                    catch {
+                                        imageBuffer = rawBuffer;
+                                        mimeType = openRes.headers.get("content-type") || "image/jpeg";
+                                    }
+                                    usedEngine = "flux";
+                                    console.log(`[Pollinations FLUX] Successfully generated ${width}x${height} via open fallback!`);
+                                    return true;
+                                }
+                            }
+                            catch (openErr) {
+                                console.warn("[Pollinations FLUX] Open fallback error:", openErr?.message || openErr);
+                            }
+                        }
+                        else if (res.status === 503) {
                             const match = errText.match(/Retry after (\d+)s/i);
                             const waitSec = match ? parseInt(match[1], 10) + 2 : 4;
                             console.warn(`[Pollinations FLUX] Waiting ${waitSec}s for cooldown...`);
@@ -392,7 +428,20 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
             }
             return false;
         };
-        if (requestedEngine === "clipdrop") {
+        if (requestedEngine === "openai") {
+            try {
+                imageBuffer = await generateOpenAIImage(finalPrompt, aspectRatio);
+                mimeType = "image/png";
+                usedEngine = "openai";
+            }
+            catch (openAiErr) {
+                console.warn("[OpenAI Image] Generation failed, automatically falling back to FLUX.1 engine:", openAiErr?.message || openAiErr);
+                const fluxOk = await tryFlux();
+                if (!fluxOk)
+                    await tryHuggingFaceFlux();
+            }
+        }
+        else if (requestedEngine === "clipdrop") {
             const ok = await tryClipdrop();
             if (!ok) {
                 console.warn("Clipdrop failed, falling back to FLUX engine");
@@ -450,6 +499,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
      * Background Removal Endpoint (Clipdrop)
      */
     async removeBackground(opts) {
+        await assertWorkspaceActive(opts.workspaceId, "AI image processing");
         const apiKey = this.getApiKey();
         if (!apiKey) {
             throw new BadRequestException("Clipdrop API key is required for background removal.");
@@ -517,10 +567,15 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
      * Saves post with attached visual asset and sets post to NEEDS_REVIEW or DRAFT
      */
     async attachAndSave(opts) {
+        await assertWorkspaceActive(opts.workspaceId, "saving AI content");
         const contentId = opts.contentId || randomUUID();
         const status = opts.status || "NEEDS_REVIEW";
         return transaction(async (db) => {
             const existing = await db.query("SELECT * FROM content WHERE id = $1 AND workspace_id = $2 FOR UPDATE", [contentId, opts.workspaceId]);
+            if (!(await db.query("SELECT id FROM media_assets WHERE id=$1 AND workspace_id=$2 AND status='COMPLETED' AND deleted_at IS NULL", [opts.assetId, opts.workspaceId])).rowCount)
+                throw new NotFoundException('Image not found in workspace.');
+            if (existing.rows[0] && !['DRAFT', 'NEEDS_REVIEW', 'APPROVED'].includes(existing.rows[0].status))
+                throw new ConflictException('Cancel the schedule before changing its image.');
             const variants = {};
             for (const p of opts.platforms) {
                 variants[p] = {
@@ -533,7 +588,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
             let postRow;
             if (existing.rowCount) {
                 postRow = (await db.query(`UPDATE content 
-             SET title = $3, body = $4, variants = $5, platforms = $6, status = $7, updated_by = $8, updated_at = NOW()
+             SET title = $3, body = $4, variants = $5, platforms = $6, status = $7, approved_by=NULL,version=version+1, updated_by = $8, updated_at = NOW()
              WHERE id = $1 AND workspace_id = $2
              RETURNING *`, [
                     contentId,
@@ -580,6 +635,8 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
             if (!res.rowCount)
                 return;
             const post = res.rows[0];
+            if (!["DRAFT", "NEEDS_REVIEW", "APPROVED"].includes(post.status))
+                throw new ConflictException("Cancel the schedule before changing its image.");
             const variants = typeof post.variants === "string" ? JSON.parse(post.variants) : (post.variants || {});
             const platforms = post.platforms || ["LinkedIn"];
             const targetPlatforms = targetPlatform ? [targetPlatform] : platforms;
@@ -593,7 +650,7 @@ Regeneration Token: ${Date.now()} - create a completely fresh and original scene
                 }
             }
             await db.query(`UPDATE content 
-         SET variants = $3, status = 'NEEDS_REVIEW', updated_by = $4, updated_at = NOW() 
+         SET variants = $3, status = 'NEEDS_REVIEW', approved_by=NULL,version=version+1, updated_by = $4, updated_at = NOW()
          WHERE id = $1 AND workspace_id = $2`, [contentId, workspaceId, JSON.stringify(variants), userId]);
         });
     }

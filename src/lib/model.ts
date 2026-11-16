@@ -41,6 +41,7 @@ export interface Post {
   timezone?: string;
   creator: string;
   version: number;
+  providerPostId?: string | null;
 }
 export interface Account {
   id: string;

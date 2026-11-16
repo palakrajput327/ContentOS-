@@ -86,6 +86,7 @@ export function NotificationBell() {
       case "batch_failed":
         return <XCircle size={16} style={{ color: "var(--danger)" }} />;
       case "batch_partial":
+      case "brand_warning":
         return <AlertTriangle size={16} style={{ color: "var(--warning)" }} />;
       case "scheduled":
         return <Clock size={16} style={{ color: "#6366f1" }} />;

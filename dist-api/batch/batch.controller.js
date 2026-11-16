@@ -11,7 +11,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
 import { Controller, Post, Get, Param, Body, Req, BadRequestException } from "@nestjs/common";
-import { assertPermission } from "../security.js";
+import { assertPermission, WorkspaceRequired } from "../security.js";
 import { BatchService } from "./batch.service.js";
 let BatchController = class BatchController {
     async createBatchAIGeneration(req, body) {
@@ -20,6 +20,8 @@ let BatchController = class BatchController {
         if (!body.items || !Array.isArray(body.items) || !body.items.length) {
             throw new BadRequestException("items array is required with at least 1 generation topic.");
         }
+        if (body.confirm !== true)
+            throw new BadRequestException("Explicit confirm:true is required for bulk operations.");
         return BatchService.createBatch({
             workspaceId: ws.id,
             userId: req.user.id,
@@ -38,6 +40,8 @@ let BatchController = class BatchController {
         if (!body.items || !Array.isArray(body.items) || !body.items.length) {
             throw new BadRequestException("items array is required with posts to save.");
         }
+        if (body.confirm !== true)
+            throw new BadRequestException("Explicit confirm:true is required for bulk operations.");
         return BatchService.createBatch({
             workspaceId: ws.id,
             userId: req.user.id,
@@ -56,6 +60,8 @@ let BatchController = class BatchController {
         if (!body.contentIds || !Array.isArray(body.contentIds) || !body.contentIds.length) {
             throw new BadRequestException("contentIds array is required.");
         }
+        if (body.confirm !== true)
+            throw new BadRequestException("Explicit confirm:true is required for bulk operations.");
         return BatchService.createBatch({
             workspaceId: ws.id,
             userId: req.user.id,
@@ -75,6 +81,8 @@ let BatchController = class BatchController {
         if (!body.contentIds || !Array.isArray(body.contentIds) || !body.contentIds.length) {
             throw new BadRequestException("contentIds array is required.");
         }
+        if (body.confirm !== true)
+            throw new BadRequestException("Explicit confirm:true is required for bulk operations.");
         return BatchService.createBatch({
             workspaceId: ws.id,
             userId: req.user.id,
@@ -97,6 +105,8 @@ let BatchController = class BatchController {
         if (!body.scheduledAt) {
             throw new BadRequestException("scheduledAt ISO timestamp is required.");
         }
+        if (body.confirm !== true)
+            throw new BadRequestException("Explicit confirm:true is required for bulk operations.");
         return BatchService.createBatch({
             workspaceId: ws.id,
             userId: req.user.id,
@@ -121,6 +131,8 @@ let BatchController = class BatchController {
         if (!body.contentIds || !Array.isArray(body.contentIds) || !body.contentIds.length) {
             throw new BadRequestException("contentIds array is required.");
         }
+        if (body.confirm !== true)
+            throw new BadRequestException("Explicit confirm:true is required for bulk operations.");
         return BatchService.createBatch({
             workspaceId: ws.id,
             userId: req.user.id,
@@ -134,8 +146,10 @@ let BatchController = class BatchController {
             })),
         });
     }
-    async retryFailed(req, batchId) {
+    async retryFailed(req, batchId, body) {
         const ws = req.workspace;
+        if (body?.confirm !== true)
+            throw new BadRequestException("Explicit confirm:true is required for bulk retry.");
         assertPermission(ws.role, "edit");
         return BatchService.retryFailedChildren(ws.id, batchId, req.user.id);
     }
@@ -200,8 +214,9 @@ __decorate([
     Post(":id/retry-failed"),
     __param(0, Req()),
     __param(1, Param("id")),
+    __param(2, Body()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:paramtypes", [Object, String, Object]),
     __metadata("design:returntype", Promise)
 ], BatchController.prototype, "retryFailed", null);
 __decorate([
@@ -220,6 +235,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], BatchController.prototype, "listBatches", null);
 BatchController = __decorate([
+    WorkspaceRequired(),
     Controller("batch")
 ], BatchController);
 export { BatchController };

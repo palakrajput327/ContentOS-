@@ -1,3 +1,4 @@
+import { assertWorkspaceActive } from "./billing/entitlement.service.js";
 import { pool } from './db.js';
 import { loadConfig } from './config.js';
 import { queueBackend } from './queue-backend.js';
@@ -5,6 +6,8 @@ export async function executeCronJob(job) {
     const p = job.payload, wid = job.workspace_id;
     if (wid && p.workspaceId !== wid)
         return { outcome: 'failed', code: 'TENANT_MISMATCH' };
+    if (wid && job.queue !== 'social-publishing')
+        await assertWorkspaceActive(wid, 'background processing');
     switch (job.queue) {
         case 'social-publishing': {
             const record = (await pool.query('SELECT id FROM scheduled_posts WHERE id=$1 AND workspace_id=$2', [p.id, wid])).rows[0];
@@ -58,6 +61,8 @@ export async function executeCronJob(job) {
         }
         case 'knowledge-automation': {
             const { KnowledgeAutomationService } = await import('./knowledge/automation.service.js');
+            if (wid)
+                return { outcome: 'completed', result: await new KnowledgeAutomationService().run(wid, 3, p.documentId) };
             const rows = (await pool.query('SELECT workspace_id FROM knowledge_automation_settings WHERE enabled=true AND next_run_at<=now() ORDER BY next_run_at LIMIT 10')).rows;
             for (const row of rows)
                 await new KnowledgeAutomationService().run(row.workspace_id);

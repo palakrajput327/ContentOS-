@@ -72,7 +72,7 @@ export default function Shell() {
     queryFn: () => request<{ id: string; name: string }[]>("/workspaces"),
   });
   const { data: billingData } = useQuery({
-    queryKey: ["billing-current"],
+    queryKey: ["billing-current", session.workspaceId],
     queryFn: () => request<any>("/billing/current"),
     staleTime: 20000,
   });
@@ -314,8 +314,9 @@ export default function Shell() {
                       "POST",
                       { id: e.target.value },
                     );
+                    await query.cancelQueries();
+                    query.clear();
                     session.login(session.user!, r.workspaceId);
-                    query.removeQueries({ queryKey: ["workspace"] });
                   }}
                   style={{
                     background: "transparent",

@@ -1,3 +1,4 @@
+import { useSession } from "../lib/session";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -75,6 +76,7 @@ interface EntitlementResponse {
     date: string;
     timezone: string;
     postsUsedToday: number;
+    postsReservedToday:number;
     dailyLimit: number;
     postsRemainingToday: number;
     usagePercentage: number;
@@ -88,15 +90,17 @@ interface PaymentRecord {
   billingPeriod: string;
   provider: string;
   providerReference: string | null;
-  status: "PENDING" | "VERIFIED" | "REJECTED";
+  status: "PENDING" | "VERIFIED" | "APPROVED" | "REJECTED";
   paymentNotes: string | null;
   planName: string;
   planCode: string;
   createdAt: string;
   verifiedAt: string | null;
+  isSimulated?: boolean;
 }
 
 export default function Billing() {
+  const workspaceId=useSession(s=>s.workspaceId);
   const queryClient = useQueryClient();
   const [billingPeriod, setBillingPeriod] = useState<"MONTHLY" | "YEARLY">("MONTHLY");
   const [activePaymentModalPlan, setActivePaymentModalPlan] = useState<Plan | null>(null);
@@ -106,7 +110,7 @@ export default function Billing() {
 
   // Queries
   const { data: currentData, isLoading: loadingCurrent } = useQuery<EntitlementResponse>({
-    queryKey: ["billing-current"],
+    queryKey: ["billing-current", workspaceId],
     queryFn: () => request<EntitlementResponse>("/billing/current"),
   });
 
@@ -116,7 +120,7 @@ export default function Billing() {
   });
 
   const { data: historyData } = useQuery<{ payments: PaymentRecord[] }>({
-    queryKey: ["billing-history"],
+    queryKey: ["billing-history", workspaceId],
     queryFn: () => request<{ payments: PaymentRecord[] }>("/billing/history"),
   });
 
@@ -137,9 +141,9 @@ export default function Billing() {
         paymentNotes: notes.trim() || undefined,
       });
 
-      toast.success("Payment request registered!", {
+      toast.success("Simulated request submitted", {
         description:
-          "Your transaction details were sent to Super Admin. Your workspace will activate once approved.",
+          "Your simulated request was sent to Super Admin. Access activates only after approval. No funds were collected.",
       });
 
       setActivePaymentModalPlan(null);
@@ -310,7 +314,7 @@ export default function Billing() {
           </div>
           <div className="billing-card-footer">
             <span>
-              {usage?.postsRemainingToday || 0} post slots remaining today (resets at midnight)
+              {usage?.postsRemainingToday || 0} slots remaining · {usage?.postsReservedToday || 0} reserved (resets at local midnight)
             </span>
           </div>
         </div>
@@ -322,10 +326,10 @@ export default function Billing() {
             <Zap size={16} style={{ color: "var(--accent)" }} />
           </div>
           <div style={{ fontSize: "0.95rem", fontWeight: 600, color: "var(--ink)" }}>
-            1 idea = 1 post unit
+            1 successful platform publication = 1 unit
           </div>
           <p style={{ fontSize: "0.82rem", color: "var(--muted)", margin: 0, lineHeight: 1.4 }}>
-            Publishing to multiple connected channels (LinkedIn, Instagram, Facebook, X, Telegram) from one post counts as 1 single posting unit.
+            Each successful publication to a social account uses one unit. Pending jobs reserve capacity; definite failures release it, and retries never charge twice.
           </p>
         </div>
       </div>
@@ -450,42 +454,15 @@ export default function Billing() {
               </strong>
             </p>
 
-            {/* Official Company Bank Account & UPI Details */}
-            <div className="bank-transfer-details-box">
-              <div style={{ fontWeight: 600, fontSize: "0.95rem", marginBottom: "10px", color: "var(--ink)" }}>
-                Direct Bank Transfer / UPI Instructions
-              </div>
-              <div className="bank-detail-row">
-                <span>Account Name:</span>
-                <strong>Hindustan Social Network (ContentOS)</strong>
-              </div>
-              <div className="bank-detail-row">
-                <span>Bank:</span>
-                <strong>HDFC Bank</strong>
-              </div>
-              <div className="bank-detail-row">
-                <span>Account Number:</span>
-                <strong>50200084920194</strong>
-              </div>
-              <div className="bank-detail-row">
-                <span>IFSC Code:</span>
-                <strong>HDFC0001234</strong>
-              </div>
-              <div className="bank-detail-row">
-                <span>UPI ID:</span>
-                <strong>hindustansocial@hdfcbank</strong>
-              </div>
-            </div>
-
-            {/* Payment Confirmation Form */}
+            <p className="bank-transfer-details-box">Simulated purchase only. No payment is collected or verified. An administrator must approve this request before access changes.</p>
             <form onSubmit={handlePaymentSubmit}>
               <label style={{ display: "block", marginBottom: "14px" }}>
                 <span style={{ fontSize: "0.85rem", fontWeight: 500, color: "var(--ink)" }}>
-                  Transaction / UTR Reference (Optional)
+                  Request reference (optional)
                 </span>
                 <input
                   type="text"
-                  placeholder="e.g. UPI-1234567890 or NEFT-HDFC-9912"
+                  placeholder="Optional reference for your request"
                   value={reference}
                   onChange={(e) => setReference(e.target.value)}
                   style={{
@@ -502,11 +479,11 @@ export default function Billing() {
 
               <label style={{ display: "block", marginBottom: "20px" }}>
                 <span style={{ fontSize: "0.85rem", fontWeight: 500, color: "var(--ink)" }}>
-                  Notes / Payment Remarks
+                  Notes for administrator
                 </span>
                 <textarea
                   rows={2}
-                  placeholder="Transferred from company account or UPI ID..."
+                  placeholder="Optional note for the administrator..."
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   style={{
@@ -536,7 +513,7 @@ export default function Billing() {
                       <Loader2 size={16} className="animate-spin" /> Submitting…
                     </>
                   ) : (
-                    "Submit Payment Request"
+                    "Submit simulated request"
                   )}
                 </Button>
               </div>
@@ -581,14 +558,14 @@ export default function Billing() {
                     <td>
                       <span
                         className={`billing-badge ${
-                          p.status === "VERIFIED"
+                          (p.status === "VERIFIED" || p.status === "APPROVED")
                             ? "badge-active"
                             : p.status === "PENDING"
                               ? "badge-trial"
                               : "badge-locked"
                         }`}
                       >
-                        {p.status}
+                        {p.status}{p.isSimulated ? " · Simulated" : ""}
                       </span>
                     </td>
                     <td>{new Date(p.createdAt).toLocaleDateString()}</td>
@@ -615,13 +592,13 @@ export default function Billing() {
           <div className="faq-card">
             <h4>How does daily posting allowance work?</h4>
             <p>
-              One unique content idea counts as 1 post toward your daily limit, regardless of how many connected social channels (LinkedIn, Instagram, Facebook, X, Telegram) it is published to.
+              Each successful platform publication counts once. Publishing one idea to three accounts uses three units. Pending and uncertain attempts reserve slots; definite failures release them. Usage resets at midnight in your workspace timezone.
             </p>
           </div>
           <div className="faq-card">
-            <h4>How are manual payments activated?</h4>
+            <h4>How are simulated purchases approved?</h4>
             <p>
-              Submit your bank transfer or UPI reference. Our platform Super Admin reviews and verifies the transaction, activating your workspace subscription and notifying you immediately.
+              Submit a simulated purchase request. Admin approval activates your subscription. No funds are transferred or verified.
             </p>
           </div>
           <div className="faq-card">

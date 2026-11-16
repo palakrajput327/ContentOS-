@@ -1,3 +1,4 @@
+import { assertWorkspaceActive } from "../billing/entitlement.service.js";
 import { queueBackend } from '../queue-backend.js';
 import { randomUUID, createHash } from "node:crypto";
 import { pool, transaction, audit } from "../db.js";
@@ -23,6 +24,7 @@ export class KnowledgeService {
     documentId: string,
     workspaceId: string,
   ): Promise<void> {
+    await assertWorkspaceActive(workspaceId,"knowledge extraction");
     console.log(`[KnowledgeService] Starting extraction for generation ${generationId}, document ${documentId}`);
 
     // 1. Fetch document & chunks with workspace isolation
@@ -255,6 +257,12 @@ export class KnowledgeService {
         { factCount },
       );
 
+      const automation=(await pool.query("SELECT enabled,autopilot_enabled FROM knowledge_automation_settings WHERE workspace_id=$1",[workspaceId])).rows[0];
+      if(factCount>0 && automation?.enabled && automation.autopilot_enabled){
+        await pool.query('UPDATE knowledge_automation_settings SET next_run_at=now() WHERE workspace_id=$1',[workspaceId]);
+        const {createQueue}=await import('../queues.js');
+        await createQueue('knowledge-automation').add('plan',{workspaceId,documentId},{jobId:'document-ready-'+documentId,attempts:3,backoff:{type:'exponential',delay:60000}});
+      }
       console.log(`[KnowledgeService] Successfully extracted ${factCount} facts for document ${documentId}`);
     } catch (err: any) {
       console.error(`[KnowledgeService] Extraction failed for generation ${generationId}:`, err);

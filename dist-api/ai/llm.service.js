@@ -4,6 +4,7 @@ import { FallbackLLMProvider } from "./fallback.provider.js";
 import { LLMConfigurationException } from "./llm.types.js";
 let currentProvider = null;
 const vendors = {
+    openai: { prefix: "OPENAI", url: "https://api.openai.com/v1" },
     gemini: { prefix: "GEMINI", url: "https://generativelanguage.googleapis.com/v1beta/openai/" },
     groq: { prefix: "GROQ", url: "https://api.groq.com/openai/v1" },
     openrouter: { prefix: "OPENROUTER", url: "https://openrouter.ai/api/v1" },
@@ -29,7 +30,7 @@ export function createLLMProvider(env = process.env) {
             throw new LLMConfigurationException("Unknown LLM provider: " + name);
         const vendor = vendors[name];
         const apiKey = env[vendor.prefix + "_API_KEY"]?.trim() || "";
-        const model = env[vendor.prefix + "_MODEL"]?.trim();
+        const model = env[vendor.prefix + "_MODEL"]?.trim() || (name === "openai" ? (env.OPENAI_MODEL?.trim() || "gpt-4o") : undefined);
         if (apiKey && !model)
             throw new LLMConfigurationException(vendor.prefix + "_MODEL is required when its API key is configured.");
         return new OpenAICompatibleProvider({ ...shared, apiKey, model: model || "unconfigured", baseUrl: env[vendor.prefix + "_BASE_URL"] || vendor.url });

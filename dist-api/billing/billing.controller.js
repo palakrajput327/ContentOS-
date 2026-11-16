@@ -66,22 +66,18 @@ let BillingController = class BillingController {
             month: "2-digit",
             day: "2-digit",
         }).format(new Date());
-        // Count distinct posts scheduled/published today in workspace timezone
-        const usageRow = (await pool.query(`SELECT COUNT(DISTINCT c.id)::int AS count
-         FROM content c
-         JOIN scheduled_posts s ON s.content_id = c.id AND s.workspace_id = c.workspace_id
-         WHERE c.workspace_id = $1
-           AND (s.execute_at AT TIME ZONE $2)::date = $3::date
-           AND s.state <> 'CANCELLED'`, [wid, timezone, todayStr])).rows[0];
-        const postsUsedToday = usageRow?.count || 0;
+        const usageRow = (await pool.query("SELECT COUNT(*) FILTER(WHERE state='SUCCESS' AND business_date=$2::date)::int AS success,COUNT(*) FILTER(WHERE (state='RESERVED' AND business_date=$2::date) OR state IN ('PROCESSING','UNCERTAIN'))::int AS reserved FROM publication_quota WHERE workspace_id=$1", [wid, todayStr])).rows[0];
+        const postsUsedToday = usageRow?.success || 0;
+        const postsReservedToday = usageRow?.reserved || 0;
         const dailyLimit = entitlement.dailyPostingLimit;
-        const postsRemainingToday = Math.max(0, dailyLimit - postsUsedToday);
+        const postsRemainingToday = Math.max(0, dailyLimit - postsUsedToday - postsReservedToday);
         return {
             entitlement,
             usage: {
                 date: todayStr,
                 timezone,
                 postsUsedToday,
+                postsReservedToday,
                 dailyLimit,
                 postsRemainingToday,
                 usagePercentage: Math.min(100, Math.round((postsUsedToday / Math.max(1, dailyLimit)) * 100)),
@@ -96,16 +92,10 @@ let BillingController = class BillingController {
         const wid = r.workspace.id;
         const ws = (await pool.query("SELECT timezone FROM workspaces WHERE id = $1", [wid])).rows[0] || { timezone: "Asia/Kolkata" };
         const timezone = ws.timezone || "Asia/Kolkata";
-        const historyRes = await pool.query(`SELECT
-         d.day::date::text AS date,
-         COUNT(DISTINCT c.id)::int AS post_count
-       FROM generate_series(current_date - 6, current_date, interval '1 day') d(day)
-       LEFT JOIN scheduled_posts s ON (s.execute_at AT TIME ZONE $2)::date = d.day::date
-         AND s.workspace_id = $1
-         AND s.state <> 'CANCELLED'
-       LEFT JOIN content c ON c.id = s.content_id AND c.workspace_id = s.workspace_id
-       GROUP BY d.day
-       ORDER BY d.day ASC`, [wid, timezone]);
+        const historyRes = await pool.query(`SELECT d.day::date::text AS date,COUNT(q.scheduled_post_id)::int AS post_count
+       FROM generate_series((now() AT TIME ZONE $2)::date - 6,(now() AT TIME ZONE $2)::date,interval '1 day') d(day)
+       LEFT JOIN publication_quota q ON q.business_date=d.day::date AND q.workspace_id=$1 AND q.state='SUCCESS'
+       GROUP BY d.day ORDER BY d.day`, [wid, timezone]);
         return {
             history: historyRes.rows.map((row) => ({
                 date: row.date,
@@ -127,6 +117,7 @@ let BillingController = class BillingController {
          sp.provider,
          sp.provider_reference,
          sp.status,
+         sp.is_simulated,
          sp.payment_notes,
          sp.created_at,
          sp.verified_at,
@@ -145,6 +136,7 @@ let BillingController = class BillingController {
                 provider: p.provider,
                 providerReference: p.provider_reference || null,
                 status: p.status,
+                isSimulated: p.is_simulated,
                 paymentNotes: p.payment_notes || null,
                 planName: p.plan_name || "Custom Plan",
                 planCode: p.plan_code || "CUSTOM",
@@ -181,9 +173,9 @@ let BillingController = class BillingController {
             }
             await db.query(`INSERT INTO subscription_payments(
            id, workspace_id, subscription_id, plan_id, billing_period, amount, currency,
-           provider, provider_reference, status, payment_notes, payment_proof_url
+           provider, provider_reference, status, payment_notes, payment_proof_url, is_simulated
          )
-         VALUES($1, $2, $3, $4, $5, $6, $7, 'MANUAL', $8, 'PENDING', $9, $10)`, [
+         VALUES($1, $2, $3, $4, $5, $6, $7, 'MANUAL', $8, 'PENDING', $9, $10, true)`, [
                 paymentId,
                 wid,
                 sub.id,
@@ -217,19 +209,13 @@ let BillingController = class BillingController {
                 planName: plan.name,
                 billingPeriod: v.billingPeriod,
                 status: "PENDING",
-                instructions: {
-                    accountName: "Hindustan Social Network (ContentOS)",
-                    bankName: "HDFC Bank",
-                    accountNumber: "50200084920194",
-                    ifscCode: "HDFC0001234",
-                    upiId: "hindustansocial@hdfcbank",
-                    supportEmail: "billing@hidustansocialnetwork.in",
-                },
+                isSimulated: true,
+                instructions: { simulated: true, message: "No payment is collected. Administrator approval is required." },
             };
         });
         return {
             success: true,
-            message: "Payment request submitted successfully. Once your transfer is verified by the Super Admin, your workspace subscription will be activated.",
+            message: "Simulated purchase request submitted. Only admin approval activates access. No payment has been processed or verified.",
             payment: result,
         };
     }

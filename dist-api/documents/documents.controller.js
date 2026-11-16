@@ -10,8 +10,9 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
+import { assertWorkspaceActive } from "../billing/entitlement.service.js";
 import { queueBackend } from '../queue-backend.js';
-import { Body, Controller, Delete, Get, Param, Post, Req, Res, NotFoundException, BadRequestException, } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Patch, Req, Res, NotFoundException, BadRequestException, } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { audit, pool, transaction } from "../db.js";
@@ -36,6 +37,7 @@ export const createDocumentSchema = z.object({
 let DocumentsController = class DocumentsController {
     async createDocument(r, input) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const v = createDocumentSchema.parse(input);
         const w = r.workspace.id;
         // Verify media asset exists, belongs to active workspace, is COMPLETED and is PDF
@@ -65,6 +67,9 @@ let DocumentsController = class DocumentsController {
                 asset.mime_type,
                 r.user.id,
             ]);
+            // An authorized upload starts the existing PDF pipeline; an explicit pause is preserved.
+            if (['Owner', 'Admin'].includes(r.workspace.role))
+                await db.query("INSERT INTO knowledge_automation_settings(workspace_id,actor_id,enabled,autopilot_enabled,horizon_days,cooldown_days,platforms,poster_style) VALUES($1,$2,true,true,14,90,'[\"LinkedIn\",\"Instagram\",\"Facebook\",\"Telegram\",\"X\"]'::jsonb,'AI_POSTER') ON CONFLICT(workspace_id) DO NOTHING", [w, r.user.id]);
             await pdfProcessingQueue.add("extract", {
                 documentId,
                 workspaceId: w,
@@ -78,9 +83,10 @@ let DocumentsController = class DocumentsController {
             };
         });
         // Proactively start PDF extraction immediately
-        import("../pdf-processing.js")
-            .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
-            .catch((err) => console.warn(`[PDF Immediate Trigger] For ${documentId}:`, err?.message || err));
+        if (queueBackend() !== 'postgres')
+            import("../pdf-processing.js")
+                .then(({ processPDFDocument }) => processPDFDocument(documentId, w))
+                .catch((err) => console.warn(`[PDF Immediate Trigger] For ${documentId}:`, err?.message || err));
         return result;
     }
     async listDocuments(r) {
@@ -180,12 +186,14 @@ let DocumentsController = class DocumentsController {
     }
     async regenerateVisualConcepts(r, documentId) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const { VisualConceptsService } = await import("./visual-concepts.service.js");
         const service = new VisualConceptsService();
         return service.regenerateConcepts(documentId, r.workspace.id);
     }
     async generateConceptVisual(r, documentId, conceptId, body) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const { VisualConceptsService } = await import("./visual-concepts.service.js");
         const service = new VisualConceptsService();
         return service.generateConceptVisual({
@@ -207,7 +215,83 @@ let DocumentsController = class DocumentsController {
             workspaceId: r.workspace.id,
             userId: r.user.id,
             channels: body?.channels,
+            caption: body?.caption,
+            variants: body?.variants,
         });
+    }
+    async updateVisualConceptCaption(r, documentId, conceptId, body) {
+        assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
+        const { VisualConceptsService } = await import("./visual-concepts.service.js");
+        const service = new VisualConceptsService();
+        return service.updateConceptCaption({
+            documentId,
+            conceptId,
+            workspaceId: r.workspace.id,
+            caption: body?.caption || "",
+        });
+    }
+    async syncVisualSchedule(r, documentId, body) {
+        assertPermission(r.workspace.role, "schedule");
+        const { VisualConceptsService } = await import("./visual-concepts.service.js");
+        const service = new VisualConceptsService();
+        return service.syncSchedule({
+            documentId,
+            workspaceId: r.workspace.id,
+            userId: r.user.id,
+            slots: body.slots || [],
+            channels: body.channels || ["linkedin"],
+        });
+    }
+    async getBrandIdentity(r, documentId) {
+        const { BrandIdentityService } = await import("./brand-identity.service.js");
+        const service = new BrandIdentityService();
+        return service.getOrCreateBrandIdentity(documentId, r.workspace.id);
+    }
+    async updateBrandIdentity(r, documentId, body) {
+        assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
+        const { BrandIdentityService } = await import("./brand-identity.service.js");
+        const service = new BrandIdentityService();
+        const updated = await service.updateBrandIdentity(documentId, r.workspace.id, body || {});
+        if (body?.recomposeExisting) {
+            void service.recomposeAllDocumentPosters(documentId, r.workspace.id, r.user.id).catch((err) => {
+                console.warn("[BrandIdentity] Auto-recompose warning:", err);
+            });
+        }
+        return updated;
+    }
+    async saveBrandIdentityPost(r, documentId, body) {
+        return this.updateBrandIdentity(r, documentId, body);
+    }
+    async uploadBrandLogo(r, documentId, body) {
+        assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
+        if (!body?.dataUrl || !body.dataUrl.includes(",")) {
+            throw new BadRequestException("Valid base64 dataUrl is required for logo upload.");
+        }
+        const [header, base64Data] = body.dataUrl.split(",");
+        const mimeMatch = header.match(/data:([^;]+);/);
+        const mimeType = mimeMatch ? mimeMatch[1] : "image/png";
+        const buffer = Buffer.from(base64Data, "base64");
+        const filename = body.filename || `logo_${Date.now()}.png`;
+        const { BrandIdentityService } = await import("./brand-identity.service.js");
+        const service = new BrandIdentityService();
+        return service.uploadLogo({
+            documentId,
+            workspaceId: r.workspace.id,
+            userId: r.user.id,
+            buffer,
+            mimeType,
+            filename,
+        });
+    }
+    async recomposePosters(r, documentId) {
+        assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
+        const { BrandIdentityService } = await import("./brand-identity.service.js");
+        const service = new BrandIdentityService();
+        return service.recomposeAllDocumentPosters(documentId, r.workspace.id, r.user.id);
     }
     async getDocumentPages(r, documentId) {
         const w = r.workspace.id;
@@ -244,6 +328,7 @@ let DocumentsController = class DocumentsController {
     }
     async reprocessDocument(r, documentId) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const w = r.workspace.id;
         const docRes = await pool.query("SELECT id, original_filename FROM documents WHERE id = $1 AND workspace_id = $2", [documentId, w]);
         if (!docRes.rowCount) {
@@ -268,6 +353,7 @@ let DocumentsController = class DocumentsController {
     }
     async fastTrackDocument(r, documentId) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const w = r.workspace.id;
         const docRes = await pool.query("SELECT id, original_filename, status FROM documents WHERE id = $1 AND workspace_id = $2", [documentId, w]);
         if (!docRes.rowCount) {
@@ -363,6 +449,7 @@ let DocumentsController = class DocumentsController {
     }
     async deleteDocument(r, documentId) {
         assertPermission(r.workspace.role, "edit");
+        await assertWorkspaceActive(r.workspace.id, "document processing");
         const w = r.workspace.id;
         const docRes = await pool.query("SELECT id, original_filename FROM documents WHERE id = $1 AND workspace_id = $2", [documentId, w]);
         if (!docRes.rowCount) {
@@ -393,10 +480,15 @@ let DocumentsController = class DocumentsController {
             }
             const planContentIds = planRows.rows.map((p) => p.content_id).filter(Boolean);
             const planIds = planRows.rows.map((p) => p.id);
-            // Collect any content IDs linked directly to this document via content_sources
-            const csRows = await db.query("SELECT content_id FROM content_sources WHERE document_id = $1 AND workspace_id = $2", [documentId, w]);
+            // Collect any content IDs linked directly to this document's visual concepts
+            let vcContentIds = [];
+            try {
+                const vcQuery = await db.query("SELECT content_id FROM document_visual_concepts WHERE document_id = $1 AND content_id IS NOT NULL", [documentId]);
+                vcContentIds = vcQuery.rows.map((r) => r.content_id).filter(Boolean);
+            }
+            catch { }
             const allContentIds = [
-                ...new Set([...planContentIds, ...csRows.rows.map((r) => r.content_id).filter(Boolean)]),
+                ...new Set([...planContentIds, ...vcContentIds]),
             ];
             // 3. Delete knowledge_content_plans FIRST because knowledge_content_plans.content_id has NO ACTION FK on content
             if (planIds.length > 0) {
@@ -420,7 +512,6 @@ let DocumentsController = class DocumentsController {
                 }
                 await db.query("DELETE FROM video_renders WHERE content_id = ANY($1::uuid[])", [allContentIds]);
                 await db.query("DELETE FROM content_versions WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2", [allContentIds, w]);
-                await db.query("DELETE FROM content_sources WHERE content_id = ANY($1::uuid[]) AND workspace_id = $2", [allContentIds, w]);
                 await db.query("DELETE FROM content WHERE id = ANY($1::uuid[]) AND workspace_id = $2", [allContentIds, w]);
             }
             // 5. Delete document-specific artifacts: media, knowledge, chunks, pages, ai_generations, visual_concepts
@@ -540,6 +631,75 @@ __decorate([
     __metadata("design:paramtypes", [Object, String, String, Object]),
     __metadata("design:returntype", Promise)
 ], DocumentsController.prototype, "dispatchVisualConcept", null);
+__decorate([
+    WorkspaceRequired(),
+    Patch(":documentId/visual-concepts/:conceptId/caption"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __param(2, Param("conceptId")),
+    __param(3, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String, Object]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "updateVisualConceptCaption", null);
+__decorate([
+    WorkspaceRequired(),
+    Post(":documentId/visual-concepts/sync-schedule"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __param(2, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "syncVisualSchedule", null);
+__decorate([
+    WorkspaceRequired(),
+    Get(":documentId/brand-identity"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "getBrandIdentity", null);
+__decorate([
+    WorkspaceRequired(),
+    Put(":documentId/brand-identity"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __param(2, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "updateBrandIdentity", null);
+__decorate([
+    WorkspaceRequired(),
+    Post(":documentId/brand-identity"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __param(2, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "saveBrandIdentityPost", null);
+__decorate([
+    WorkspaceRequired(),
+    Post(":documentId/brand-identity/upload-logo"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __param(2, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "uploadBrandLogo", null);
+__decorate([
+    WorkspaceRequired(),
+    Post(":documentId/brand-identity/recompose"),
+    __param(0, Req()),
+    __param(1, Param("documentId")),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], DocumentsController.prototype, "recomposePosters", null);
 __decorate([
     WorkspaceRequired(),
     Get(":documentId/pages"),

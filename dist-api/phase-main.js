@@ -7,7 +7,9 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+import { assertWorkspaceActive } from "./billing/entitlement.service.js";
 import { loadEnvFile } from "node:process";
+import fs from "node:fs";
 try {
     loadEnvFile(".env");
 }
@@ -15,6 +17,7 @@ catch {
     // cPanel may also provide environment variables directly.
 }
 import "reflect-metadata";
+import { jsonBodyParsers } from "./http-body.js";
 import { Module, Catch, HttpException, Injectable, UnauthorizedException, ForbiddenException, BadRequestException, Controller, Get, ServiceUnavailableException, } from "@nestjs/common";
 import { NestFactory, APP_GUARD, Reflector } from "@nestjs/core";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
@@ -73,6 +76,10 @@ let PhaseGuard = class PhaseGuard {
             if (!m.rowCount)
                 throw new ForbiddenException("Workspace access denied.");
             r.workspace = { id: wid, role: m.rows[0].role };
+            const protectedPath = /^\/api\/v1\/(content|ai|clipdrop|documents|instagram-studio|calendar|knowledge|batch)(\/|$)/.test(r.path);
+            const safeAction = r.method === 'DELETE' || /\/(cancel|reject)$/.test(r.path);
+            if (protectedPath && !['GET', 'HEAD', 'OPTIONS'].includes(r.method) && !safeAction)
+                await assertWorkspaceActive(wid, 'this operation');
         }
         return true;
     }
@@ -103,6 +110,14 @@ let ErrorFilter = class ErrorFilter {
         }
         else if (e instanceof MetaGraphError) {
             status = e.status && e.status >= 400 && e.status < 600 ? e.status : 400;
+            message = e.message;
+        }
+        else if (e?.code === '23505') {
+            status = 409;
+            message = 'The request conflicts with an existing record or publication.';
+        }
+        else if (e?.code === '23514') {
+            status = 409;
             message = e.message;
         }
         else {
@@ -168,6 +183,47 @@ __decorate([
 HealthController = __decorate([
     Controller("health")
 ], HealthController);
+let CronController = class CronController {
+    async cronTick() {
+        try {
+            const { relayScheduledPosts } = await import("./cron-tasks.js");
+            await relayScheduledPosts(pool);
+            const mailMod = await import("./mail.js");
+            await mailMod.deliverEmails({ limit: 10 });
+            const duePosts = (await pool.query(`SELECT id FROM scheduled_posts 
+         WHERE state IN ('PENDING', 'ENQUEUED') AND execute_at <= NOW()
+         AND error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED'
+         ORDER BY execute_at ASC LIMIT 15`)).rows;
+            const processed = [];
+            for (const sp of duePosts) {
+                const { executePublishRecord } = await import("./publishing.js");
+                try {
+                    console.log(`[ContentOS CronTick] Auto-publishing due post ${sp.id}...`);
+                    await executePublishRecord(sp.id, { attemptsMade: 0, maxAttempts: 3 });
+                    processed.push({ id: sp.id, status: "published" });
+                }
+                catch (postErr) {
+                    console.warn(`[ContentOS CronTick] Auto-publish failed for post ${sp.id}:`, postErr.message);
+                    processed.push({ id: sp.id, status: "failed", error: postErr.message });
+                }
+            }
+            return { ok: true, timestamp: new Date().toISOString(), processedCount: processed.length, processed };
+        }
+        catch (err) {
+            return { ok: false, error: err?.message };
+        }
+    }
+};
+__decorate([
+    Public(),
+    Get("cron/tick"),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], CronController.prototype, "cronTick", null);
+CronController = __decorate([
+    Controller()
+], CronController);
 import { SocialController } from "./social.controller.js";
 import { StorageController } from "./storage/storage.controller.js";
 import { DocumentsController } from "./documents/documents.controller.js";
@@ -182,6 +238,7 @@ import { FestivalController } from "./calendar/festival.controller.js";
 import { NotificationsController } from "./notifications/notifications.controller.js";
 import { CommentsController } from "./comments/comments.controller.js";
 import { ClipdropController } from "./clipdrop/clipdrop.controller.js";
+import { InstagramStudioController } from "./creative/instagram-studio.controller.js";
 import { ClipdropService } from "./clipdrop/clipdrop.service.js";
 import { BillingController } from "./billing/billing.controller.js";
 let PhaseModule = class PhaseModule {
@@ -211,6 +268,8 @@ PhaseModule = __decorate([
             NotificationsController,
             CommentsController,
             ClipdropController,
+            InstagramStudioController,
+            CronController,
         ],
         providers: [AdminGuard, { provide: APP_GUARD, useClass: PhaseGuard }, ClipdropService],
     })
@@ -317,7 +376,7 @@ export async function bootstrap() {
             });
         next();
     });
-    app.use(express.json({ limit: "16kb" }));
+    app.use(jsonBodyParsers());
     app.use(cookieParser());
     app.use(async (req, res, next) => {
         if (!req.path.startsWith("/api/v1/auth/"))
@@ -361,12 +420,21 @@ export async function bootstrap() {
             .build()));
     const server = app.getHttpAdapter().getInstance();
     const root = fileURLToPath(new URL("../dist/", import.meta.url));
-    // Serve the built React/Vite frontend before Nest registers its 404 handler.
-    server.use(express.static(root));
-    // SPA fallback: all non-API GET requests return the frontend index.html.
+    // Serve the built React/Vite frontend before Nest registers its 404 handler (if dist exists).
+    if (fs.existsSync(root)) {
+        server.use(express.static(root));
+    }
+    // SPA fallback / API root healthcheck: all non-API GET requests return index.html or clean 200 OK HTML.
     server.use((req, res, next) => {
         if (req.method === "GET" && !req.path.startsWith("/api/")) {
-            return res.sendFile(`${root}/index.html`);
+            const indexHtml = `${root}/index.html`;
+            if (fs.existsSync(indexHtml)) {
+                return res.sendFile(indexHtml);
+            }
+            return res
+                .status(200)
+                .type("html")
+                .send("<!doctype html><html><head><title>ContentOS API</title></head><body><h1>ContentOS API Running</h1><p>Status: OK (200)</p></body></html>");
         }
         next();
     });
@@ -385,12 +453,49 @@ export async function bootstrap() {
         port: rawPort,
     }));
     // Built-in Auto-Scheduler Loop: Checks every 30s for due posts and publishes automatically
+    // Reuse the leased durable worker lane in API-only PostgreSQL deployments.
+    const autoPublisherDisabled = config.APP_ENV === 'test' || process.env.DISABLE_AUTO_PUBLISHER === 'true';
+    if (autoPublisherDisabled) {
+        console.log('[ContentOS] Auto-publisher is DISABLED (DISABLE_AUTO_PUBLISHER=true or test mode).');
+    }
+    const backgroundStop = new AbortController();
+    let backgroundRun;
+    const backgroundTimer = setInterval(() => {
+        if (autoPublisherDisabled || backgroundRun)
+            return;
+        backgroundRun = (async () => {
+            const { queueBackend } = await import('./queue-backend.js');
+            if (queueBackend() !== 'postgres')
+                return;
+            const { postgresQueue } = await import('./queues.js');
+            const { runCron } = await import('./cron-runtime.js');
+            const { prepareCron } = await import('./cron-tasks.js');
+            const { executeCronJob } = await import('./cron-job.js');
+            await runCron(postgresQueue, { lane: 'background', budgetMs: 20000,
+                signal: backgroundStop.signal, prepare: () => prepareCron('background'),
+                handle: executeCronJob });
+        })().catch(error => console.warn('[ContentOS] Background processing:', error.message))
+            .finally(() => { backgroundRun = undefined; });
+    }, 5000);
     const autoPublishInterval = setInterval(async () => {
+        if (autoPublisherDisabled) {
+            if (config.APP_ENV !== 'test') {
+                try {
+                    const { deliverEmails } = await import("./mail.js");
+                    await deliverEmails({ limit: 10 });
+                }
+                catch { }
+            }
+            return;
+        }
         try {
             const { relayScheduledPosts } = await import("./cron-tasks.js");
             await relayScheduledPosts(pool);
+            const mailMod = await import("./mail.js");
+            await mailMod.deliverEmails({ limit: 10 });
             const duePosts = (await pool.query(`SELECT id FROM scheduled_posts 
-         WHERE state = 'ENQUEUED' AND execute_at <= NOW()
+         WHERE state IN ('PENDING', 'ENQUEUED') AND execute_at <= NOW()
+         AND error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED'
          ORDER BY execute_at ASC LIMIT 10`)).rows;
             for (const sp of duePosts) {
                 const { executePublishRecord } = await import("./publishing.js");
@@ -402,18 +507,51 @@ export async function bootstrap() {
                     console.warn(`[ContentOS] Auto-publish failed for post ${sp.id}:`, postErr.message);
                 }
             }
-            const { deliverEmails } = await import("./mail.js");
-            await deliverEmails({ limit: 10 });
+            // Auto-dispatch due visual concepts from Document Knowledge Base / AI Studio
+            try {
+                const dueConcepts = (await pool.query(`SELECT dvc.id, dvc.document_id, dvc.workspace_id, dvc.target_channels, 
+                  COALESCE((SELECT m.user_id FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE m.workspace_id=dvc.workspace_id AND m.role='Owner' AND u.account_status='ACTIVE' LIMIT 1),d.created_by) as user_id
+           FROM document_visual_concepts dvc
+           LEFT JOIN documents d ON d.id = dvc.document_id
+           WHERE dvc.scheduled_at IS NOT NULL 
+             AND dvc.scheduled_at <= NOW()
+             AND dvc.scheduled_at >= NOW() - interval '15 minutes'
+             AND (dvc.status IS NULL OR dvc.status = 'PENDING')
+           ORDER BY dvc.scheduled_at ASC LIMIT 5`)).rows;
+                for (const concept of dueConcepts) {
+                    try {
+                        console.log(`[ContentOS] Auto-dispatching due visual concept ${concept.id} (Doc: ${concept.document_id})...`);
+                        const { VisualConceptsService } = await import("./documents/visual-concepts.service.js");
+                        const vcService = new VisualConceptsService();
+                        await vcService.dispatchConcept({
+                            documentId: concept.document_id,
+                            conceptId: concept.id,
+                            workspaceId: concept.workspace_id,
+                            userId: concept.user_id,
+                            channels: concept.target_channels || ["linkedin"],
+                        });
+                    }
+                    catch (conceptErr) {
+                        console.warn(`[ContentOS] Auto-dispatch failed for concept ${concept.id}:`, conceptErr?.message || conceptErr);
+                    }
+                }
+            }
+            catch (vcErr) {
+                console.warn("[ContentOS] Visual concepts check warning:", vcErr?.message || vcErr);
+            }
         }
         catch (loopErr) {
             console.warn("[ContentOS] Auto-scheduler loop error:", loopErr.message);
         }
     }, 30000);
     // Immediate check on startup for overdue posts
-    setTimeout(async () => {
+    const startupPublishTimer = setTimeout(async () => {
+        if (autoPublisherDisabled)
+            return;
         try {
             const duePosts = (await pool.query(`SELECT id FROM scheduled_posts 
-         WHERE state = 'ENQUEUED' AND execute_at <= NOW()
+         WHERE state IN ('PENDING', 'ENQUEUED') AND execute_at <= NOW()
+         AND error_code IS DISTINCT FROM 'OVERDUE_REVIEW_REQUIRED'
          ORDER BY execute_at ASC LIMIT 10`)).rows;
             for (const sp of duePosts) {
                 const { executePublishRecord } = await import("./publishing.js");
@@ -425,12 +563,47 @@ export async function bootstrap() {
                     console.warn(`[ContentOS] Immediate auto-publish failed for post ${sp.id}:`, postErr.message);
                 }
             }
+            // Auto-dispatch due visual concepts from Document Knowledge Base / AI Studio
+            try {
+                const dueConcepts = (await pool.query(`SELECT dvc.id, dvc.document_id, dvc.workspace_id, dvc.target_channels, 
+                  COALESCE(d.created_by, (SELECT id FROM users LIMIT 1)) as user_id
+           FROM document_visual_concepts dvc
+           LEFT JOIN documents d ON d.id = dvc.document_id
+           WHERE dvc.scheduled_at IS NOT NULL 
+             AND dvc.scheduled_at <= NOW()
+             AND dvc.scheduled_at >= NOW() - interval '15 minutes'
+             AND (dvc.status IS NULL OR dvc.status = 'PENDING')
+           ORDER BY dvc.scheduled_at ASC LIMIT 5`)).rows;
+                for (const concept of dueConcepts) {
+                    try {
+                        console.log(`[ContentOS] Auto-dispatching due visual concept ${concept.id} (Doc: ${concept.document_id})...`);
+                        const { VisualConceptsService } = await import("./documents/visual-concepts.service.js");
+                        const vcService = new VisualConceptsService();
+                        await vcService.dispatchConcept({
+                            documentId: concept.document_id,
+                            conceptId: concept.id,
+                            workspaceId: concept.workspace_id,
+                            userId: concept.user_id,
+                            channels: concept.target_channels || ["linkedin"],
+                        });
+                    }
+                    catch (conceptErr) {
+                        console.warn(`[ContentOS] Auto-dispatch failed for concept ${concept.id}:`, conceptErr?.message || conceptErr);
+                    }
+                }
+            }
+            catch (vcErr) {
+                console.warn("[ContentOS] Visual concepts check warning:", vcErr?.message || vcErr);
+            }
         }
         catch (err) {
             console.warn("[ContentOS] Immediate overdue check error:", err.message);
         }
     }, 3000);
     let closing = false;
+    const originalClose = app.close.bind(app);
+    app.close = async () => { clearInterval(backgroundTimer); backgroundStop.abort(); if (backgroundRun)
+        await backgroundRun; clearInterval(autoPublishInterval); clearTimeout(startupPublishTimer); return originalClose(); };
     const close = async () => {
         if (closing)
             return;

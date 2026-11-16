@@ -148,7 +148,7 @@ export class KnowledgeAutomationController {
       canEdit: ["Owner", "Admin", "Content Manager", "Editor"].includes(
         r.workspace.role,
       ),
-      mode: "REVIEW",
+      mode: settings.rows[0]?.autopilot_enabled ? "AUTOPILOT" : "REVIEW",
     };
   }
   @Patch("settings") async settings(
@@ -436,13 +436,18 @@ export class KnowledgeAutomationController {
       brand,
     });
 
+    const sourceDocumentId = plan.document_id || snapshot.documentId || snapshot.sources?.[0]?.documentId || (plan.knowledge_id ? (await pool.query("SELECT document_id FROM document_knowledge WHERE id=$1 AND workspace_id=$2", [plan.knowledge_id, r.workspace.id])).rows[0]?.document_id : null);
+    if (!sourceDocumentId) throw new BadRequestException("A source PDF is required for branding.");
+    const { BrandIdentityService } = await import("../documents/brand-identity.service.js");
+    const brandService = new BrandIdentityService();
+
     let newMediaUrl = snapshot.mediaUrl || null;
     let newAssetId = snapshot.mediaAssetId || null;
     try {
       const imgRes = await clipdropService.generateImage({
         workspaceId: r.workspace.id,
         userId: r.user.id,
-        prompt: res.prompt,
+        prompt: res.prompt + "\nDo not draw logos, domains or URLs. Approved branding is added afterward.",
         engine: "flux",
         enableOverlay: false,
         headline: res.headline || title,
@@ -451,11 +456,12 @@ export class KnowledgeAutomationController {
         idempotencyKey: `refresh:${id}:${Date.now()}`,
       });
       if (imgRes?.url) {
-        newMediaUrl = imgRes.url;
-        newAssetId = imgRes.assetId;
+        const branded = await brandService.brandGeneratedImage({ documentId: sourceDocumentId, workspaceId: r.workspace.id, userId: r.user.id, assetId: imgRes.assetId, url: imgRes.url });
+        newMediaUrl = branded.url;
+        newAssetId = branded.assetId;
       }
     } catch (imgErr) {
-      console.warn("Could not auto-generate refreshed visual image:", imgErr);
+      throw imgErr;
     }
 
     const updatedSnapshot = {
@@ -557,17 +563,21 @@ export class KnowledgeAutomationController {
     const conceptsRes = await pool.query(
       `SELECT 
         dvc.id,
+        'document' as source,
         dvc.document_id,
+        COALESCE(d.original_filename, 'Business Document') as document_name,
         dvc.concept_title as title,
-        dvc.source_excerpt as excerpt,
-        dvc.prompt,
+        dvc.prompt as concept_prompt,
+        dvc.source_excerpt,
+        dvc.source_page as page_number,
         dvc.asset_id,
         dvc.image_url,
         dvc.status,
-        dvc.target_channels as channels,
+        COALESCE(dvc.target_channels, ARRAY['LinkedIn', 'Instagram', 'Facebook', 'Telegram']::text[]) as target_channels,
+        dvc.scheduled_at,
         dvc.dispatched_at,
         dvc.created_at,
-        d.original_filename as document_name
+        dvc.post_result
        FROM document_visual_concepts dvc
        LEFT JOIN documents d ON d.id = dvc.document_id
        WHERE dvc.workspace_id = $1 
@@ -582,18 +592,23 @@ export class KnowledgeAutomationController {
     const contentRes = await pool.query(
       `SELECT 
         c.id,
+        'content_library' as source,
         NULL as document_id,
+        'Content Library Post' as document_name,
         c.title,
-        c.body as excerpt,
-        '' as prompt,
-        NULL as asset_id,
-        (SELECT public_url FROM media_assets ma JOIN content_media cm ON cm.media_asset_id = ma.id WHERE cm.content_id = c.id LIMIT 1) as image_url,
+        '' as concept_prompt,
+        c.body as source_excerpt,
+        NULL as page_number,
+        c.image_asset_id as asset_id,
+        ma.object_key,
         'DISPATCHED' as status,
-        c.channels,
+        COALESCE(c.platforms, '["LinkedIn", "Instagram", "Facebook", "Telegram"]'::jsonb) as target_channels,
+        c.updated_at as scheduled_at,
         c.updated_at as dispatched_at,
         c.created_at,
-        'Content Library Post' as document_name
+        NULL as post_result
        FROM content c
+       LEFT JOIN media_assets ma ON ma.id = c.image_asset_id
        WHERE c.workspace_id = $1 
          AND c.status = 'PUBLISHED'
          AND c.created_at >= NOW() - INTERVAL '10 days'
@@ -602,10 +617,27 @@ export class KnowledgeAutomationController {
       [w]
     );
 
+    // Resolve media URLs for content rows
+    const { generateStorageSignature } = await import("../storage/signed-url.js");
+    const storageBase = process.env.PUBLIC_STORAGE_URL || "http://localhost:3001/api/v1/storage/local/download";
+    const expires = Date.now() + 1000 * 60 * 60 * 24 * 365;
+
+    const formattedContent = contentRes.rows.map((row: any) => {
+      let imageUrl = null;
+      if (row.object_key) {
+        const sig = generateStorageSignature("contentos-media", row.object_key, expires);
+        imageUrl = `${storageBase}?bucket=contentos-media&key=${encodeURIComponent(row.object_key)}&expires=${expires}&sig=${sig}`;
+      }
+      return {
+        ...row,
+        image_url: imageUrl,
+      };
+    });
+
     // Merge and deduplicate
-    const items = [...conceptsRes.rows, ...contentRes.rows]
-      .filter((v, i, a) => a.findIndex(t => t.id === v.id || (t.title && t.title === v.title)) === i)
-      .sort((a, b) => new Date(b.dispatched_at || b.created_at).getTime() - new Date(a.dispatched_at || a.created_at).getTime());
+    const items = [...conceptsRes.rows, ...formattedContent]
+      .filter((v, i, a) => a.findIndex((t: any) => t.id === v.id || (t.title && t.title === v.title)) === i)
+      .sort((a: any, b: any) => new Date(b.dispatched_at || b.created_at).getTime() - new Date(a.dispatched_at || a.created_at).getTime());
 
     return {
       history: items,

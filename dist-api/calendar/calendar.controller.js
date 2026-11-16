@@ -10,6 +10,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
+import { requiresPublicationApproval } from "../publishing-policy.js";
 import { Controller, Get, Post, Body, Param, Req, BadRequestException, NotFoundException, } from "@nestjs/common";
 import { assertPermission, WorkspaceRequired } from "../security.js";
 import { pool, transaction, audit } from "../db.js";
@@ -20,7 +21,46 @@ import { validateSchedule } from '../content.controller.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { createPublishPlan } from '../publish-planner.js';
+import { OVERDUE_GRACE_MS, resolveOverduePost } from '../overdue-posts.js';
 let CalendarController = class CalendarController {
+    async overdue(req) {
+        const posts = (await pool.query(`SELECT s.id,c.title,s.content_id,s.execute_at,s.error_code,a.platform,a.name AS account_name,
+      (lower(a.state)<>'connected' OR t.ciphertext IS NULL OR (t.expires_at<=now() AND NOT (lower(a.platform)='youtube' AND t.refresh_ciphertext IS NOT NULL))) AS reconnect_required
+      FROM scheduled_posts s JOIN content c ON c.id=s.content_id AND c.workspace_id=s.workspace_id
+      JOIN social_accounts a ON a.id=s.account_id AND a.workspace_id=s.workspace_id
+      LEFT JOIN social_account_tokens t ON t.account_id=a.id
+      WHERE s.workspace_id=$1 AND s.content_version=c.version AND s.state IN ('PENDING','ENQUEUED')
+      AND (s.error_code='OVERDUE_REVIEW_REQUIRED' OR s.execute_at<now()-$2*interval '1 millisecond')
+      ORDER BY s.execute_at,s.id`, [req.workspace.id, OVERDUE_GRACE_MS])).rows;
+        const concepts = (await pool.query(`SELECT id,concept_title AS title,scheduled_at AS execute_at,
+      array_to_string(ARRAY(SELECT jsonb_array_elements_text(target_channels)),', ') AS platform,
+      'Visual concept — all target channels' AS account_name,'concept' AS source,false AS reconnect_required
+      FROM document_visual_concepts WHERE workspace_id=$1 AND (status IS NULL OR status='PENDING')
+      AND scheduled_at<now()-$2*interval '1 millisecond' ORDER BY scheduled_at,id`, [req.workspace.id, OVERDUE_GRACE_MS])).rows;
+        return { posts: [...posts, ...concepts], graceMinutes: OVERDUE_GRACE_MS / 60000 };
+    }
+    async resolveOverdue(req, id, body) {
+        assertPermission(req.workspace.role, 'schedule');
+        const parsed = z.object({ action: z.enum(['publish', 'reschedule', 'discard']), source: z.enum(['post', 'concept']).optional(), scheduledAt: z.string().datetime({ offset: true }).optional(), confirm: z.literal(true) }).safeParse(body);
+        if (!parsed.success || !z.string().uuid().safeParse(id).success)
+            throw new BadRequestException('A valid post, action and explicit confirmation are required.');
+        if (parsed.data.source === 'concept') {
+            return transaction(async (db) => {
+                const concept = (await db.query(`SELECT * FROM document_visual_concepts WHERE id=$1 AND workspace_id=$2 FOR UPDATE`, [id, req.workspace.id])).rows[0];
+                if (!concept)
+                    throw new NotFoundException('Visual concept not found.');
+                if (!concept.scheduled_at || ![null, 'PENDING'].includes(concept.status) || Date.now() - new Date(concept.scheduled_at).getTime() <= OVERDUE_GRACE_MS)
+                    throw new BadRequestException('This visual concept schedule has changed. Refresh before reviewing.');
+                const at = parsed.data.action === 'discard' ? null : parsed.data.action === 'publish' ? new Date() : new Date(parsed.data.scheduledAt || '');
+                if (at && (!Number.isFinite(at.getTime()) || (parsed.data.action === 'reschedule' && at.getTime() <= Date.now())))
+                    throw new BadRequestException('Choose a future date and time.');
+                await db.query('UPDATE document_visual_concepts SET scheduled_at=$3,updated_at=now() WHERE id=$1 AND workspace_id=$2', [id, req.workspace.id, at]);
+                await audit(db, req.workspace.id, req.user.id, `overdue visual concept ${parsed.data.action}`, 'document', concept.document_id, concept.concept_title, { scheduledAt: concept.scheduled_at }, { scheduledAt: at });
+                return { id, action: parsed.data.action };
+            });
+        }
+        return resolveOverduePost(req.workspace.id, req.user.id, id, parsed.data);
+    }
     async scheduleProposal(req, contentId, body) {
         assertPermission(req.workspace.role, 'schedule');
         if (body.approve === true)
@@ -201,10 +241,10 @@ let CalendarController = class CalendarController {
                     post.status = 'APPROVED';
                 }
             }
-            const knowledge = (await client.query('SELECT 1 FROM knowledge_content_plans WHERE workspace_id=$1 AND content_id=$2 LIMIT 1', [ws.id, contentId])).rows.length > 0;
             const at = new Date(scheduledAtIso || '');
-            const approvalStatus = post.status === 'SCHEDULED' ? (post.approved_by ? 'APPROVED' : !workspace.require_approval ? 'DRAFT' : post.status) : post.status;
-            validateSchedule(approvalStatus, workspace.require_approval || knowledge, at);
+            const requiresApproval = await requiresPublicationApproval(client, ws.id, post.id);
+            const approvalStatus = post.status === 'SCHEDULED' ? (post.approved_by ? 'APPROVED' : !requiresApproval ? 'DRAFT' : post.status) : post.status;
+            validateSchedule(approvalStatus, requiresApproval, at);
             await assertDailySlot(client, ws.id, post, at);
             const accounts = (await client.query(`SELECT a.id,a.platform FROM social_accounts a JOIN social_account_tokens t ON t.account_id=a.id WHERE a.workspace_id=$1 AND lower(a.platform)=ANY($2) AND lower(a.state)='connected' AND t.ciphertext IS NOT NULL AND (t.expires_at IS NULL OR t.expires_at>now())`, [ws.id, post.platforms.map((p) => p.toLowerCase())])).rows;
             if (!accounts.length || accounts.length !== post.platforms.length)
@@ -224,6 +264,22 @@ let CalendarController = class CalendarController {
         });
     }
 };
+__decorate([
+    Get('overdue'),
+    __param(0, Req()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], CalendarController.prototype, "overdue", null);
+__decorate([
+    Post('overdue/:id/resolve'),
+    __param(0, Req()),
+    __param(1, Param('id')),
+    __param(2, Body()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", Promise)
+], CalendarController.prototype, "resolveOverdue", null);
 __decorate([
     Post('proposals/:id/schedule'),
     __param(0, Req()),

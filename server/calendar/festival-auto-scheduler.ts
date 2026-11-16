@@ -1,3 +1,4 @@
+import { getWorkspaceEntitlement } from "../billing/entitlement.service.js";
 import { pool, audit, transaction, type DB } from "../db.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -92,6 +93,7 @@ export class FestivalAutoSchedulerService {
     now: Date,
     result: SchedulerExecutionResult,
   ) {
+    if((await getWorkspaceEntitlement(ws.id,db)).isLocked){result.skippedWorkspaces++;return;}
     const timezone = ws.timezone || "Asia/Kolkata";
     const prepDays = Math.max(1, Math.min(30, Number(ws.festival_prep_days) || 2));
     const wsRegion: FestivalRegion = ws.festival_region || "ALL";

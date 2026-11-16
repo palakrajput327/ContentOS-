@@ -1,13 +1,14 @@
 import { Controller, Post, Get, Param, Body, Req, BadRequestException } from "@nestjs/common";
-import { assertPermission, type AuthedRequest } from "../security.js";
+import { assertPermission, WorkspaceRequired, type AuthedRequest } from "../security.js";
 import { BatchService } from "./batch.service.js";
 
+@WorkspaceRequired()
 @Controller("batch")
 export class BatchController {
   @Post("ai-generation")
   async createBatchAIGeneration(
     @Req() req: AuthedRequest,
-    @Body() body: { items: Array<{ topic: string; tone?: string; goal?: string; platforms?: string[] }> }
+    @Body() body: { confirm?: boolean; items: Array<{ topic: string; tone?: string; goal?: string; platforms?: string[] }> }
   ) {
     const ws = req.workspace!;
     assertPermission(ws.role, "edit");
@@ -16,6 +17,7 @@ export class BatchController {
       throw new BadRequestException("items array is required with at least 1 generation topic.");
     }
 
+    if (body.confirm !== true) throw new BadRequestException("Explicit confirm:true is required for bulk operations.");
     return BatchService.createBatch({
       workspaceId: ws.id,
       userId: req.user!.id,
@@ -32,7 +34,7 @@ export class BatchController {
   @Post("bulk-save")
   async createBulkSave(
     @Req() req: AuthedRequest,
-    @Body() body: { items: Array<{ title: string; body: string; platforms: string[]; variants?: Record<string, any> }> }
+    @Body() body: { confirm?: boolean; items: Array<{ title: string; body: string; platforms: string[]; variants?: Record<string, any> }> }
   ) {
     const ws = req.workspace!;
     assertPermission(ws.role, "edit");
@@ -41,6 +43,7 @@ export class BatchController {
       throw new BadRequestException("items array is required with posts to save.");
     }
 
+    if (body.confirm !== true) throw new BadRequestException("Explicit confirm:true is required for bulk operations.");
     return BatchService.createBatch({
       workspaceId: ws.id,
       userId: req.user!.id,
@@ -57,7 +60,7 @@ export class BatchController {
   @Post("bulk-approve")
   async bulkApprove(
     @Req() req: AuthedRequest,
-    @Body() body: { contentIds: string[] }
+    @Body() body: { confirm?: boolean; contentIds: string[] }
   ) {
     const ws = req.workspace!;
     assertPermission(ws.role, "approve");
@@ -66,6 +69,7 @@ export class BatchController {
       throw new BadRequestException("contentIds array is required.");
     }
 
+    if (body.confirm !== true) throw new BadRequestException("Explicit confirm:true is required for bulk operations.");
     return BatchService.createBatch({
       workspaceId: ws.id,
       userId: req.user!.id,
@@ -83,7 +87,7 @@ export class BatchController {
   @Post("bulk-reject")
   async bulkReject(
     @Req() req: AuthedRequest,
-    @Body() body: { contentIds: string[] }
+    @Body() body: { confirm?: boolean; contentIds: string[] }
   ) {
     const ws = req.workspace!;
     assertPermission(ws.role, "approve");
@@ -92,6 +96,7 @@ export class BatchController {
       throw new BadRequestException("contentIds array is required.");
     }
 
+    if (body.confirm !== true) throw new BadRequestException("Explicit confirm:true is required for bulk operations.");
     return BatchService.createBatch({
       workspaceId: ws.id,
       userId: req.user!.id,
@@ -109,7 +114,7 @@ export class BatchController {
   @Post("bulk-schedule")
   async bulkSchedule(
     @Req() req: AuthedRequest,
-    @Body() body: { contentIds: string[]; scheduledAt: string; timezone?: string }
+    @Body() body: { confirm?: boolean; contentIds: string[]; scheduledAt: string; timezone?: string }
   ) {
     const ws = req.workspace!;
     assertPermission(ws.role, "schedule");
@@ -121,6 +126,7 @@ export class BatchController {
       throw new BadRequestException("scheduledAt ISO timestamp is required.");
     }
 
+    if (body.confirm !== true) throw new BadRequestException("Explicit confirm:true is required for bulk operations.");
     return BatchService.createBatch({
       workspaceId: ws.id,
       userId: req.user!.id,
@@ -143,7 +149,7 @@ export class BatchController {
   @Post("bulk-publish")
   async bulkPublish(
     @Req() req: AuthedRequest,
-    @Body() body: { contentIds: string[] }
+    @Body() body: { confirm?: boolean; contentIds: string[] }
   ) {
     const ws = req.workspace!;
     assertPermission(ws.role, "schedule");
@@ -152,6 +158,7 @@ export class BatchController {
       throw new BadRequestException("contentIds array is required.");
     }
 
+    if (body.confirm !== true) throw new BadRequestException("Explicit confirm:true is required for bulk operations.");
     return BatchService.createBatch({
       workspaceId: ws.id,
       userId: req.user!.id,
@@ -169,9 +176,11 @@ export class BatchController {
   @Post(":id/retry-failed")
   async retryFailed(
     @Req() req: AuthedRequest,
-    @Param("id") batchId: string
+    @Param("id") batchId: string,
+    @Body() body: { confirm?: boolean }
   ) {
     const ws = req.workspace!;
+    if (body?.confirm !== true) throw new BadRequestException("Explicit confirm:true is required for bulk retry.");
     assertPermission(ws.role, "edit");
     return BatchService.retryFailedChildren(ws.id, batchId, req.user!.id);
   }

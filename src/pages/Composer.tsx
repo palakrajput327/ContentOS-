@@ -507,7 +507,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
           const res = await request<{ success: boolean; status?: string; error?: string; providerPostId?: string; videoId?: string; url?: string }>(
             `/content/${saved.id}/publish`,
             "POST",
-            { socialAccountId: acc.id },
+            { socialAccountId: acc.id, manualPublish: true },
           );
           if (res.success === true && (res.providerPostId || res.videoId)) {
             publishResults.push({ platform: p, accountName: acc.name, success: true, status:'success', providerPostId:res.providerPostId || res.videoId, url:res.url });
@@ -621,14 +621,15 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         youtube: ytPayload || undefined,
       });
 
-      // 2. Transition if approval required and user has approval permissions
+      // 2. If workspace requires approval, auto-approve before scheduling
+      //    (manual schedule by an authorized user = self-approved, same as Publish Now)
       const canApprove = ["Owner", "Admin", "Approver"].includes(s.workspace.role);
       if (s.workspace.requireApproval && canApprove) {
         try {
           await data.transition(saved.id, "review");
           await data.transition(saved.id, "approve");
         } catch {
-          // ignore if already approved
+          // already in NEEDS_REVIEW or APPROVED — continue to schedule
         }
       }
 
@@ -645,6 +646,84 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
     } catch (err: any) {
       setScheduleError(err.message || "Failed to schedule post");
       toast.error(err.message || "Failed to schedule post");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  // Send Manual Post to Autopilot Queue
+  async function handleSendToAutopilot() {
+    try {
+      setError("");
+      if (!title.trim() || !body.trim() || !selected.length) {
+        throw new Error("Add a title, write your content, and select at least one target platform before sending to Autopilot.");
+      }
+      setBusy("autopilot");
+
+      const cleanVariants: Record<string, any> = {};
+      selected.forEach((p) => {
+        if (variants[p]) {
+          cleanVariants[p] = composedVariant(p);
+        } else {
+          cleanVariants[p] = {
+            title,
+            caption: body,
+            mediaType: postType,
+            mediaUrl: mediaUrl || undefined,
+            mediaAssetId: mediaAssetId || undefined,
+          };
+        }
+      });
+
+      // YouTube validation
+      let ytPayload = post?.youtube;
+      if (!ytPayload && selected.includes("YouTube")) {
+        const ytVar = cleanVariants["YouTube"];
+        const mAssetId = (typeof ytVar === "object" ? ytVar.mediaAssetId : null) || mediaAssetId;
+        if (!mAssetId) {
+          throw new Error("YouTube requires a video attachment. Please upload a video or Short first, or uncheck YouTube.");
+        }
+        const ytTitle = ((typeof ytVar === "object" ? ytVar.title : "") || title || "Untitled Video").replace(/[<>]/g, "").trim().slice(0, 100);
+        const ytDesc = ((typeof ytVar === "object" ? ytVar.caption : "") || body || "").trim().slice(0, 5000);
+        const ytKind = (typeof ytVar === "object" && ytVar.metadata?.youtubeKind === "Short") ? "Short" : "Video";
+        const ytVis = (typeof ytVar === "object" && ytVar.metadata?.visibility) || "public";
+        ytPayload = {
+          kind: ytKind,
+          assetId: mAssetId,
+          title: ytTitle || "Untitled Video",
+          description: ytDesc,
+          visibility: ytVis,
+        };
+      }
+
+      // 1. Save post draft
+      const saved = await data.save({
+        ...post,
+        title: title.trim(),
+        body: body.trim(),
+        platforms: selected,
+        variants: cleanVariants,
+        youtube: ytPayload || undefined,
+      });
+
+      // 2. Call send-to-autopilot endpoint
+      const result = await request<{
+        id: string;
+        status: string;
+        scheduledAt: string;
+        formattedTime: string;
+        platforms: string[];
+      }>(`/content/${saved.id}/send-to-autopilot`, "POST");
+
+      await query.invalidateQueries({ queryKey: ["workspace"] });
+      toast.success(
+        `⚡ Queued into Autopilot! Automatically scheduled for ${result.formattedTime || "next slot"} on ${selected.join(", ")}.`,
+        { duration: 6000 }
+      );
+      nav("/app/calendar");
+    } catch (e: any) {
+      setError(e.message || "Failed to send post to Autopilot");
+      toast.error(e.message || "Failed to send post to Autopilot");
     } finally {
       setBusy("");
     }
@@ -1232,6 +1311,21 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
                 <CalendarDays size={16} /> Schedule
               </Button>
               <Button
+                type="button"
+                onClick={handleSendToAutopilot}
+                disabled={!!busy || !editable || !canPublish || !selected.length || !title.trim() || !body.trim()}
+                style={{
+                  background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                  color: "#ffffff",
+                  border: "1px solid #818cf8",
+                  fontWeight: 600,
+                  boxShadow: "0 2px 8px rgba(99, 102, 241, 0.35)",
+                }}
+              >
+                <Zap size={16} className={busy === 'autopilot' ? 'animate-spin' : ''} />
+                {busy === 'autopilot' ? 'Queuing to Autopilot…' : '⚡ Send to Autopilot'}
+              </Button>
+              <Button
                 variant="primary"
                 onClick={reviewPost}
                 disabled={!!busy || !editable || !canPublish || !selected.length}
@@ -1351,9 +1445,10 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
         brandCta={s?.brand?.cta}
         onAttach={(result) => {
           if (visualTarget !== 'shared') {
-            setVariants(prev=>({...prev,[visualTarget]:{...prev[visualTarget],mediaType:'image',mediaAssetId:result.assetId,mediaUrl:result.url}}));
+            setVariants(prev=>({...prev,[visualTarget]:{...prev[visualTarget],...(result.caption?{caption:result.caption}:{}),mediaType:'image',mediaAssetId:result.assetId,mediaUrl:result.url}}));
             return;
           }
+          if(result.caption)setBody(result.caption);
           setMediaUrl(result.url);
           setMediaAssetId(result.assetId);
           setPostType("image");

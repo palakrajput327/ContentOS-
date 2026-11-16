@@ -1,3 +1,6 @@
+import { assertWorkspaceActive } from "../billing/entitlement.service.js";
+import { assertPermission } from "../security.js";
+import { assertPublicationApproved, requiresPublicationApproval } from "../publishing-policy.js";
 import { getStorageProvider } from '../storage/storage.factory.js';
 import { assertDailySlot } from '../calendar/daily-posting.js';
 import { randomUUID } from "node:crypto";
@@ -8,8 +11,13 @@ import { validateSchedule } from "../content.controller.js";
 import { createPublishPlan } from "../publish-planner.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 export async function executeChildItem(db, item, workspaceId, saveForReview = false) {
+    await assertWorkspaceActive(workspaceId, "batch processing", db);
     const op = item.operation_type;
     const payload = item.payload || {};
+    if (payload.userId) {
+        const member = (await db.query("SELECT m.role FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE m.workspace_id=$1 AND m.user_id=$2 AND u.account_status='ACTIVE'", [workspaceId, payload.userId])).rows[0];
+        assertPermission(member?.role, op === 'bulk_approve' || op === 'bulk_reject' ? 'approve' : op === 'bulk_publish' || op === 'bulk_schedule' ? 'schedule' : 'edit');
+    }
     switch (op) {
         case "ai_generation": {
             const topic = payload.topic || "AI Post Topic";
@@ -81,7 +89,7 @@ export async function executeChildItem(db, item, workspaceId, saveForReview = fa
             const post = (await db.query("SELECT * FROM content WHERE id = $1 AND workspace_id = $2 FOR UPDATE", [contentId, workspaceId])).rows[0];
             if (!post)
                 throw new Error("Content item not found in workspace.");
-            if (post.status !== "NEEDS_REVIEW") {
+            if (post.status !== "NEEDS_REVIEW" && !(isApprove && post.status === "DRAFT")) {
                 throw new Error(`Content item must be in NEEDS_REVIEW state (current: ${post.status}).`);
             }
             const newStatus = isApprove ? "APPROVED" : "DRAFT";
@@ -102,8 +110,7 @@ export async function executeChildItem(db, item, workspaceId, saveForReview = fa
             const post = (await db.query("SELECT * FROM content WHERE id = $1 AND workspace_id = $2 FOR UPDATE", [contentId, workspaceId])).rows[0];
             if (!post)
                 throw new Error("Content item not found.");
-            const ws = (await db.query("SELECT require_approval FROM workspaces WHERE id = $1", [workspaceId])).rows[0];
-            validateSchedule(post.status, ws?.require_approval ?? true, at);
+            validateSchedule(post.status, await requiresPublicationApproval(db, workspaceId, contentId), at);
             await assertDailySlot(db, workspaceId, post, at);
             const targetPlatforms = post.platforms;
             for (const platform of targetPlatforms) {
@@ -125,10 +132,9 @@ export async function executeChildItem(db, item, workspaceId, saveForReview = fa
             const post = (await db.query("SELECT * FROM content WHERE id = $1 AND workspace_id = $2 FOR UPDATE", [contentId, workspaceId])).rows[0];
             if (!post)
                 throw new Error("Content item not found.");
-            if (post.status === "PUBLISHING")
-                throw new Error("Post is currently being published.");
-            if (post.status === "PUBLISHED")
-                throw new Error("Post has already been published.");
+            if (!["DRAFT", "APPROVED", "FAILED"].includes(post.status))
+                throw new Error("Post is not available for bulk publishing.");
+            await assertPublicationApproved(db, workspaceId, post);
             const targetPlatforms = post.platforms;
             const scheduledIds = [];
             for (const platform of targetPlatforms) {
@@ -137,7 +143,7 @@ export async function executeChildItem(db, item, workspaceId, saveForReview = fa
                 if (!account)
                     throw new Error(`No connected ${platform} channel found in workspace.`);
                 const schedId = randomUUID();
-                await db.query("INSERT INTO scheduled_posts(id, workspace_id, content_id, account_id, content_version, execute_at, timezone, state) VALUES($1, $2, $3, $4, $5, NOW(), 'UTC', 'ENQUEUED')", [schedId, workspaceId, contentId, account.id, post.version, "UTC"]);
+                await db.query("INSERT INTO scheduled_posts(id, workspace_id, content_id, account_id, content_version, execute_at, timezone, state) VALUES($1, $2, $3, $4, $5, NOW(), 'UTC', 'ENQUEUED')", [schedId, workspaceId, contentId, account.id, post.version]);
                 scheduledIds.push(schedId);
                 // Enqueue into existing social-publishing queue to reuse existing worker!
                 await publishingQueue.add("publish", { id: schedId, workspaceId }, { jobId: schedId }, db);

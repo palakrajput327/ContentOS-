@@ -518,85 +518,10 @@ export async function publishYouTubeNow(
   contentId: string,
   accountId: string,
 ) {
-  const claimed = await transaction(async (db) => {
-    const content = (
-      await db.query(
-        "SELECT * FROM content WHERE id=$1 AND workspace_id=$2 FOR UPDATE",
-        [contentId, wid],
-      )
-    ).rows[0];
-    if (!content) throw new NotFoundException("Content not found");
-    const ws = (
-      await db.query("SELECT require_approval FROM workspaces WHERE id=$1", [
-        wid,
-      ])
-    ).rows[0];
-    const member = (
-      await db.query(
-        "SELECT role FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
-        [wid, userId],
-      )
-    ).rows[0];
-    const isOwnerOrAdmin = ["Owner", "Admin"].includes(member?.role);
-
-    if (
-      !["DRAFT", "APPROVED", "FAILED"].includes(content.status) ||
-      (ws.require_approval && content.status !== "APPROVED" && !isOwnerOrAdmin)
-    )
-      throw new ConflictException(
-        "Only eligible drafts or approved content can publish.",
-      );
-
-    if (content.status !== "APPROVED" && (isOwnerOrAdmin || !ws.require_approval)) {
-      await db.query(
-        "UPDATE content SET status='APPROVED', approved_by=COALESCE(approved_by, $3) WHERE id=$1 AND workspace_id=$2",
-        [contentId, wid, userId],
-      );
-      content.status = "APPROVED";
-    }
-    const account = (
-      await db.query(
-        "SELECT * FROM social_accounts WHERE id=$1 AND workspace_id=$2 AND lower(platform)='youtube'",
-        [accountId, wid],
-      )
-    ).rows[0];
-    if (!account)
-      throw new ForbiddenException(
-        "Select a YouTube account in this workspace.",
-      );
-    if (!["connected"].includes(String(account.state).toLowerCase()))
-      throw new BadRequestException("Reconnect your YouTube account.");
-    const plats = typeof content.platforms === "string" ? JSON.parse(content.platforms || "[]") : (content.platforms || []);
-    if (!plats.some((p: string) => String(p).toLowerCase() === "youtube"))
-      throw new BadRequestException("This content does not target YouTube.");
-    const validYt = await resolveYouTubeInput(db, wid, content);
-    await validateYouTubeInput(db, wid, validYt, false);
-    content.youtube = validYt;
-    const record = (
-      await db.query(
-        "INSERT INTO scheduled_posts(id,workspace_id,content_id,account_id,content_version,execute_at,timezone,state,attempt_started_at) VALUES($1,$2,$3,$4,$5,now(),'UTC','PROCESSING',now()) ON CONFLICT(content_id,account_id,content_version) DO NOTHING RETURNING *",
-        [randomUUID(), wid, contentId, accountId, content.version],
-      )
-    ).rows[0];
-    if (!record)
-      throw new ConflictException(
-        "This publication has already been attempted. Check its status before trying again.",
-      );
-    await db.query(
-      "UPDATE content SET status='PUBLISHING',updated_by=$3,updated_at=now() WHERE id=$1 AND workspace_id=$2",
-      [contentId, wid, userId],
-    );
-    return { record, content, account };
-  });
-  return {
-    contentId,
-    ...(await publishYouTubeRecord(
-      claimed.record,
-      claimed.content,
-      claimed.account,
-    )),
-  };
+  const { publishContentNow } = await import("./publishing.js");
+  return publishContentNow(wid, userId, contentId, accountId);
 }
+
 export function youtubeProcessing(video: any, createdAt: string | Date) {
   if (!video)
     return {

@@ -1,3 +1,5 @@
+import { billingPeriodEnd, extendSubscription } from "./billing/lifecycle.js";
+import { getWorkspaceEntitlement } from "./billing/entitlement.service.js";
 import {
   Body,
   Controller,
@@ -212,11 +214,11 @@ export class AdminController {
       pool.query("SELECT COUNT(*)::int AS cnt FROM users WHERE account_status = 'SUSPENDED'"),
       pool.query("SELECT COUNT(*)::int AS cnt FROM users WHERE account_status = 'DELETED'"),
       pool.query(`SELECT COUNT(*)::int AS cnt FROM workspace_subscriptions WHERE status = 'TRIALING' AND current_period_end > now()`),
-      pool.query(`SELECT COUNT(*)::int AS cnt FROM workspace_subscriptions WHERE status IN ('ACTIVE', 'ADMIN_GRANTED')`),
+      pool.query(`SELECT COUNT(*)::int AS cnt FROM workspace_subscriptions WHERE (status='ACTIVE' AND current_period_end>now()) OR (status='ADMIN_GRANTED' AND (current_period_end IS NULL OR current_period_end>now()))`),
       pool.query(`SELECT COUNT(*)::int AS cnt FROM workspace_subscriptions WHERE (status = 'EXPIRED') OR (status = 'TRIALING' AND current_period_end <= now())`),
       pool.query("SELECT COUNT(*)::int AS cnt FROM workspaces"),
-      pool.query(`SELECT COALESCE(SUM(amount), 0)::numeric(12,2) AS total FROM subscription_payments WHERE status = 'VERIFIED' AND billing_period = 'MONTHLY'`),
-      pool.query(`SELECT COALESCE(SUM(amount), 0)::numeric(12,2) AS total FROM subscription_payments WHERE status = 'VERIFIED' AND billing_period = 'YEARLY'`),
+      pool.query(`SELECT COALESCE(SUM(amount), 0)::numeric(12,2) AS total FROM subscription_payments WHERE status = 'VERIFIED' AND is_simulated=false AND billing_period = 'MONTHLY'`),
+      pool.query(`SELECT COALESCE(SUM(amount), 0)::numeric(12,2) AS total FROM subscription_payments WHERE status = 'VERIFIED' AND is_simulated=false AND billing_period = 'YEARLY'`),
       pool.query(`SELECT COUNT(*)::int AS cnt FROM subscription_payments WHERE status = 'PENDING'`),
       pool.query(`SELECT COUNT(*)::int AS cnt FROM workspace_subscriptions WHERE current_period_end BETWEEN now() AND now() + interval '7 days' AND status IN ('ACTIVE', 'TRIALING')`),
       pool.query(
@@ -234,6 +236,8 @@ export class AdminController {
       ),
     ]);
 
+    const entitlementRows=(await pool.query("SELECT id FROM workspaces")).rows;
+    const effective=await Promise.all(entitlementRows.map(w=>getWorkspaceEntitlement(w.id)));
     const totalRevenue =
       Number(revenueMonthly.rows[0]?.total || 0) +
       Number(revenueAnnual.rows[0]?.total || 0);
@@ -245,9 +249,9 @@ export class AdminController {
         activeUsers: activeUsers.rows[0]?.cnt || 0,
         suspendedUsers: suspendedUsers.rows[0]?.cnt || 0,
         deletedUsers: deletedUsers.rows[0]?.cnt || 0,
-        trialUsers: trialUsers.rows[0]?.cnt || 0,
-        paidSubscribers: paidUsers.rows[0]?.cnt || 0,
-        expiredUsers: expiredUsers.rows[0]?.cnt || 0,
+        trialUsers: effective.filter(e=>e.effectiveState==="TRIAL_ACTIVE").length,
+        paidSubscribers: effective.filter(e=>["PAID_ACTIVE","ADMIN_GRANTED"].includes(e.effectiveState)).length,
+        expiredUsers: effective.filter(e=>e.effectiveState==="LOCKED").length,
         activeWorkspaces: workspacesCount.rows[0]?.cnt || 0,
         monthlyRevenue: Number(revenueMonthly.rows[0]?.total || 0),
         annualRevenue: Number(revenueAnnual.rows[0]?.total || 0),
@@ -421,20 +425,33 @@ export class AdminController {
        ORDER BY ws.updated_at DESC`,
     );
 
-    return {
-      subscriptions: res.rows.map((s) => ({
+    const subscriptions = await Promise.all(res.rows.map(async s => {
+      const entitlement = await getWorkspaceEntitlement(s.workspace_id);
+      const usage = (await pool.query("SELECT COUNT(*) FILTER(WHERE state='SUCCESS' AND business_date=(now() AT TIME ZONE w.timezone)::date)::int AS used,COUNT(*) FILTER(WHERE state IN ('PROCESSING','UNCERTAIN') OR state='RESERVED' AND business_date=(now() AT TIME ZONE w.timezone)::date)::int AS reserved FROM publication_quota q JOIN workspaces w ON w.id=q.workspace_id WHERE q.workspace_id=$1",[s.workspace_id])).rows[0];
+      const diagnostics=(await pool.query("SELECT COUNT(*) FILTER(WHERE state IN ('PENDING','ENQUEUED'))::int AS pending,COUNT(*) FILTER(WHERE state='FAILED')::int AS failed,COUNT(*) FILTER(WHERE state='UNCERTAIN')::int AS uncertain,COUNT(*) FILTER(WHERE error_code='SUBSCRIPTION_REQUIRED')::int AS blocked FROM scheduled_posts WHERE workspace_id=$1",[s.workspace_id])).rows[0];
+      const generations=(await pool.query("SELECT COUNT(*)::int AS count FROM ai_generations WHERE workspace_id=$1",[s.workspace_id])).rows[0].count;
+      const expiry=entitlement.effectiveState==='TRIAL_ACTIVE'?entitlement.trial.endsAt:entitlement.subscription.currentPeriodEnd;
+      const status=entitlement.effectiveState==='SUSPENDED'?'SUSPENDED':entitlement.isLocked?(s.cancel_at_period_end?'CANCELED':'EXPIRED'):entitlement.effectiveState==='TRIAL_ACTIVE'?'TRIALING':s.status;
+      return {
         id: s.id,
         workspaceId: s.workspace_id,
         workspaceName: s.workspace_name,
         ownerEmail: s.owner_email || "System",
         ownerName: s.owner_name || "Workspace Manager",
-        status: s.status,
+        status,
+        storedStatus:s.status,
+        diagnostics,
+        aiGenerations:generations,
+        daysRemaining:expiry?Math.max(0,Math.ceil((new Date(expiry).getTime()-Date.now())/86400000)):null,
+        postsUsedToday:usage.used,
+        postsReservedToday:usage.reserved,
+        postsRemainingToday:Math.max(0,entitlement.dailyPostingLimit-usage.used-usage.reserved),
         billingPeriod: s.billing_period,
         startAt: s.start_at,
         currentPeriodEnd: s.current_period_end,
         cancelAtPeriodEnd: s.cancel_at_period_end,
         customDailyLimit: s.custom_daily_limit,
-        dailyPostingLimit: Number(s.daily_limit),
+        dailyPostingLimit: entitlement.dailyPostingLimit,
         adminOverrideNote: s.admin_override_note,
         planId: s.plan_id,
         planCode: s.plan_code || "NONE",
@@ -443,8 +460,9 @@ export class AdminController {
         yearlyPrice: s.yearly_price ? Number(s.yearly_price) : 0,
         trialEndsAt: s.trial_ends_at,
         trialStatus: s.trial_status,
-      })),
-    };
+      };
+    }));
+    return {subscriptions};
   }
 
   @Post("subscriptions/:id/activate")
@@ -487,15 +505,9 @@ export class AdminController {
       if (!sub) throw new NotFoundException("Subscription not found");
 
       const now = new Date();
-      const currentEnd = sub.current_period_end && new Date(sub.current_period_end) > now
-        ? new Date(sub.current_period_end)
-        : now;
-
-      const durationMs = v.billingPeriod === "YEARLY"
-        ? 365 * 24 * 60 * 60 * 1000
-        : v.months * 30 * 24 * 60 * 60 * 1000;
-
-      const nextEnd = new Date(currentEnd.getTime() + durationMs);
+      const renewal=sub.status==='ACTIVE' && sub.plan_id===plan.id && sub.billing_period===v.billingPeriod && sub.current_period_end && new Date(sub.current_period_end)>now;
+      let nextEnd=renewal?new Date(sub.current_period_end):now;
+      for(let i=0;i<(v.billingPeriod==='YEARLY'?1:v.months);i++) nextEnd=billingPeriodEnd(nextEnd,v.billingPeriod);
       const nextStatus = v.complimentary ? "ADMIN_GRANTED" : "ACTIVE";
 
       await db.query(
@@ -503,8 +515,10 @@ export class AdminController {
          SET plan_id = $2,
              billing_period = $3,
              status = $4,
+             start_at = CASE WHEN status IN ('ACTIVE','ADMIN_GRANTED') AND plan_id=$2 THEN start_at ELSE now() END,
              current_period_end = $5,
              custom_daily_limit = $6,
+             custom_limit_source=CASE WHEN $6::int IS NULL THEN 'PLAN' ELSE 'ADMIN' END,
              admin_override_note = $7,
              cancel_at_period_end = false,
              updated_at = now()
@@ -567,34 +581,7 @@ export class AdminController {
       ).rows[0];
       if (!sub) throw new NotFoundException("Subscription not found");
 
-      const now = new Date();
-      const currentEnd = sub.current_period_end && new Date(sub.current_period_end) > now
-        ? new Date(sub.current_period_end)
-        : now;
-
-      const nextEnd = new Date(currentEnd.getTime() + v.days * 24 * 60 * 60 * 1000);
-
-      await db.query(
-        `UPDATE workspace_subscriptions
-         SET current_period_end = $2,
-             status = CASE WHEN status = 'EXPIRED' THEN 'ACTIVE' ELSE status END,
-             admin_override_note = $3,
-             updated_at = now()
-         WHERE id = $1`,
-        [id, nextEnd, `Extended by ${v.days} days: ${v.reason}`],
-      );
-
-      // Also extend workspace_trials if currently trialing
-      await db.query(
-        `UPDATE workspace_trials
-         SET ends_at = $2,
-             status = 'EXTENDED',
-             extension_count = extension_count + 1,
-             extension_reason = $3,
-             updated_at = now()
-         WHERE workspace_id = $1`,
-        [sub.workspace_id, nextEnd, v.reason],
-      );
+      const nextEnd = await extendSubscription(db,sub,v.days,v.reason);
 
       // Audit log
       await db.query(
@@ -685,6 +672,7 @@ export class AdminController {
         billingPeriod: z.enum(["MONTHLY", "YEARLY"]).optional(),
         currentPeriodEnd: z.string().datetime().optional(),
         adminOverrideNote: z.string().trim().max(500).optional(),
+        cancelAtPeriodEnd:z.boolean().optional(),
       })
       .parse(input);
 
@@ -718,11 +706,13 @@ export class AdminController {
          SET plan_id = $2,
              current_period_end = $3,
              custom_daily_limit = $4,
+             custom_limit_source=CASE WHEN $4::int IS NULL THEN 'PLAN' ELSE 'ADMIN' END,
              billing_period = $5,
              admin_override_note = $6,
+             cancel_at_period_end=COALESCE($7,cancel_at_period_end),
              updated_at = now()
          WHERE id = $1`,
-        [id, planId, nextEnd, nextLimit, nextPeriod, nextNote],
+        [id, planId, nextEnd, nextLimit, nextPeriod, nextNote,v.cancelAtPeriodEnd??null],
       );
 
       await db.query(
@@ -733,7 +723,7 @@ export class AdminController {
           actorUsername,
           id,
           JSON.stringify(sub),
-          JSON.stringify({ planId, current_period_end: nextEnd, custom_daily_limit: nextLimit }),
+          JSON.stringify({ planId, current_period_end: nextEnd, custom_daily_limit: nextLimit,cancelAtPeriodEnd:v.cancelAtPeriodEnd??sub.cancel_at_period_end }),
           req.ip || "unknown",
         ],
       );
@@ -865,6 +855,7 @@ export class AdminController {
          sp.provider,
          sp.provider_reference,
          sp.status,
+         sp.is_simulated,
          sp.payment_notes,
          sp.verified_by,
          sp.verified_at,
@@ -894,6 +885,7 @@ export class AdminController {
         provider: p.provider,
         providerReference: p.provider_reference || "None",
         status: p.status,
+        isSimulated: p.is_simulated,
         paymentNotes: p.payment_notes || "",
         verifiedBy: p.verified_by,
         verifiedAt: p.verified_at,
@@ -928,13 +920,13 @@ export class AdminController {
       ).rows[0];
 
       if (!payment) throw new NotFoundException("Payment record not found");
-      if (payment.status === "VERIFIED")
-        throw new HttpException("Payment has already been verified.", 409);
+      if (payment.status !== "PENDING")
+        throw new HttpException("Only pending requests can be approved.", 409);
 
       const now = new Date();
       await db.query(
         `UPDATE subscription_payments
-         SET status = 'VERIFIED',
+         SET status = CASE WHEN is_simulated THEN 'APPROVED' ELSE 'VERIFIED' END,
              verified_by = $2,
              verified_at = now(),
              payment_notes = COALESCE(payment_notes, '') || ' ' || $3,
@@ -946,20 +938,14 @@ export class AdminController {
       // Automatically activate workspace subscription
       const sub = (
         await db.query(
-          "SELECT * FROM workspace_subscriptions WHERE id = $1 OR workspace_id = $2 FOR UPDATE LIMIT 1",
+          "SELECT * FROM workspace_subscriptions WHERE id = $1 OR workspace_id = $2 LIMIT 1 FOR UPDATE",
           [payment.subscription_id, payment.workspace_id],
         )
       ).rows[0];
 
-      const durationMs = payment.billing_period === "YEARLY"
-        ? 365 * 24 * 60 * 60 * 1000
-        : 30 * 24 * 60 * 60 * 1000;
-
-      const currentEnd = sub?.current_period_end && new Date(sub.current_period_end) > now
-        ? new Date(sub.current_period_end)
-        : now;
-
-      const nextEnd = new Date(currentEnd.getTime() + durationMs);
+      const renewal = sub?.status === 'ACTIVE' && sub.plan_id === payment.plan_id && sub.billing_period === payment.billing_period && sub.current_period_end && new Date(sub.current_period_end)>now;
+      const periodStart = renewal ? new Date(sub.current_period_end) : now;
+      const nextEnd = billingPeriodEnd(periodStart,payment.billing_period);
 
       if (sub) {
         await db.query(
@@ -967,12 +953,15 @@ export class AdminController {
            SET plan_id = COALESCE($2, plan_id),
                billing_period = $3,
                status = 'ACTIVE',
+               start_at = CASE WHEN $5 THEN start_at ELSE now() END,
+               custom_daily_limit = CASE WHEN custom_limit_source='TRIAL' THEN NULL ELSE custom_daily_limit END,
+               custom_limit_source=CASE WHEN custom_limit_source='TRIAL' THEN 'PLAN' ELSE custom_limit_source END,
                current_period_end = $4,
                cancel_at_period_end = false,
-               admin_override_note = 'Activated via verified manual payment',
+               admin_override_note = CASE WHEN $6 THEN 'Activated via simulated purchase approval; no funds verified' ELSE 'Activated via verified manual payment' END,
                updated_at = now()
            WHERE id = $1`,
-          [sub.id, payment.plan_id, payment.billing_period, nextEnd],
+          [sub.id, payment.plan_id, payment.billing_period, nextEnd,!!renewal,!!payment.is_simulated],
         );
       } else {
         await db.query(
@@ -982,16 +971,17 @@ export class AdminController {
         );
       }
 
+      await db.query("INSERT INTO subscription_events(id,workspace_id,subscription_id,event_type,details) SELECT $1,workspace_id,id,'PURCHASE_APPROVED',$3 FROM workspace_subscriptions WHERE workspace_id=$2",[randomUUID(),payment.workspace_id,JSON.stringify({paymentId:id,isSimulated:payment.is_simulated,renewal:!!renewal,endsAt:nextEnd})]);
       // Record administrative audit log
       await db.query(
         `INSERT INTO administrative_audit_logs(id, actor_username, target_type, target_id, action, before_value, after_value, reason, ip_address)
-         VALUES($1, $2, 'payment', $3, 'PAYMENT_VERIFIED', $4, $5, $6, $7)`,
+         VALUES($1, $2, 'payment', $3, 'PURCHASE_APPROVED', $4, $5, $6, $7)`,
         [
           randomUUID(),
           actorUsername,
           id,
           JSON.stringify({ status: payment.status }),
-          JSON.stringify({ status: "VERIFIED", activatedUntil: nextEnd }),
+          JSON.stringify({ status: payment.is_simulated ? "APPROVED" : "VERIFIED", isSimulated: payment.is_simulated, activatedUntil: nextEnd }),
           v.note || "Super Admin approved payment",
           req.ip || "unknown",
         ],
@@ -999,7 +989,7 @@ export class AdminController {
 
       return {
         success: true,
-        message: `Payment verified. Workspace subscription is now active until ${nextEnd.toLocaleDateString()}.`,
+        message: `Request approved${payment.is_simulated ? " (simulated; no funds verified)" : ""}. Workspace active until ${nextEnd.toLocaleDateString()}.`,
       };
     });
   }
@@ -1028,6 +1018,8 @@ export class AdminController {
       ).rows[0];
 
       if (!payment) throw new NotFoundException("Payment record not found");
+
+      if (payment.status !== "PENDING") throw new HttpException("Only pending requests can be rejected.",409);
 
       await db.query(
         `UPDATE subscription_payments

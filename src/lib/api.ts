@@ -137,6 +137,24 @@ export interface DocItem {
   processing_completed_at?: string;
 }
 
+export interface DocumentBrandIdentity {
+  documentId: string;
+  workspaceId: string;
+  companyName: string;
+  logoUrl?: string | null;
+  logoAssetId?: string | null;
+  websiteDomain: string;
+  brandColors: string[];
+  applyToAllPosters: boolean;
+  logoPosition: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  domainPosition: "bottom-center" | "bottom-left" | "bottom-right" | "top-center" | "top-right";
+  logoSize: "small" | "medium" | "large";
+  safeMargin: number;
+  status: "DETECTED" | "CONFIRMED" | "MANUAL" | "PENDING_REVIEW";
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface KnowledgeItem {
   id: string;
   generation_id?: string;
@@ -412,6 +430,23 @@ export const documentsApi = {
     if (useSession.getState().demo) return;
     await request(`/documents/${documentId}/knowledge`, "DELETE");
   },
+
+  getBrandIdentity: async (documentId: string): Promise<DocumentBrandIdentity> => {
+    return request(`/documents/${documentId}/brand-identity`);
+  },
+
+  updateBrandIdentity: async (documentId: string, data: Partial<DocumentBrandIdentity> & { recomposeExisting?: boolean }): Promise<DocumentBrandIdentity> => {
+    return request(`/documents/${documentId}/brand-identity`, "PUT", data);
+  },
+
+  uploadBrandLogo: async (documentId: string, dataUrl: string, filename?: string): Promise<{ logoUrl: string; logoAssetId: string }> => {
+    return request(`/documents/${documentId}/brand-identity/upload-logo`, "POST", { dataUrl, filename });
+  },
+
+  recomposePosters: async (documentId: string): Promise<{ updatedCount: number }> => {
+    return request(`/documents/${documentId}/brand-identity/recompose`, "POST");
+  },
+
 };
 
 export const clipdropApi = {
@@ -515,3 +550,160 @@ export const clipdropApi = {
   },
 };
 
+
+
+// ==========================================
+// INSTAGRAM AI CREATIVE STUDIO API CONTRACTS
+// ==========================================
+
+export interface BrandDnaProfile {
+  workspaceId: string;
+  companyName: string;
+  industry: string;
+  targetAudience: string;
+  communicationTone: string;
+  brandColors: string[];
+  typographyStyle: string;
+  visualStyle: string;
+  logoUrl?: string | null;
+  logoAssetId?: string | null;
+  logoPosition: string;
+  websiteDomain: string;
+  preferredLanguage: string;
+  ctaStyle: string;
+  creativeGuidelines: string;
+  status: "PENDING_REVIEW" | "APPROVED" | "ACTIVE" | "MANUAL";
+  sourceDocumentId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreativeVariationItem {
+  id: string;
+  workspaceId: string;
+  batchId: string;
+  conceptStyle: "PREMIUM_LUXURY" | "MODERN_MINIMAL" | "BOLD_ENGAGEMENT";
+  headline: string;
+  caption: string;
+  cta: string;
+  hashtags: string[];
+  prompt: string;
+  aspectRatio: string;
+  assetId?: string | null;
+  imageUrl?: string | null;
+  rawAssetId?: string | null;
+  rawImageUrl?: string | null;
+  isSelected: boolean;
+  sourceTopic: string;
+  sourceDocumentId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CarouselSlideItem {
+  id: string;
+  carouselId: string;
+  slideIndex: number;
+  slideType: "HOOK" | "CONTENT" | "CTA";
+  headline: string;
+  bodyText: string;
+  badgeText?: string | null;
+  prompt: string;
+  aspectRatio: string;
+  assetId?: string | null;
+  imageUrl?: string | null;
+  rawAssetId?: string | null;
+  rawImageUrl?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InstagramCarouselItem {
+  id: string;
+  workspaceId: string;
+  title: string;
+  caption: string;
+  aspectRatio: string;
+  slideCount: number;
+  themeStyle: string;
+  status: "DRAFT" | "READY" | "SCHEDULED" | "PUBLISHED" | "FAILED";
+  contentId?: string | null;
+  sourceDocumentId?: string | null;
+  slides: CarouselSlideItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const instagramStudioApi = {
+  getBrandDna: async (): Promise<BrandDnaProfile> => {
+    return request<BrandDnaProfile>("/instagram-studio/brand-dna");
+  },
+
+  extractBrandDna: async (opts: { documentId?: string; rawText?: string; url?: string }): Promise<BrandDnaProfile> => {
+    return request<BrandDnaProfile>("/instagram-studio/brand-dna/extract", "POST", opts);
+  },
+
+  updateBrandDna: async (updates: Partial<BrandDnaProfile>): Promise<BrandDnaProfile> => {
+    return request<BrandDnaProfile>("/instagram-studio/brand-dna", "PUT", updates);
+  },
+
+  uploadBrandLogo: async (dataUrl: string, filename?: string): Promise<{ logoUrl: string; logoAssetId: string; brandColors: string[] }> => {
+    return request<{ logoUrl: string; logoAssetId: string; brandColors: string[] }>("/instagram-studio/brand-dna/upload-logo", "POST", { dataUrl, filename });
+  },
+
+  generateVariations: async (topic: string, documentId?: string): Promise<{ batchId: string; variations: CreativeVariationItem[] }> => {
+    return request<{ batchId: string; variations: CreativeVariationItem[] }>("/instagram-studio/variations/generate", "POST", { topic, documentId });
+  },
+
+  getBatchVariations: async (batchId: string): Promise<CreativeVariationItem[]> => {
+    return request<CreativeVariationItem[]>(`/instagram-studio/variations/batch/${batchId}`);
+  },
+
+  generateVariationImage: async (variationId: string, prompt?: string): Promise<{ assetId: string; imageUrl: string; variation: CreativeVariationItem }> => {
+    return request<{ assetId: string; imageUrl: string; variation: CreativeVariationItem }>(`/instagram-studio/variations/${variationId}/generate-image`, "POST", { prompt });
+  },
+
+  regenerateVariation: async (variationId: string, prompt?: string): Promise<CreativeVariationItem> => {
+    return request<CreativeVariationItem>(`/instagram-studio/variations/${variationId}/regenerate`, "POST", { prompt });
+  },
+
+  saveVariationAsDraft: async (variationId: string): Promise<{ contentId: string; scheduledPostId: string }> => {
+    return request<{ contentId: string; scheduledPostId: string }>(`/instagram-studio/variations/${variationId}/save-draft`, "POST");
+  },
+
+  generateCarousel: async (opts: { topic: string; slideCount?: number; documentId?: string; themeStyle?: string }): Promise<InstagramCarouselItem> => {
+    return request<InstagramCarouselItem>("/instagram-studio/carousels/generate", "POST", opts);
+  },
+
+  listCarousels: async (): Promise<InstagramCarouselItem[]> => {
+    return request<InstagramCarouselItem[]>("/instagram-studio/carousels");
+  },
+
+  getCarousel: async (id: string): Promise<InstagramCarouselItem> => {
+    return request<InstagramCarouselItem>(`/instagram-studio/carousels/${id}`);
+  },
+
+  reorderSlides: async (carouselId: string, orderedSlideIds: string[]): Promise<CarouselSlideItem[]> => {
+    return request<CarouselSlideItem[]>(`/instagram-studio/carousels/${carouselId}/reorder`, "PUT", { orderedSlideIds });
+  },
+
+  updateSlide: async (carouselId: string, slideId: string, payload: { headline?: string; bodyText?: string; badgeText?: string }): Promise<CarouselSlideItem> => {
+    return request<CarouselSlideItem>(`/instagram-studio/carousels/${carouselId}/slides/${slideId}`, "PUT", payload);
+  },
+
+  renderSlide: async (carouselId: string, slideId: string, generateBgArt?: boolean): Promise<{ assetId: string; imageUrl: string; slide: CarouselSlideItem }> => {
+    return request<{ assetId: string; imageUrl: string; slide: CarouselSlideItem }>(`/instagram-studio/carousels/${carouselId}/slides/${slideId}/render`, "POST", { generateBgArt });
+  },
+
+  renderAllSlides: async (carouselId: string): Promise<{ renderedCount: number; slides: CarouselSlideItem[] }> => {
+    return request<{ renderedCount: number; slides: CarouselSlideItem[] }>(`/instagram-studio/carousels/${carouselId}/render-all`, "POST");
+  },
+
+  saveCarouselAsDraft: async (carouselId: string): Promise<{ contentId: string; scheduledPostId: string; mediaCount: number }> => {
+    return request<{ contentId: string; scheduledPostId: string; mediaCount: number }>(`/instagram-studio/carousels/${carouselId}/save-draft`, "POST");
+  },
+
+  publishCarouselNow: async (carouselId: string): Promise<{ success: boolean; publishedPostId?: string; reason?: string }> => {
+    return request<{ success: boolean; publishedPostId?: string; reason?: string }>(`/instagram-studio/carousels/${carouselId}/publish`, "POST");
+  },
+};

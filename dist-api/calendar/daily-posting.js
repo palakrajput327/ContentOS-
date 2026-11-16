@@ -1,3 +1,4 @@
+import { assertWorkspaceActive, getWorkspaceEntitlement } from "../billing/entitlement.service.js";
 import { ConflictException } from "@nestjs/common";
 import { listFestivalsForYear } from "./festival.data.js";
 export function dailyCapacity(target, scheduled, festivals, scheduledFestivals) {
@@ -27,20 +28,20 @@ export async function getDailyCapacity(db, workspaceId, date, excludeId) {
         festival_region: "National",
     };
     const timezone = limitRow.timezone || "Asia/Kolkata";
-    const rows = (await db.query(`SELECT DISTINCT c.id, c.variants FROM content c JOIN scheduled_posts s ON s.content_id=c.id AND s.workspace_id=c.workspace_id
-    WHERE c.workspace_id=$1 AND (s.execute_at AT TIME ZONE $2)::date=$3::date
-    AND s.state <> 'CANCELLED' AND ($4::uuid IS NULL OR c.id<>$4)`, [workspaceId, timezone, date, excludeId || null])).rows;
+    const rows = (await db.query("SELECT q.scheduled_post_id AS id,c.variants FROM publication_quota q LEFT JOIN content c ON c.id=q.content_id AND c.workspace_id=q.workspace_id WHERE q.workspace_id=$1 AND (q.business_date=$2::date AND q.state IN ('SUCCESS','RESERVED') OR q.state IN ('PROCESSING','UNCERTAIN')) AND ($3::uuid IS NULL OR q.content_id<>$3)", [workspaceId, date, excludeId || null])).rows;
+    const entitlement = await getWorkspaceEntitlement(workspaceId, db);
     const festivals = limitRow.festival_automation_enabled
         ? listFestivalsForYear(Number(date.slice(0, 4)), {
             region: limitRow.festival_region,
         }).filter((f) => f.dateForYear === date).length
         : 0;
-    return dailyCapacity(Number(limitRow.daily_limit) || 3, rows.length, festivals, rows.filter((r) => r.variants?.metadata?.content_source === "INDIAN_FESTIVAL_ENGINE").length);
+    return dailyCapacity(entitlement.dailyPostingLimit, rows.length, festivals, rows.filter((r) => r.variants?.metadata?.content_source === "INDIAN_FESTIVAL_ENGINE").length);
 }
-// All schedule writers take the same workspace lock before checking capacity.
-// Existing approved schedules are never moved to make room for new automation.
+// Slot planning is a preflight; the publication_quota trigger serializes actual reservations.
+// Avoid upgrading a workspace SHARE lock while another scheduler holds it.
 export async function assertDailySlot(db, workspaceId, post, at) {
-    const ws = (await db.query("SELECT timezone FROM workspaces WHERE id=$1 FOR UPDATE", [
+    await assertWorkspaceActive(workspaceId, "scheduling", db);
+    const ws = (await db.query("SELECT timezone FROM workspaces WHERE id=$1", [
         workspaceId,
     ])).rows[0];
     const timezone = ws?.timezone || "Asia/Kolkata";
@@ -52,7 +53,7 @@ export async function assertDailySlot(db, workspaceId, post, at) {
     }).format(at);
     const capacity = await getDailyCapacity(db, workspaceId, date, post.id);
     if (post.variants?.metadata?.content_source !== "INDIAN_FESTIVAL_ENGINE" &&
-        !capacity.remaining)
+        capacity.remaining < (Array.isArray(post.platforms) ? post.platforms.length : 1))
         throw new ConflictException("Daily posting target reached or slots reserved for festivals. Choose another date.");
     const conflict = await db.query(`SELECT 1 FROM scheduled_posts WHERE workspace_id=$1 AND content_id<>$2
     AND state <> 'CANCELLED' AND ABS(EXTRACT(EPOCH FROM (execute_at-$3::timestamptz))) < 600 LIMIT 1`, [workspaceId, post.id, at]);

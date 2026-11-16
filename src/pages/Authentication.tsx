@@ -95,10 +95,17 @@ export function Register() {
   const [error, setError] = useState("");
   const [phone, setPhone] = useState("");
   const [countryCode, setCountryCode] = useState("+91");
+  const [googleEnabled,setGoogleEnabled]=useState(false);
+  const [googleBusy,setGoogleBusy]=useState(false);
+  useEffect(()=>{authRequest<{enabled:boolean}>("/google/status").then(r=>setGoogleEnabled(r.enabled)).catch(()=>{});
+    const reason=new URLSearchParams(window.location.search).get("googleError");
+    if(reason)setError(reason==="existing_account"?"This email already has an account. Log in with email first.":reason==="inactive_account"?"This account is inactive. Contact support.":"Google signup could not be completed. Try again or use email signup.");
+  },[]);
   const nav = useNavigate();
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<z.infer<typeof registerSchema>>({
     resolver: zodResolver(registerSchema),
@@ -224,6 +231,13 @@ export function Register() {
             {error}
           </p>
         )}
+        <Button type="button" variant="secondary" disabled={!googleEnabled || googleBusy || isSubmitting} onClick={async()=>{
+          if(!watch('termsAccepted')){setError('Accept the Terms of Service and Privacy Policy before continuing with Google.');return;}
+          setGoogleBusy(true);setError('');
+          try{const result=await authRequest<{url:string}>('/google/start',{termsAccepted:true});window.location.assign(result.url);}
+          catch(e){setError((e as Error).message);setGoogleBusy(false);}
+        }}>{googleBusy?'Connecting to Google…':'Continue with Google'}</Button>
+        {!googleEnabled && <small>Google signup is unavailable. You can create your trial with email below.</small>}
         <Button type="submit" variant="primary" disabled={isSubmitting}>
           {isSubmitting ? "Creating your trial…" : "Start 5-day free trial"}
           <ArrowRight size={16} />

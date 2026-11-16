@@ -65,3 +65,6 @@ txt.txt
 _git_diff_stat.txt
 _git_status.txt
 _storage_diff.txt
+
+# Disposable isolated integration databases (retained only after failed fixture setup)
+.saas-test-*/

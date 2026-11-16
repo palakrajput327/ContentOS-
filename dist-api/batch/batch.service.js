@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { pool, transaction, audit } from "../db.js";
 import { BadRequestException, NotFoundException } from "@nestjs/common";
+import { assertPermission } from "../security.js";
 import { createQueue } from '../queues.js';
 import { queueBackend } from '../queue-backend.js';
 export const batchQueue = createQueue("batch-processing", {
@@ -120,6 +121,8 @@ export class BatchService {
             const batch = (await db.query("SELECT * FROM batch_jobs WHERE id = $1 AND workspace_id = $2 FOR UPDATE", [batchId, workspaceId])).rows[0];
             if (!batch)
                 throw new NotFoundException("Batch job not found.");
+            const member = (await db.query("SELECT role FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", [workspaceId, userId])).rows[0];
+            assertPermission(member?.role, batch.type.includes("approve") || batch.type.includes("reject") ? "approve" : batch.type.includes("publish") || batch.type.includes("schedule") ? "schedule" : "edit");
             const failedItems = (await db.query("SELECT * FROM batch_child_items WHERE batch_id = $1 AND workspace_id = $2 AND status = 'FAILED' FOR UPDATE", [batchId, workspaceId])).rows;
             if (!failedItems.length) {
                 throw new BadRequestException("No failed child items found to retry in this batch.");

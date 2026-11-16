@@ -35,7 +35,7 @@ import type { Account } from "../lib/model";
 export interface ClipdropImageModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAttach?: (result: { assetId: string; url: string; filename: string }) => void;
+  onAttach?: (result: { assetId: string; url: string; filename: string; caption?: string }) => void;
   initialContentText?: string;
   initialTitle?: string;
   contentId?: string;
@@ -230,6 +230,9 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
   const [publishResults, setPublishResults] = useState<Array<{platform:string;status:string;postId?:string;error?:string}>>([]);
   const [selectedSocialAccountIds, setSelectedSocialAccountIds] = useState<string[]>([]);
   const [postCaption, setPostCaption] = useState<string>(initialContentText || "");
+  const [captionOptions,setCaptionOptions]=useState<Array<{label:string;caption:string;hashtags:string[]}>>([]);
+  const [captionBusy,setCaptionBusy]=useState(false);
+  const [captionError,setCaptionError]=useState('');
   const [captionManuallyEdited, setCaptionManuallyEdited] = useState(false);
 
   // Memoized connected accounts from active workspace
@@ -315,10 +318,10 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
   }, [prompt]);
 
   useEffect(() => {
-    if (!captionManuallyEdited && prompt && !initialContentText) {
+    if (!generatedAsset && !captionManuallyEdited && prompt && !initialContentText) {
       setPostCaption(prompt);
     }
-  }, [prompt, captionManuallyEdited, initialContentText]);
+  }, [prompt, captionManuallyEdited, initialContentText, generatedAsset]);
 
   useEffect(() => {
     if (isOpen) {
@@ -384,6 +387,15 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
     }
   }
 
+  async function generateCaptionsForImage(assetId:string,replaceDraft=false){
+    setCaptionBusy(true);setCaptionError('');
+    try{const result=await request<{options:Array<{label:string;caption:string;hashtags:string[]}>}>('/ai/image-captions','POST',{assetId,platform:targetPlatform,prompt});
+      setCaptionOptions(result.options);
+      if((!captionManuallyEdited && !initialContentText.trim()) || replaceDraft)setPostCaption(result.options[0]?.caption||'');
+    }catch(e:any){setCaptionError(e.message||'Caption generation failed. Your image is retained.');}
+    finally{setCaptionBusy(false);}
+  }
+
   async function handleGenerate(isVariation: boolean = false) {
     if (!prompt.trim()) {
       toast.error("Please enter an image prompt.");
@@ -433,6 +445,8 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
         remainingCredits: res.remainingCredits,
       });
 
+      setCaptionOptions([]);
+      await generateCaptionsForImage(res.assetId);
       setIsAttached(true);
       if (res.contentId) {
         setSavedPostId(res.contentId);
@@ -667,7 +681,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
 
     try {
       const asset=await visualAssetForPost();
-      onAttach?.(asset);
+      onAttach?.({...asset,caption:postCaption});
       setIsAttached(true);
       toast.success('Visual attached to your post.');
       if(composerMode)onClose();
@@ -766,7 +780,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
         platforms: targetPlatforms,
         assetId: asset.assetId,
         mediaUrl: asset.url,
-        status: "NEEDS_REVIEW",
+        status: "DRAFT",
       });
 
       setSavedPostId(saveRes.id);
@@ -1764,6 +1778,14 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
               </div>
             )}
 
+            {generatedAsset && <section className="panel" style={{padding:16,border:'1px solid var(--border)'}} aria-label="Image captions and hashtags">
+              <h3>Caption & hashtags</h3><p>AI suggestions based on this image's prompt. Review before sharing.</p>
+              <button type="button" className="button secondary" disabled={captionBusy || isGenerating} onClick={()=>generateCaptionsForImage(generatedAsset.assetId)}>{captionBusy?'Writing caption options…':captionOptions.length?'Regenerate captions':'Generate captions'}</button>
+              {captionError && <p role="alert" className="error">{captionError}</p>}
+              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>{captionOptions.map((option,i)=><button type="button" key={i} className="button secondary" onClick={()=>{setPostCaption(option.caption);setCaptionManuallyEdited(true);}}>{option.label}</button>)}</div>
+              <label>Editable caption<textarea rows={5} value={postCaption} onChange={e=>{setPostCaption(e.target.value);setCaptionManuallyEdited(true);}} placeholder="Choose a suggestion or write your own caption"/></label>
+              <button type="button" className="button secondary" disabled={!postCaption} onClick={()=>{navigator.clipboard.writeText(postCaption);toast.success('Caption and hashtags copied');}}>Copy caption & hashtags</button>
+            </section>}
             {composerMode && generatedAsset && <div className="panel" style={{padding:16}}>
               <strong>{attachmentLabel}</strong>
               <p>This image will use your caption and selected channels in Create Post. Review and publish there.</p>

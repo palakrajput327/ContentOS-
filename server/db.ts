@@ -83,10 +83,31 @@ poolConfig.idleTimeoutMillis = 5000;
 poolConfig.allowExitOnIdle = true;
 poolConfig.keepAlive = true;
 poolConfig.keepAliveInitialDelayMillis = 5000;
-poolConfig.ssl = localDatabase ? false : {
-  rejectUnauthorized: false,
-  servername: databaseHost || undefined,
-};
+// Determine SSL configuration flexibly
+const isExplicitlyDisabled = rawConnectionString ? /sslmode=disable|ssl=false/i.test(rawConnectionString) : false;
+const isExplicitlyRequired = rawConnectionString ? /sslmode=(require|verify-ca|verify-full|prefer)|ssl=true/i.test(rawConnectionString) : false;
+
+let useSsl = false;
+if (localDatabase || isExplicitlyDisabled) {
+  useSsl = false;
+} else if (isExplicitlyRequired) {
+  useSsl = true;
+} else if (!localDatabase) {
+  // Remote cloud database (e.g. Neon, AWS RDS, Supabase) requires SSL
+  useSsl = true;
+} else if (process.env.PGSSL === "true" || process.env.DATABASE_SSL === "true") {
+  useSsl = true;
+} else {
+  // Local cPanel PostgreSQL (127.0.0.1 / localhost) does not support SSL
+  useSsl = false;
+}
+
+poolConfig.ssl = useSsl
+  ? {
+      rejectUnauthorized: false,
+      servername: databaseHost && !localDatabase ? databaseHost : undefined,
+    }
+  : false;
 
 export const pool = new Pool(poolConfig);
 

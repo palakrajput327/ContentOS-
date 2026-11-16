@@ -41,8 +41,8 @@ export async function resolveMetaMedia(db, workspaceId, assetId, publicDownload 
     let url = await provider.getSignedDownloadUrl(asset.bucket, asset.object_key, 3600);
     const convertJpeg = jpeg && asset.mime_type.startsWith('image/') && !['image/jpeg', 'image/jpg'].includes(asset.mime_type);
     if (url.startsWith("/") || convertJpeg) {
-        const customBase = process.env.META_MEDIA_PUBLIC_BASE_URL?.trim();
-        const isCustomBaseValid = customBase && !customBase.includes("localhost") && !customBase.includes("hidustansocialnetwork.in");
+        const customBase = (process.env.META_MEDIA_PUBLIC_BASE_URL || process.env.PUBLIC_URL || process.env.STORAGE_PUBLIC_URL || process.env.APP_URL)?.trim();
+        const isCustomBaseValid = customBase && !customBase.includes("localhost") && !customBase.includes("127.0.0.1");
         const base = isCustomBaseValid
             ? customBase
             : `http://localhost:${process.env.PORT || 3001}`;
