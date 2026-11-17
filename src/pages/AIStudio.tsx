@@ -2222,7 +2222,7 @@ export default function AIStudio() {
                       </div>
                       <div style={{ minWidth: 0, overflow: "hidden" }}>
                         <strong style={{ fontSize: "0.8rem", color: "var(--ink)", display: "block", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
-                          {s?.brand?.name || s?.workspace?.name || "ContentOS"}
+                          {s?.brand?.name || s?.workspace?.name || "One Social"}
                         </strong>
                         <span style={{ fontSize: "0.68rem", color: "var(--color-text-muted)" }}>
                           {activePreviewPlatform} • {activeDispatchSlot?.timeStr || "10:30 AM"}

@@ -45,10 +45,12 @@ export const Button = forwardRef<
 export function Logo() {
   return (
     <span className="brandmark">
-      <span className="brand-icon">
-        C<span />
-      </span>
-      Content<span className="brand-os">OS</span>
+      <svg className="brand-symbol" width="32" height="32" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect width="32" height="32" rx="8" fill="currentColor" />
+        <path d="M10 12L16 8H20V24H15V14L10 17V12Z" fill="var(--on-accent, #fff)" />
+        <circle cx="24" cy="9" r="2" fill="var(--on-accent, #fff)" />
+      </svg>
+      <span>One <span className="brand-os">Social</span></span>
     </span>
   );
 }

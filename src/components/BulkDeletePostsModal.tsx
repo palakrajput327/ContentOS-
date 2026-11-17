@@ -326,7 +326,7 @@ export function BulkDeletePostsModal({
               {deleteMode === "platform_only"
                 ? "Remove published posts from connected social accounts (e.g. LinkedIn, Facebook, Telegram) while preserving your draft copy."
                 : deleteMode === "soft_local"
-                  ? "Soft-delete posts from account: cancel schedule/overdue backlogs in ContentOS without modifying live platforms."
+                  ? "Soft-delete posts from account: cancel schedule/overdue backlogs in One Social without modifying live platforms."
                   : (isSingle
                     ? "Permanently remove this post from your library."
                     : isPreselected
@@ -520,7 +520,7 @@ export function BulkDeletePostsModal({
                       <>
                         <option value="full">Full Delete (Live {singleItem?.platform} + Account Schedule)</option>
                         <option value="soft_local">Soft Delete from Account (Keep Live Post & History)</option>
-                        <option value="platform_only">Delete Live {singleItem?.platform} Only (Keep ContentOS Draft)</option>
+                        <option value="platform_only">Delete Live {singleItem?.platform} Only (Keep One Social Draft)</option>
                       </>
                     ) : (
                       <>
@@ -533,8 +533,8 @@ export function BulkDeletePostsModal({
                     {deleteMode === "soft_local"
                       ? "Cancels queued/overdue posting and marks the account record cancelled without touching live social channels."
                       : deleteMode === "platform_only"
-                        ? "Removes the live post from the social platform while keeping your copy as a draft in ContentOS."
-                        : "Removes the post from ContentOS and calls the social platform API if published."}
+                        ? "Removes the live post from the social platform while keeping your copy as a draft in One Social."
+                        : "Removes the post from One Social and calls the social platform API if published."}
                   </span>
                 </div>
 
@@ -850,13 +850,13 @@ export function BulkDeletePostsModal({
               >
                 <option value="full">Full Delete — Delete from Live Social Platforms + Account Schedule</option>
                 <option value="soft_local">Soft Delete from Account — Cancel Overdue / Active Queue (Keep Live Posts & History)</option>
-                <option value="platform_only">Platform Only — Delete from Live Social Platforms (Keep ContentOS Copy)</option>
+                <option value="platform_only">Platform Only — Delete from Live Social Platforms (Keep One Social Copy)</option>
               </select>
               <span style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
                 {deleteMode === "soft_local"
-                  ? "Recommended for overdue backlogs: marks scheduled/queued posts as Cancelled in ContentOS and stops future auto-posting without touching live channels."
+                  ? "Recommended for overdue backlogs: marks scheduled/queued posts as Cancelled in One Social and stops future auto-posting without touching live channels."
                   : deleteMode === "platform_only"
-                    ? "Calls LinkedIn/Telegram/Meta APIs to delete live posts while keeping your copy in ContentOS as cancelled drafts."
+                    ? "Calls LinkedIn/Telegram/Meta APIs to delete live posts while keeping your copy in One Social as cancelled drafts."
                     : "Calls platform APIs to delete published posts and removes local schedule records. If a platform API rejects deletion, the local record is preserved."}
               </span>
             </div>
@@ -1026,10 +1026,10 @@ export function BulkDeletePostsModal({
                   </label>
                   <p style={{ margin: "4px 0 0 24px", fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
                     {deleteMode === "soft_local"
-                      ? "Soft delete cancels queued/overdue posts in ContentOS and stops future auto-posting while preserving live social posts and history."
+                      ? "Soft delete cancels queued/overdue posts in One Social and stops future auto-posting while preserving live social posts and history."
                       : deleteMode === "platform_only"
-                        ? "Removes live posts from connected social platforms while keeping your ContentOS drafts intact."
-                        : "This action will delete posts from your ContentOS schedule and request deletion from connected social platforms where permitted."}
+                        ? "Removes live posts from connected social platforms while keeping your One Social drafts intact."
+                        : "This action will delete posts from your One Social schedule and request deletion from connected social platforms where permitted."}
                   </p>
                 </div>
               </div>

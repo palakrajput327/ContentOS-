@@ -30,8 +30,8 @@ export async function queueTokenEmail(
     [
       user.email,
       purpose === "verify"
-        ? "Verify your ContentOS email"
-        : purpose === "login" ? "Your ContentOS sign-in code" : "Reset your ContentOS password",
+        ? "Verify your One Social email"
+        : purpose === "login" ? "Your One Social sign-in code" : "Reset your One Social password",
     ],
   );
   await db.query(
@@ -49,22 +49,22 @@ export async function queueTokenEmail(
       challengeHash,
     ],
   );
-  const body = `Your ContentOS ${purpose === "verify" ? "verification" : purpose === "login" ? "sign-in" : "password reset"} code is: ${token}\n\nEnter this code inside ContentOS. It expires in 10 minutes and can only be used once. If you did not request this, ignore this email.`;
+  const body = `Your One Social ${purpose === "verify" ? "verification" : purpose === "login" ? "sign-in" : "password reset"} code is: ${token}\n\nEnter this code inside One Social. It expires in 10 minutes and can only be used once. If you did not request this, ignore this email.`;
   await db.query(
     "INSERT INTO email_outbox(id,recipient,subject,encrypted_body,expires_at,is_test) VALUES($1,$2,$3,$4,$5,$6)",
     [
       id,
       user.email,
       purpose === "verify"
-        ? "Verify your ContentOS email"
-        : purpose === "login" ? "Your ContentOS sign-in code" : "Reset your ContentOS password",
+        ? "Verify your One Social email"
+        : purpose === "login" ? "Your One Social sign-in code" : "Reset your One Social password",
       encryptToken(body, `mail:${id}`),
       expires,
       process.env.APP_ENV === 'test',
     ],
   );
   void deliverEmails({ limit: 5 }).catch((err) => {
-    console.warn("[ContentOS Mail] Instant OTP dispatch attempt:", err?.message || err);
+    console.warn("[One Social Mail] Instant OTP dispatch attempt:", err?.message || err);
   });
 }
 
@@ -87,13 +87,13 @@ export async function queuePublishNotificationEmail(
   const isSuccess = input.status === "published";
   const layerName = input.layer || (isSuccess ? "Layer 5: Social Publishing & Channel Dispatch" : "Layer 5: Channel Publishing");
   const subject = isSuccess
-    ? `✅ [ContentOS] Post Live on ${input.platform} (${layerName})`
-    : `⚠️ [ContentOS Alert] Publishing Failed in ${layerName}`;
+    ? `✅ [One Social] Post Live on ${input.platform} (${layerName})`
+    : `⚠️ [One Social Alert] Publishing Failed in ${layerName}`;
 
   const greeting = input.recipientName ? `Hi ${input.recipientName},` : `Hello,`;
   const body = isSuccess
-    ? `${greeting}\n\nYour automated post "${input.postTitle}" has been successfully published to ${input.platform}.\n\nPipeline Stage: ${layerName} ✅\nPlatform: ${input.platform}\nPost ID: ${input.providerPostId || "N/A"}\nTime: ${new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })} IST\n\nAll 5 automation layers (PDF Extraction -> AI Prompt -> AI Poster Studio -> Copywriting -> Live Channel Dispatch) executed successfully.\n\nYou can review live performance inside your ContentOS dashboard.`
-    : `${greeting}\n\nAn automated operation encountered an issue in ${layerName} for "${input.postTitle}".\n\nPipeline Stage: ${layerName} ❌\nPlatform: ${input.platform}\nDiagnosed Error: ${input.errorReason || "Unknown provider error"}\nTime: ${new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })} IST\n\nAction Required: Please log in to your ContentOS dashboard to review the layer diagnostics or reconnect your ${input.platform} channel.`;
+    ? `${greeting}\n\nYour automated post "${input.postTitle}" has been successfully published to ${input.platform}.\n\nPipeline Stage: ${layerName} ✅\nPlatform: ${input.platform}\nPost ID: ${input.providerPostId || "N/A"}\nTime: ${new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })} IST\n\nAll 5 automation layers (PDF Extraction -> AI Prompt -> AI Poster Studio -> Copywriting -> Live Channel Dispatch) executed successfully.\n\nYou can review live performance inside your One Social dashboard.`
+    : `${greeting}\n\nAn automated operation encountered an issue in ${layerName} for "${input.postTitle}".\n\nPipeline Stage: ${layerName} ❌\nPlatform: ${input.platform}\nDiagnosed Error: ${input.errorReason || "Unknown provider error"}\nTime: ${new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })} IST\n\nAction Required: Please log in to your One Social dashboard to review the layer diagnostics or reconnect your ${input.platform} channel.`;
 
   await db.query(
     "INSERT INTO email_outbox(id,recipient,subject,encrypted_body,expires_at,is_test) VALUES($1,$2,$3,$4,$5,$6)",

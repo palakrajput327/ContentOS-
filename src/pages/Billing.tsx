@@ -194,7 +194,7 @@ export default function Billing() {
               <Lock size={22} />
             </div>
             <div className="locked-banner-text">
-              <h3>Your ContentOS trial has ended</h3>
+              <h3>Your One Social trial has ended</h3>
               <p>
                 Your content, drafts, and connected accounts are completely safe. Choose a plan below to resume creating and publishing.
               </p>
@@ -220,7 +220,7 @@ export default function Billing() {
                 <Sparkles size={20} />
               </div>
               <div>
-                <h3>Your ContentOS journey starts here</h3>
+                <h3>Your One Social journey starts here</h3>
                 <p>Enjoy 5 days of intelligent social media creation and scheduling with 3 posts per day.</p>
               </div>
             </div>

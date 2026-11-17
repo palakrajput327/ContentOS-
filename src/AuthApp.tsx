@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import Landing from "./pages/Landing";
 import { Register, Login, ForgotPassword, Terms } from "./pages/Authentication";
@@ -6,21 +6,19 @@ import EmailCode from "./pages/EmailCode";
 import { authRequest, type User } from "./lib/auth-client";
 import { useSession } from "./lib/session";
 import Shell from "./components/Shell";
-import Overview from "./pages/Overview";
-import Composer from "./pages/Composer";
-import AIStudio from "./pages/AIStudio";
-import Library from "./pages/Library";
-import Calendar from "./pages/Calendar";
-import FestivalAutomation from './pages/FestivalAutomation';
-import {
-  Channels,
-  Members,
-  Activity,
-  Settings,
-  Analytics,
-} from "./pages/Manage";
-import Admin from "./pages/Admin";
-import Billing from "./pages/Billing";
+const Overview = lazy(() => import("./pages/Overview"));
+const Composer = lazy(() => import("./pages/Composer"));
+const AIStudio = lazy(() => import("./pages/AIStudio"));
+const Library = lazy(() => import("./pages/Library"));
+const Calendar = lazy(() => import("./pages/Calendar"));
+const FestivalAutomation = lazy(() => import("./pages/FestivalAutomation"));
+const Channels = lazy(() => import("./pages/Manage").then(m => ({ default: m.Channels })));
+const Members = lazy(() => import("./pages/Manage").then(m => ({ default: m.Members })));
+const Activity = lazy(() => import("./pages/Manage").then(m => ({ default: m.Activity })));
+const Settings = lazy(() => import("./pages/Manage").then(m => ({ default: m.Settings })));
+const Analytics = lazy(() => import("./pages/Manage").then(m => ({ default: m.Analytics })));
+const Admin = lazy(() => import("./pages/Admin"));
+const Billing = lazy(() => import("./pages/Billing"));
 export default function AuthApp() {
   const session = useSession();
   const [checking, setChecking] = useState(true);
@@ -47,7 +45,7 @@ export default function AuthApp() {
   if (checking)
     return <div className="loading-state">Checking your session…</div>;
   return (
-    <Routes>
+    <Suspense fallback={<div className="loading-state" role="status">Loading your workspace…</div>}><Routes>
       <Route path="/" element={<Landing />} />
       <Route
         path="/signup"
@@ -96,6 +94,6 @@ export default function AuthApp() {
         path="*"
         element={<Navigate to={session.user ? "/app" : "/login"} />}
       />
-    </Routes>
+    </Routes></Suspense>
   );
 }

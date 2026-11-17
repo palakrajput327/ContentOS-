@@ -458,7 +458,7 @@ export function PublishPreviewModal({
                 </strong>
                 {isInstagramAutoPoster && (
                   <p style={{ margin: "4px 0 0", fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
-                    Instagram requires media. ContentOS will render a high-quality JPEG image card from your text caption during publishing.
+                    Instagram requires media. One Social will render a high-quality JPEG image card from your text caption during publishing.
                   </p>
                 )}
                 {!isInstagramAutoPoster && mediaType === "image" && variantObj.mediaUrl && (

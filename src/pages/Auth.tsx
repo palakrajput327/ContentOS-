@@ -309,7 +309,7 @@ export default function Auth({ signup = false }: { signup?: boolean }) {
           </form>
         )}
         <p className="auth-switch">
-          {signup ? "Already have an account?" : "New to ContentOS?"}{" "}
+          {signup ? "Already have an account?" : "New to One Social?"}{" "}
           <Link to={signup ? "/login" : "/signup"}>
             {signup ? "Log in" : "Create an account"}
           </Link>

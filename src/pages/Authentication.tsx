@@ -15,6 +15,9 @@ import {
   FileText,
   Shield,
   ExternalLink,
+  Sparkles,
+  CalendarDays,
+  Users,
 } from "lucide-react";
 import { Button, Logo } from "../components/ui";
 import { authRequest, type User } from "../lib/auth-client";
@@ -48,11 +51,9 @@ export function AuthLayout({
             and the people who bring it all together.
           </p>
           <div className="auth-art">
-            <span>KNOWLEDGE</span>
-            <i />
-            <span>CREATION</span>
-            <i />
-            <span>CONNECTION</span>
+            <div><Sparkles size={19} /><span><strong>Ideas that sound like you</strong><small>Your knowledge. Your brand voice.</small></span></div>
+            <div><CalendarDays size={19} /><span><strong>A calmer content calendar</strong><small>Plan, review, and schedule in one place.</small></span></div>
+            <div><Users size={19} /><span><strong>Better, together</strong><small>One shared space for your whole team.</small></span></div>
           </div>
         </div>
         <small>
@@ -325,7 +326,7 @@ export function Login({
         </Button>
       </form>
       <p className="auth-switch">
-        New to ContentOS? <Link to="/signup">Create an account</Link>
+        New to One Social? <Link to="/signup">Create an account</Link>
       </p>
     </AuthLayout>
   );
@@ -431,7 +432,7 @@ export function Terms({ defaultTab }: { defaultTab?: "terms" | "privacy" }) {
           </div>
           <h1>Terms of Service & Privacy Policy</h1>
           <p>
-            Governing the use of ContentOS, the autonomous social media operating system by Hindustan Social Network.
+            Governing the use of One Social, the autonomous social media operating system by Hindustan Social Network.
             Effective date: October 2026.
           </p>
         </div>
@@ -464,8 +465,8 @@ export function Terms({ defaultTab }: { defaultTab?: "terms" | "privacy" }) {
                 <h2>1. Acceptance of Terms & Company Identity</h2>
                 <p>
                   These Terms of Service constitute a legally binding agreement between you (&ldquo;User&rdquo; or &ldquo;Client&rdquo;)
-                  and <strong>Hindustan Social Network</strong> (&ldquo;ContentOS&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;, or &ldquo;our&rdquo;),
-                  governing your access to and use of the ContentOS platform, application, and related services
+                  and <strong>Hindustan Social Network</strong> (&ldquo;One Social&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;, or &ldquo;our&rdquo;),
+                  governing your access to and use of the One Social platform, application, and related services
                   (accessible at <a href="https://hidustansocialnetwork.in" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>hidustansocialnetwork.in</a>).
                 </p>
                 <p>
@@ -477,13 +478,13 @@ export function Terms({ defaultTab }: { defaultTab?: "terms" | "privacy" }) {
 
               <div className="legal-callout-box">
                 <strong>🔒 Key Principle:</strong> You retain 100% full intellectual property ownership of your business PDFs,
-                uploaded graphics, extracted brand assets, and generated social posts. ContentOS does not claim any ownership over your work.
+                uploaded graphics, extracted brand assets, and generated social posts. One Social does not claim any ownership over your work.
               </div>
 
               <div className="legal-section">
                 <h2>2. Platform Services & Autonomous AI Capabilities</h2>
                 <p>
-                  ContentOS provides an autonomous AI content workflow and digital publishing operating system designed to streamline
+                  One Social provides an autonomous AI content workflow and digital publishing operating system designed to streamline
                   business marketing across multiple digital channels:
                 </p>
                 <ul>
@@ -497,11 +498,11 @@ export function Terms({ defaultTab }: { defaultTab?: "terms" | "privacy" }) {
               <div className="legal-section">
                 <h2>3. Social Media Account Integrations & Official APIs</h2>
                 <p>
-                  ContentOS connects with third-party social media platforms exclusively via their official, authorized developer APIs:
+                  One Social connects with third-party social media platforms exclusively via their official, authorized developer APIs:
                 </p>
                 <ul>
-                  <li><strong>Official OAuth 2.0:</strong> ContentOS accesses your social channels (LinkedIn, Meta / Instagram & Facebook, Google / YouTube, Telegram) strictly using authorized OAuth protocols. We never store or ask for your social media account passwords.</li>
-                  <li><strong>Publishing Authority:</strong> By connecting an account, you grant ContentOS the authorization to publish, schedule, and format posts strictly according to your workspace settings.</li>
+                  <li><strong>Official OAuth 2.0:</strong> One Social accesses your social channels (LinkedIn, Meta / Instagram & Facebook, Google / YouTube, Telegram) strictly using authorized OAuth protocols. We never store or ask for your social media account passwords.</li>
+                  <li><strong>Publishing Authority:</strong> By connecting an account, you grant One Social the authorization to publish, schedule, and format posts strictly according to your workspace settings.</li>
                   <li><strong>1-Click Revocation:</strong> You retain full autonomy. You can disconnect any social media channel at any time from your Channel Settings, which immediately invalidates and deletes the stored access tokens.</li>
                 </ul>
               </div>
@@ -522,7 +523,7 @@ export function Terms({ defaultTab }: { defaultTab?: "terms" | "privacy" }) {
               <div className="legal-section">
                 <h2>5. User Responsibilities & Acceptable Use</h2>
                 <p>
-                  To maintain platform reliability and protect our community, you agree not to use ContentOS to:
+                  To maintain platform reliability and protect our community, you agree not to use One Social to:
                 </p>
                 <ul>
                   <li>Publish content that is illegal, defamatory, fraudulent, or promotes harassment or hate speech.</li>
@@ -567,9 +568,9 @@ export function Terms({ defaultTab }: { defaultTab?: "terms" | "privacy" }) {
               <div className="legal-section">
                 <h2>1. Privacy Commitment & Overview</h2>
                 <p>
-                  At <strong>Hindustan Social Network</strong> (&ldquo;ContentOS&rdquo;, &ldquo;we&rdquo;, &ldquo;our&rdquo;),
+                  At <strong>Hindustan Social Network</strong> (&ldquo;One Social&rdquo;, &ldquo;we&rdquo;, &ldquo;our&rdquo;),
                   protecting your personal and business privacy is a foundational priority. This Privacy Policy details our practices
-                  regarding the collection, processing, storage, and protection of information when you use ContentOS.
+                  regarding the collection, processing, storage, and protection of information when you use One Social.
                 </p>
               </div>
 
@@ -591,7 +592,7 @@ export function Terms({ defaultTab }: { defaultTab?: "terms" | "privacy" }) {
 
               <div className="legal-section">
                 <h2>3. How We Use Your Information</h2>
-                <p>Your information is used strictly to provide the core services of ContentOS:</p>
+                <p>Your information is used strictly to provide the core services of One Social:</p>
                 <ul>
                   <li>To ingest and parse your business PDFs and produce structured social media campaigns.</li>
                   <li>To publish and schedule approved visual posters and captions to your designated social platforms at configured times.</li>
@@ -639,7 +640,7 @@ export function Terms({ defaultTab }: { defaultTab?: "terms" | "privacy" }) {
               <div className="legal-section">
                 <h2>7. Cookies & Session Storage</h2>
                 <p>
-                  ContentOS uses only essential, secure HTTP-only cookies necessary for session authentication and appearance settings
+                  One Social uses only essential, secure HTTP-only cookies necessary for session authentication and appearance settings
                   (light/dark theme). We do not deploy third-party advertising tracking cookies or behavioral tracking pixels.
                 </p>
               </div>
@@ -647,12 +648,12 @@ export function Terms({ defaultTab }: { defaultTab?: "terms" | "privacy" }) {
               <div className="legal-section">
                 <h2>8. Google API & YouTube Limited Use Disclosure</h2>
                 <p>
-                  ContentOS accesses Google APIs (including YouTube Data API v3) exclusively to allow users to publish and schedule video content and view channel details upon explicit user authorization.
+                  One Social accesses Google APIs (including YouTube Data API v3) exclusively to allow users to publish and schedule video content and view channel details upon explicit user authorization.
                 </p>
                 <ul>
-                  <li><strong>Limited Use:</strong> ContentOS&apos;s use and transfer of information received from Google APIs to any other app will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Google API Services User Data Policy</a>, including the Limited Use requirements.</li>
-                  <li><strong>Data Retention & Revocation:</strong> You can revoke ContentOS&apos;s access to your Google account at any time via your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Google Security Settings</a> or by disconnecting YouTube in ContentOS Channel Settings, which immediately deletes all stored access and refresh tokens.</li>
-                  <li><strong>Third-Party Terms:</strong> ContentOS uses YouTube API Services. By using these features, you agree to be bound by the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>YouTube Terms of Service</a> and <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Google Privacy Policy</a>.</li>
+                  <li><strong>Limited Use:</strong> One Social&apos;s use and transfer of information received from Google APIs to any other app will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Google API Services User Data Policy</a>, including the Limited Use requirements.</li>
+                  <li><strong>Data Retention & Revocation:</strong> You can revoke One Social&apos;s access to your Google account at any time via your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Google Security Settings</a> or by disconnecting YouTube in One Social Channel Settings, which immediately deletes all stored access and refresh tokens.</li>
+                  <li><strong>Third-Party Terms:</strong> One Social uses YouTube API Services. By using these features, you agree to be bound by the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>YouTube Terms of Service</a> and <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Google Privacy Policy</a>.</li>
                 </ul>
               </div>
 

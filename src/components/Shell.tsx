@@ -376,7 +376,7 @@ export default function Shell() {
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <Sparkles size={15} style={{ color: "var(--accent)" }} />
               <span>
-                <strong>Your free trial is active:</strong> Explore ContentOS with {billingData.usage?.dailyLimit || 3} posts/day. {billingData.entitlement.trial.daysRemaining} days remaining in your trial.
+                <strong>Your free trial is active:</strong> Explore One Social with {billingData.usage?.dailyLimit || 3} posts/day. {billingData.entitlement.trial.daysRemaining} days remaining in your trial.
               </span>
             </div>
             <Link
@@ -465,7 +465,7 @@ export default function Shell() {
           )}
         </main>
         <footer className="app-footer">
-          A little structure. More space to create.<span>Hindustan Social Network · ContentOS</span>
+          A little structure. More space to create.<span>One Social</span>
         </footer>
       </div>
     </div>

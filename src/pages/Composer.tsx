@@ -328,7 +328,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
               p === "X"
                 ? `${source.slice(0, 140)}. What do you think?`
                 : p === "Instagram"
-                  ? `${source}\n\nA fresh perspective for your team.\n\n${s.brand.hashtags || "#ContentOS #Social"}`
+                  ? `${source}\n\nA fresh perspective for your team.\n\n${s.brand.hashtags || "#One Social #Social"}`
                   : p === "Telegram"
                     ? `📢 Community Update\n\n${source}\n\nShare your thoughts below!`
                     : p === "YouTube"
@@ -1065,7 +1065,7 @@ export default function Composer({ studio = false }: { studio?: boolean }) {
               maxLength={160}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. ContentOS Platform Launch Announcement"
+              placeholder="e.g. One Social Platform Launch Announcement"
               disabled={!editable || !canEdit}
               style={{ marginBottom: "14px" }}
             />

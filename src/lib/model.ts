@@ -1,4 +1,4 @@
-export const PRODUCT = import.meta.env.VITE_PRODUCT_NAME || "ContentOS";
+export const PRODUCT = import.meta.env.VITE_PRODUCT_NAME || "One Social";
 export const platforms = [
   "LinkedIn",
   "Instagram",

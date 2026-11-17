@@ -422,7 +422,7 @@ export const InstagramCarouselBuilder: React.FC<InstagramCarouselBuilderProps> =
                       </div>
                     )}
                     <span className="text-xs font-semibold text-white/90">
-                      {brandDna?.companyName || "ContentOS"}
+                      {brandDna?.companyName || "One Social"}
                     </span>
                   </div>
 

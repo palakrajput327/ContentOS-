@@ -131,10 +131,10 @@ export default function Landing() {
                 <i />
                 <i />
               </div>
-              <span onClick={enterInteractiveDemo} style={{ cursor: "pointer" }}>Workspace / Overview</span>
-              <span className="preview-tag" onClick={enterInteractiveDemo} style={{ cursor: "pointer" }} title="Click to test interactive demo">
+              <span>Workspace / Overview</span>
+              <button type="button" className="preview-tag" onClick={enterInteractiveDemo} title="Open interactive demo">
                 TRY LIVE DEMO ↗
-              </span>
+              </button>
             </div>
             <div className="mini-app">
               <aside>
@@ -152,7 +152,7 @@ export default function Landing() {
                   "Calendar",
                   "Content library",
                 ].map((x, i) => (
-                  <div
+                  <button type="button"
                     className={i === 0 ? "mini-nav selected" : "mini-nav"}
                     key={x}
                     onClick={() => {
@@ -172,7 +172,7 @@ export default function Landing() {
                       ][i]
                     }
                     {x}
-                  </div>
+                  </button>
                 ))}
                 <small className="mini-label">ACTIVE PLATFORM (CLICK TO TEST)</small>
                 <div className="mini-channel-buttons" style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
@@ -248,7 +248,7 @@ export default function Landing() {
                         <strong style={{ fontSize: '.84rem', color: 'var(--ink)', lineHeight: 1.35 }}>
                           {activePlatform === "LinkedIn" && "How high-performing creator teams build a 30-day content pipeline."}
                           {activePlatform === "Instagram" && "Design principles for peaceful dark mode interfaces & visual carousels."}
-                          {activePlatform === "YouTube" && "ContentOS Architecture: Proactive Token Refresh & 4K Resumable Uploads."}
+                          {activePlatform === "YouTube" && "One Social Architecture: Proactive Token Refresh & 4K Resumable Uploads."}
                           {activePlatform === "Facebook" && "Product Release: Multi-Tenant Workspaces, Festival Automation & RBAC."}
                           {activePlatform === "Telegram" && "Production Update: All social publishing queues operational at 99.98%."}
                         </strong>
@@ -527,7 +527,8 @@ export default function Landing() {
           <Link to="/privacy" style={{ color: "var(--muted)", fontSize: "0.8rem", textDecoration: "none" }}>Privacy Policy</Link>
         </div>
         <small>
-          © {new Date().getFullYear()} {PRODUCT} · Hindustan Social Network
+          © {new Date().getFullYear()} {PRODUCT} · From <a href="https://www.hindustandigitalworkshop.tech/" target="_blank" rel="noreferrer">Hindustan Social Network</a>
+          <span className="landing-contact"><a href="tel:+919015148252">+91 90151 48252</a><span>India</span></span>
         </small>
       </footer>
     </div>

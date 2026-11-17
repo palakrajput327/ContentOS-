@@ -760,7 +760,7 @@ export const ClipdropImageModal: React.FC<ClipdropImageModalProps> = ({
         prompt.trim() ||
         headline.trim() ||
         initialContentText?.trim() ||
-        "Visual generated with ContentOS AI Studio";
+        "Visual generated with One Social AI Studio";
 
       const titleToPublish =
         headline.trim() ||
