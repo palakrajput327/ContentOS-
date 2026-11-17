@@ -410,7 +410,7 @@ export default function Admin() {
 
         <main className="admin-content">
           <div className="admin-heading">
-            <p className="admin-eyebrow">CONTENTOS / PLATFORM CONSOLE</p>
+            <p className="admin-eyebrow">ONE SOCIAL / PLATFORM CONSOLE</p>
             <h1>{title}</h1>
             <p>
               {section === "summary"
@@ -860,7 +860,7 @@ export default function Admin() {
 
               {/* SECTION: PLANS */}
               {section === "plans" && (
-                <div className="admin-table">
+                <div className="admin-table admin-plans-table" role="region" aria-label="Subscription plans" tabIndex={0}>
                   <table>
                     <thead>
                       <tr>
@@ -894,7 +894,7 @@ export default function Admin() {
                             </Badge>
                           </td>
                           <td>
-                            <small>{(pl.features || []).join(", ")}</small>
+                            <ul className="admin-plan-features">{(pl.features || []).map((feature: string, index: number) => <li key={`${index}-${feature}`}>{feature}</li>)}</ul>
                           </td>
                           <td>
                             <button
@@ -1038,7 +1038,7 @@ export default function Admin() {
                     </select>
                     <small>{data?.total || 0} posts</small>
                   </div>
-                  <div className="admin-table">
+                  <div className="admin-table admin-posts-table" role="region" aria-label="Workspace posts" tabIndex={0}>
                     <table>
                       <thead>
                         <tr>
