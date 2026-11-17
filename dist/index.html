@@ -6,16 +6,15 @@
     <meta name="theme-color" content="#0B0F17" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
     <script>
-      try { const theme = localStorage.getItem('contentos-appearance'); document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark'; } catch { document.documentElement.dataset.theme = 'dark'; }
+      try { const saved = localStorage.getItem('contentos-appearance'); const theme = saved === 'light' || saved === 'dark' ? saved : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; document.documentElement.dataset.theme = theme; document.documentElement.style.colorScheme = theme; } catch { document.documentElement.dataset.theme = 'dark'; }
     </script>
-    <meta name="description" content="ContentOS — your business knowledge, turned into a consistent social presence. Create, review and schedule content in one workspace." />
+    <meta name="description" content="One Social — your business knowledge, turned into a consistent social presence. Create, review and schedule content in one workspace." />
     <link rel="icon" href="/favicon.svg" />
-    <title>ContentOS — The Operating System for Modern Media & Creators</title>
-    <script type="module" crossorigin src="/assets/index-DfGnRFs8.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/vendor-ChOPLrtR.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-D4oMlTN6.css">
+    <title>One Social — The Operating System for Modern Media & Creators</title>
+    <script type="module" crossorigin src="/assets/index-DreSF_d_.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-BpTAzZ2y.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-BxJFu3FE.css">
   </head>
   <body>
     <div id="root"></div>
