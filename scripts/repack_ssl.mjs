@@ -19,7 +19,10 @@ if (fs.existsSync('package-lock.json')) {
 }
 fs.copyFileSync('database_full_setup.sql', path.join(baseDir, 'database_full_setup.sql'));
 if (fs.existsSync('env-cpanel-production.env')) {
+  fs.copyFileSync('env-cpanel-production.env', path.join(baseDir, '.env'));
   fs.copyFileSync('env-cpanel-production.env', path.join(baseDir, '.env.production.example'));
+} else if (fs.existsSync('.env')) {
+  fs.copyFileSync('.env', path.join(baseDir, '.env'));
 }
 
 const entries = {};
